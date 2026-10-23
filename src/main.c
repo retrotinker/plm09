@@ -1,5 +1,7 @@
 /* plmc: PL/M (tiny core) to 6809 lwasm compiler -- driver */
+#include "ast.h"
 #include "lexer.h"
+#include "parser.h"
 #include "util.h"
 
 #include <errno.h>
@@ -101,11 +103,13 @@ int main(int argc, char **argv)
         lex_dump(text);
         return 0;
     }
-    (void)ast;
+    Program *prog = parse_program(text);
+    if (ast) {
+        ast_dump(prog);
+        return 0;
+    }
     (void)vectors;
     (void)out_path;
-    lex_init(text);
-    while (lex_next().type != T_EOF)
-        ;
+    (void)org;
     fatal("compilation is not implemented yet");
 }

@@ -1,1 +1,1 @@
-strings longer than 2 characters
+3:5: error: strings longer than 2 characters are not supported

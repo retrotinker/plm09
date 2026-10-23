@@ -1,1 +1,4 @@
+T: DO;
+DECLARE X BYTE;
 X = 1; /* oops
+END T;

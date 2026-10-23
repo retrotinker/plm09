@@ -1,1 +1,4 @@
+T: DO;
+DECLARE X BYTE;
 X = 65536;
+END T;

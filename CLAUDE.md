@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 plm09 is a Linux compiler (`plmc`, written in C11) for a minimal "tiny core" subset of PL/M. It emits 6809 assembly for the lwasm assembler (lwtools 4.24). The target is a bare, generic 6809: all I/O goes through hook routines the user supplies. A headless 6809 simulator (`sim6809`, also C) in this repo runs the generated code in automated tests. XRoar and MAME are installed, but they are for manual spot checks only.
 
-**Status:** M0 (scaffolding), M1 (simulator) and M2 (runtime: `runtime/plm_crt0.asm`, `plm_rt.asm`, `runtime/sim/plm_hooks.asm`, tested by `sim/tests/rt_*.asm`) are done. `plmc` is still a stub that prints usage and exits with status 2. The design and milestone list (M0–M10) are in `docs/DESIGN.md`. Update this file and commit at each milestone.
+**Status:** M0 (scaffolding), M1 (simulator) and M2 (runtime: `runtime/plm_crt0.asm`, `plm_rt.asm`, `runtime/sim/plm_hooks.asm`, tested by `sim/tests/rt_*.asm`), M3 (lexer) and M4 (parser, `--ast`) are done. Compiling to assembly is not implemented yet. The design and milestone list (M0–M10) are in `docs/DESIGN.md`. Update this file and commit at each milestone.
 
 Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (only to generate one sim test).
 

@@ -1,0 +1,3 @@
+T: DO;
+DECLARE X(10) BYTE;
+END T;

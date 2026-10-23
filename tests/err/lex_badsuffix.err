@@ -1,1 +1,1 @@
-invalid number '12G'
+3:5: error: invalid number '12G'

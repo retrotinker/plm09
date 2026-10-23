@@ -1,1 +1,4 @@
+T: DO;
+DECLARE X BYTE;
 X = 12G;
+END T;

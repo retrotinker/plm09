@@ -1,1 +1,1 @@
-does not fit in 16 bits
+3:5: error: number '65536' does not fit in 16 bits

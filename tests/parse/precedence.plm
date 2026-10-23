@@ -1,0 +1,13 @@
+/* operator precedence and associativity */
+PREC: DO;
+DECLARE (A, B, C, D) BYTE, W ADDRESS;
+A = NOT A < B AND C;
+A = A OR B AND C XOR D;
+W = A + B * C - D / 2 MOD 3;
+W = -A * B;
+W = - - A + (B + C) * D;
+A = A - B - C;
+A = A < B = C;
+A = NOT NOT A;
+W = 'A' + 'AB' + 0FFH;
+END PREC;

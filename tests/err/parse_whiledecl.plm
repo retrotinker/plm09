@@ -1,0 +1,5 @@
+T: DO;
+DO WHILE 1;
+DECLARE X BYTE;
+END;
+END T;

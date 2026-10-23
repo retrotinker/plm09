@@ -1,0 +1,15 @@
+PROGRAM PREC
+  DECLARE A BYTE
+  DECLARE B BYTE
+  DECLARE C BYTE
+  DECLARE D BYTE
+  DECLARE W ADDRESS
+  ASSIGN A = (AND (NOT (< A B)) C)
+  ASSIGN A = (XOR (OR A (AND B C)) D)
+  ASSIGN W = (- (+ A (* B C)) (MOD (/ D 2) 3))
+  ASSIGN W = (* (NEG A) B)
+  ASSIGN W = (+ (NEG (NEG A)) (* (+ B C) D))
+  ASSIGN A = (- (- A B) C)
+  ASSIGN A = (= (< A B) C)
+  ASSIGN A = (NOT (NOT A))
+  ASSIGN W = (+ (+ 65 16706) 255)
