@@ -1,0 +1,45 @@
+/* assignment, + - AND OR XOR NOT, unary minus, BYTE/ADDRESS conversion.
+   Expected values are worked out in the comments. */
+ARITH: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE (B1, B2) BYTE, (W1, W2) ADDRESS;
+B1 = 200; B2 = 100;
+CALL PUTDEC(B1 + B2);         /* BYTE+BYTE wraps: 300-256 = 44 */
+W1 = B1 + B2;                 /* wraps before widening: 44 */
+CALL PUTDEC(W1);
+W1 = 200;
+CALL PUTDEC(W1 + B2);         /* ADDRESS + BYTE: 300 */
+CALL PUTDEC(B1 + 300);        /* constant > 255 is ADDRESS: 500 */
+CALL PUTDEC(B2 - B1);         /* 100-200 as BYTE: 156 */
+CALL PUTDEC(W1 - 201);        /* 65535 */
+W2 = 1234H;
+B1 = W2;                      /* truncates to 34H: 52 */
+CALL PUTDEC(B1);
+CALL PUTDEC(W2 AND 0F0FH);    /* 0204H = 516 */
+CALL PUTDEC(W2 OR 0F00FH);    /* 0F23FH = 62015 */
+CALL PUTDEC(W2 XOR 0FFFFH);   /* 0EDCBH = 60875 */
+CALL PUTDEC(B1 AND 0FH);      /* 34H AND 0FH = 4 */
+CALL PUTDEC(B1 OR 80H);       /* 0B4H = 180 */
+CALL PUTDEC(B1 XOR 0FFH);     /* 0CBH = 203 */
+CALL PUTDEC(NOT B1);          /* BYTE complement: 203 */
+CALL PUTDEC(NOT W2);          /* 0EDCBH = 60875 */
+CALL PUTDEC(-B1);             /* BYTE negate: 256-52 = 204 */
+CALL PUTDEC(-W2);             /* 65536-4660 = 60876 */
+CALL PUTDEC(-0);              /* 0 */
+B1, W1, B2 = 300;             /* B1 = 44, W1 = 300, B2 = 44 */
+CALL PUTDEC(B1);
+CALL PUTDEC(W1);
+CALL PUTDEC(B2);
+B1, W1 = 255;
+CALL PUTDEC(W1 + 1);          /* 256 */
+CALL PUTDEC(B1 + 1);          /* 0 */
+/* non-simple right operands go through the stack */
+B1 = 10; B2 = 3; W1 = 1000; W2 = 7;
+CALL PUTDEC((W1 - W2) - (B1 - B2));    /* 993 - 7 = 986 */
+CALL PUTDEC(B1 - (B2 - (W2 - B1)));    /* 7-10 = 65533; 3-65533 = 6; 10-6 = 4 */
+CALL PUTDEC((B1 + B2) AND (W1 OR W2)); /* 13 AND 1007 = 13 */
+CALL PUTDEC((W1 + 1) XOR (W2 + 1));    /* 1001 XOR 8 = 993 */
+CALL PUTDEC(B1 + W1);                  /* BYTE var as 16-bit right operand: 1010 */
+CALL PUTDEC('AB');                     /* 2-char string: 4142H = 16706 */
+CALL PUTDEC(1$000);                    /* 1000 */
+END ARITH;

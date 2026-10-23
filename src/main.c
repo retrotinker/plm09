@@ -1,5 +1,6 @@
 /* plmc: PL/M (tiny core) to 6809 lwasm compiler -- driver */
 #include "ast.h"
+#include "codegen.h"
 #include "lexer.h"
 #include "parser.h"
 #include "sema.h"
@@ -110,8 +111,16 @@ int main(int argc, char **argv)
         return 0;
     }
     sema_program(prog);
-    (void)vectors;
-    (void)out_path;
-    (void)org;
-    fatal("compilation is not implemented yet");
+
+    CodegenOptions opt = { (unsigned)org, vectors };
+    FILE *f = stdout;
+    if (out_path && !(f = fopen(out_path, "w")))
+        fatal("%s: %s", out_path, strerror(errno));
+    codegen(f, prog, &opt);
+    if (ferror(f) || (f != stdout && fclose(f) != 0)) {
+        if (out_path)
+            remove(out_path);
+        fatal("error writing %s", out_path ? out_path : "output");
+    }
+    return 0;
 }

@@ -1,0 +1,13 @@
+/* smallest useful program: characters and a number through the hooks */
+HELLO: DO;
+PUTCH: PROCEDURE (C) EXTERNAL;
+    DECLARE C BYTE;
+END PUTCH;
+PUTDEC: PROCEDURE (N) EXTERNAL;
+    DECLARE N ADDRESS;
+END PUTDEC;
+CALL PUTCH('H');
+CALL PUTCH('I');
+CALL PUTCH(10);
+CALL PUTDEC(1234);
+END HELLO;
