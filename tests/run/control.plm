@@ -1,0 +1,116 @@
+/* relationals, IF/ELSE, DO blocks, DO WHILE.  Expected values in comments. */
+CTRL: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (B, C, I, J) BYTE, (W, X, N) ADDRESS;
+
+/* relationals as values: 0FFH true, 0 false */
+B = 5; C = 7;
+CALL PUTDEC(B < C);                 /* 255 */
+CALL PUTDEC(B > C);                 /* 0 */
+CALL PUTDEC(B <= 5);                /* 255 */
+CALL PUTDEC(B >= 6);                /* 0 */
+CALL PUTDEC(B = 5);                 /* 255 */
+CALL PUTDEC(B <> 5);                /* 0 */
+/* comparisons are unsigned */
+B = 200;
+CALL PUTDEC(B > 100);               /* 255 */
+W = 0FFFFH;
+CALL PUTDEC(W > 1);                 /* 255 */
+CALL PUTDEC(W < 8000H);             /* 0 */
+W = 8000H; X = 7FFFH;
+CALL PUTDEC(W > X);                 /* 255 (signed would say false) */
+CALL PUTDEC(W <= X);                /* 0 */
+B = 80H; C = 7FH;
+CALL PUTDEC(B > C);                 /* 255 */
+CALL PUTDEC(B >= B);                /* 255 */
+/* BYTE vs ADDRESS compares at 16 bits */
+W = 300; B = 255;
+CALL PUTDEC(W > B);                 /* 255 */
+CALL PUTDEC(B < W);                 /* 255 */
+CALL PUTDEC(W = 300);               /* 255 */
+CALL PUTDEC(B = 300);               /* 0: 255 <> 300 */
+/* combined with AND / OR / NOT */
+B = 80H; C = 7FH;
+CALL PUTDEC((B > C) AND (C > 0));   /* 255 */
+CALL PUTDEC(NOT (B > C));           /* 0 */
+CALL PUTDEC((B < C) OR (C = 7FH));  /* 255 */
+
+/* IF tests only bit 0: prints TFTFT */
+IF 3 THEN CALL PUTCH('T'); ELSE CALL PUTCH('F');
+IF 2 THEN CALL PUTCH('T'); ELSE CALL PUTCH('F');
+W = 101H;
+IF W THEN CALL PUTCH('T'); ELSE CALL PUTCH('F');
+W = 100H;
+IF W THEN CALL PUTCH('T'); ELSE CALL PUTCH('F');
+IF NOT 0 THEN CALL PUTCH('T');
+IF NOT 1 THEN CALL PUTCH('X');
+CALL PUTCH(10);
+
+/* dangling ELSE binds to the inner IF: prints B */
+B = 0;
+IF 1 THEN IF B THEN CALL PUTCH('A'); ELSE CALL PUTCH('B');
+IF 0 THEN IF 1 THEN CALL PUTCH('C'); ELSE CALL PUTCH('D');
+CALL PUTCH(10);
+
+/* every relational as a condition, true and false, both widths: 10 */
+N = 0;
+B = 10;
+IF B = 10 THEN N = N + 1;   IF B <> 10 THEN N = N + 100;
+IF B < 11 THEN N = N + 1;   IF B < 10 THEN N = N + 100;
+IF B > 9 THEN N = N + 1;    IF B > 10 THEN N = N + 100;
+IF B <= 10 THEN N = N + 1;  IF B <= 9 THEN N = N + 100;
+IF B >= 10 THEN N = N + 1;  IF B >= 11 THEN N = N + 100;
+W = 1000;
+IF W = 1000 THEN N = N + 1; IF W <> 1000 THEN N = N + 100;
+IF W < 1001 THEN N = N + 1; IF W < 1000 THEN N = N + 100;
+IF W > 999 THEN N = N + 1;  IF W > 1000 THEN N = N + 100;
+IF W <= 1000 THEN N = N + 1; IF W <= 999 THEN N = N + 100;
+IF W >= 1000 THEN N = N + 1; IF W >= 1001 THEN N = N + 100;
+CALL PUTDEC(N);                     /* 10 */
+
+/* DO WHILE: count to 1000, summing (mod 65536) */
+W = 0; N = 0;
+DO WHILE W < 1000;
+    W = W + 1;
+    N = N + W;
+END;
+CALL PUTDEC(W);                     /* 1000 */
+CALL PUTDEC(N);                     /* 500500 mod 65536 = 41748 */
+
+/* nested loops: 10 x 20 */
+N = 0; I = 0;
+DO WHILE I < 10;
+    J = 0;
+    DO WHILE J < 20;
+        N = N + 1;
+        J = J + 1;
+    END;
+    I = I + 1;
+END;
+CALL PUTDEC(N);                     /* 200 */
+
+DO WHILE 0;
+    CALL PUTCH('X');
+END;
+
+/* BYTE counter wraps to 0 after 255 increments */
+B = 1; N = 0;
+DO WHILE B <> 0;
+    B = B + 1;
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* 255 */
+
+/* labeled block with a local that shadows B */
+BLK: DO;
+    DECLARE B ADDRESS;
+    B = 1000;
+    CALL PUTDEC(B);                 /* 1000 */
+END BLK;
+CALL PUTDEC(B);                     /* outer B: 0 */
+
+IF 1 THEN ; ELSE CALL PUTCH('X');
+CALL PUTCH('.');
+CALL PUTCH(10);
+END CTRL;

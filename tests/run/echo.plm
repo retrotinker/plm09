@@ -1,0 +1,13 @@
+/* GETCH until end of input (0), upper-casing letters */
+ECHO: DO;
+GETCH: PROCEDURE BYTE EXTERNAL; END GETCH;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE C BYTE;
+C = GETCH;
+DO WHILE C <> 0;
+    IF C >= 'a' AND C <= 'z' THEN
+        C = C - 20H;
+    CALL PUTCH(C);
+    C = GETCH;
+END;
+END ECHO;
