@@ -21,7 +21,7 @@ bad() { fail=$((fail + 1)); echo "FAIL $1: $2"; }
 
 # assemble ASM -> S19; listing alongside
 assemble() {
-    "${LWASM[@]}" -l"${2%.s19}.lst" -o "$2" "$1" 2>"$2.err"
+    "${LWASM[@]}" --list="${2%.s19}.lst" -o "$2" "$1" 2>"$2.err"
 }
 
 # compare actual file $2 with expected $3; name $1
@@ -34,17 +34,51 @@ check_diff() {
     return 1
 }
 
+# (address, bytes) of each instruction from LEN_BEGIN up to LEN_END, from an
+# lwasm listing ($1 = listing) or a sim6809 -t trace ($1 = trace)
+len_pairs() {
+    awk -v b="$2" -v e="$3" '$1 ~ /^[0-9A-F][0-9A-F][0-9A-F][0-9A-F]$/ &&
+        $2 ~ /^[0-9A-F]+$/ && $1 >= b && $1 < e { print $1, $2 }' "$1"
+}
+
+# sim test: assemble, run, compare stdout+rc with .out.  Optional first-line
+# "; SIMARGS: ..." passes extra simulator options.  Files whose listing has
+# LEN_BEGIN/LEN_END also get the trace-vs-listing instruction length check.
+sim_one() {    # $1 = asm, $2 = expected .out
+    local name s19 lst args b e
+    name=sim/$(basename "$1" .asm)
+    s19=$OUT/$(basename "$1" .asm).s19
+    lst=${s19%.s19}.lst
+    if ! assemble "$1" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; return; fi
+    args=$(sed -n '1s/^; SIMARGS: *//p' "$1")
+    b=$(awk '/LEN_BEGIN/ { print $1; exit }' "$lst")
+    e=$(awk '/LEN_END/ { print $1; exit }' "$lst")
+    [ -n "$b" ] && args="$args -t"
+    # shellcheck disable=SC2086
+    "$SIM" $args "$s19" </dev/null >"$s19.stdout" 2>"$s19.stderr"
+    echo "rc=$?" >>"$s19.stdout"
+    check_diff "$name" "$s19.stdout" "$2" || return
+    if [ -n "$b" ]; then
+        len_pairs "$lst" "$b" "$e" >"$s19.want"
+        len_pairs "$s19.stderr" "$b" "$e" >"$s19.got"
+        if [ ! -s "$s19.want" ]; then bad "$name" "no instructions in listing range"; return; fi
+        check_diff "$name (lengths)" "$s19.got" "$s19.want" || return
+        echo "  $name: $(wc -l <"$s19.want") instructions match the lwasm listing"
+    fi
+    ok
+}
+
 suite_sim() {
-    local f name s19
+    local f
     for f in "$ROOT"/sim/tests/*.asm; do
         [ -e "$f" ] || continue
-        name=sim/$(basename "$f" .asm)
-        s19=$OUT/$(basename "$f" .asm).s19
-        if ! assemble "$f" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; continue; fi
-        "$SIM" "$s19" </dev/null >"$s19.stdout" 2>"$s19.stderr"
-        echo "rc=$?" >>"$s19.stdout"
-        check_diff "$name" "$s19.stdout" "${f%.asm}.out" && ok
+        sim_one "$f" "${f%.asm}.out"
     done
+    if python3 "$ROOT/sim/tests/gen_len_ops.py" >"$OUT/len_ops.asm"; then
+        sim_one "$OUT/len_ops.asm" "$ROOT/sim/tests/len_ops.out"
+    else
+        bad sim/len_ops "generator failed"
+    fi
 }
 
 suite_golden() {    # $1 = dir, $2 = plmc flag, $3 = expected extension

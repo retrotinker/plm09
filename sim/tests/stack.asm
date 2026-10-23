@@ -1,0 +1,221 @@
+; PSH/PUL ordering, U stack, JSR/RTS/PULS PC, RTI, TFR/EXG, ORCC/ANDCC.
+	INCLUDE	harness.inc
+
+C	MACRO
+	JSR	CHKA
+	FCB	\1
+	ENDM
+CD	MACRO
+	JSR	CHKD
+	FDB	\1
+	ENDM
+
+MAIN	LDX	#N_PSH
+	JSR	TBEGIN
+	LDA	#$33
+	TFR	A,DP
+	LDD	#$1122
+	LDX	#$4444
+	LDY	#$5555
+	LDU	#$6666
+	ANDCC	#0
+	ORCC	#$0D
+	PSHS	PC,U,Y,X,DP,B,A,CC
+PSHPC	CLRA			; frame: CC A B DP X Y U PC from low address up
+	TFR	A,DP
+	LDA	,S
+	C	$0D
+	LDA	1,S
+	C	$11
+	LDA	2,S
+	C	$22
+	LDA	3,S
+	C	$33
+	LDD	4,S
+	CD	$4444
+	LDD	6,S
+	CD	$5555
+	LDD	8,S
+	CD	$6666
+	LDD	10,S
+	CD	PSHPC
+	LEAS	12,S
+	TFR	S,D
+	CD	$8000
+	JSR	TEND
+
+	LDX	#N_PUL
+	JSR	TBEGIN
+	LEAS	-10,S		; copy FRAME onto the stack, then pull it
+	LDX	#FRAME
+	TFR	S,Y
+	LDB	#10
+CPY	LDA	,X+
+	STA	,Y+
+	DECB
+	BNE	CPY
+	PULS	CC,A,B,DP,X,Y,U
+	PSHS	CC
+	CD	$A1A2
+	TFR	X,D
+	CD	$B1B2
+	TFR	Y,D
+	CD	$C1C2
+	TFR	U,D
+	CD	$D1D2
+	TFR	DP,A
+	C	$00
+	PULS	A
+	C	$05
+	TFR	S,D
+	CD	$8000
+	JSR	TEND
+
+	LDX	#N_U
+	JSR	TBEGIN
+	LDU	#$6000
+	LDD	#$1234
+	LDX	#$5678
+	PSHU	D,X		; X pushed first: memory = A B Xh Xl
+	TFR	U,D
+	CD	$5FFC
+	LDD	$5FFC
+	CD	$1234
+	LDD	$5FFE
+	CD	$5678
+	PSHU	S
+	LDD	,U
+	CD	$8000
+	LEAS	-2,S
+	PULU	S
+	TFR	S,D
+	CD	$8000
+	PULU	D,X
+	CD	$1234
+	TFR	X,D
+	CD	$5678
+	JSR	TEND
+
+	LDX	#N_CALL
+	JSR	TBEGIN
+	JSR	SUBRA		; pushed return address
+JSRRET	CD	JSRRET
+	JSR	[SUBP]		; indirect, returns via PULS PC
+	C	7
+	LDY	#SUB1
+	JSR	,Y
+	C	1
+	LDX	#JTAB
+	LDB	#2
+	JSR	[B,X]
+	C	2
+	LDX	#JMPOK
+	JMP	,X
+	LDA	#$EE
+JMPOK	TFR	S,D
+	CD	$8000
+	JSR	TEND
+
+	LDX	#N_RTI
+	JSR	TBEGIN
+	LDX	#RTI1		; short frame: CC (E clear), PC
+	PSHS	X
+	LDA	#$04
+	PSHS	A
+	RTI
+	LDA	#$EE
+RTI1	TFR	CC,A
+	C	$04
+	LDX	#RTI2		; full frame: CC (E set) A B DP X Y U PC
+	PSHS	X
+	LDU	#$1111
+	LDY	#$2222
+	LDX	#$3333
+	LDD	#$4455
+	PSHS	U,Y,X,DP,B,A
+	LDA	#$80
+	PSHS	A
+	LDD	#0
+	LDX	#0
+	LDY	#0
+	LDU	#0
+	RTI
+	LDA	#$EE
+RTI2	TFR	CC,A
+	C	$80
+	ANDCC	#0
+	TFR	X,D
+	CD	$3333
+	TFR	Y,D
+	CD	$2222
+	TFR	U,D
+	CD	$1111
+	TFR	S,D
+	CD	$8000
+	JSR	TEND
+
+	LDX	#N_TFR
+	JSR	TBEGIN
+	LDD	#$1234
+	TFR	D,X
+	TFR	X,Y
+	TFR	Y,U
+	LDD	#0
+	TFR	U,D
+	CD	$1234
+	LDX	#1
+	LDY	#2
+	EXG	X,Y
+	TFR	X,D
+	CD	2
+	TFR	Y,D
+	CD	1
+	LDD	#$ABCD
+	EXG	A,B
+	CD	$CDAB
+	LDA	#$3C
+	EXG	A,DP
+	TFR	DP,B
+	CLRA
+	EXG	A,DP		; A = $3C, DP = 0
+	CD	$3C3C
+	LDX	#$4321
+	EXG	D,X
+	CD	$4321
+	TFR	PC,D
+TFRPC	CD	TFRPC
+	ANDCC	#0
+	ORCC	#$AA
+	TFR	CC,A
+	C	$AA
+	ORCC	#$AA		; (the check changed CC)
+	ANDCC	#$0F
+	TFR	CC,A
+	C	$0A
+	LDA	#$05
+	TFR	A,CC
+	TFR	CC,B
+	TFR	B,A
+	C	$05
+	NOP
+	JSR	TEND
+	JMP	DONE
+
+SUBRA	LDD	,S
+	RTS
+SUB1	LDA	#1
+	RTS
+SUB2	LDA	#2
+	RTS
+SUB7	LDA	#7
+	PULS	PC
+SUBP	FDB	SUB7
+JTAB	FDB	SUB1,SUB2
+FRAME	FCB	$05,$A1,$A2,$00,$B1,$B2,$C1,$C2,$D1,$D2
+N_PSH	FCN	"PSHS"
+N_PUL	FCN	"PULS"
+N_U	FCN	"USTACK"
+N_CALL	FCN	"CALL"
+N_RTI	FCN	"RTI"
+N_TFR	FCN	"TFR"
+	END	H_START

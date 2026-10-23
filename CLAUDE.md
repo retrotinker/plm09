@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 plm09 is a Linux compiler (`plmc`, written in C11) for a minimal "tiny core" subset of PL/M. It emits 6809 assembly for the lwasm assembler (lwtools 4.24). The target is a bare, generic 6809: all I/O goes through hook routines the user supplies. A headless 6809 simulator (`sim6809`, also C) in this repo runs the generated code in automated tests. XRoar and MAME are installed, but they are for manual spot checks only.
 
-Status: the code is not written yet. The approved design and milestone list (M0–M10) are in `docs/DESIGN.md`. Update this file as each milestone lands.
+Status: M1 done (simulator). The compiler is still a stub. The approved design and milestone list (M0–M10) are in `docs/DESIGN.md`. Update this file as each milestone lands, and commit at each milestone.
 
 ## Commands (planned Makefile)
 
@@ -95,6 +95,10 @@ The hooks are selected only through the include path: `-I runtime/sim` for the s
   | +2 | write | exit with that status |
   | +4/+5 | write | print the 16-bit value in decimal; `STD $FF04` is enough |
 
-- The simulator itself is checked by self-checking assembly tests in `sim/tests/` and by comparing trace PCs with the address column of `lwasm -l`.
+- How the simulator itself is tested (`make sim-test`):
+  - Each `sim/tests/*.asm` file is assembled, run, and its stdout plus `rc=N` compared with its `.out`. An optional first line `; SIMARGS: ...` passes extra simulator options.
+  - Most of these files `INCLUDE harness.inc`, which provides groups (`TBEGIN`/`TEND` print `OK name`), inline checks (`JSR CHKA` + `FCB expected`, `JSR CHKD` + `FDB`), and table-driven `RUN8`/`RUN16` for ALU vectors. The expected values are worked out by hand from the datasheet, so a failure can mean the test is wrong. Watch for flag clobbering in tests: LD/ST set N, Z and V, while TFR, LEAS/LEAU and PSH/PUL (except PULS CC) leave CC alone.
+  - `gen_len_ops.py` generates (into `build/tests/`) every opcode × addressing mode as straight-line code. The runner checks that every traced (address, bytes) pair between `LEN_BEGIN` and `LEN_END` matches the lwasm listing, which catches decode-length bugs in `cpu6809.c` and `disasm.c`.
+- lwasm wants `--list=FILE`; plain `-l FILE` fails. Forward references with `,PCR` get 16-bit offsets.
 
 **Planned extensions** (arrays, BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.dim` and `Symbol.storage` exist from the start for these. Keep them in place, and keep their future words reserved in the lexer.

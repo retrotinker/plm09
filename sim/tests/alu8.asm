@@ -1,0 +1,258 @@
+; 8-bit ALU results and flags (H=$20 N=$08 Z=$04 V=$02 C=$01).
+; Expected values worked out by hand from the MC6809 datasheet.
+	INCLUDE	harness.inc
+
+; T name,table,routine
+T	MACRO
+	LDX	#\1_N
+	JSR	TBEGIN
+	LDX	#\1_T
+	LDY	#\1_R
+	JSR	RUN8
+	JSR	TEND
+	ENDM
+
+MAIN	T	ADDA
+	T	ADCA
+	T	SUBA
+	T	SBCA
+	T	CMPA
+	T	NEGA
+	T	COMA
+	T	LSRA
+	T	RORA
+	T	ASRA
+	T	ASLA
+	T	ROLA
+	T	DECA
+	T	INCA
+	T	TSTA
+	T	CLRA
+	T	ANDA
+	T	ORA
+	T	EORA
+	T	BITA
+	T	LDA
+	T	DAA
+	T	BSIDE
+	T	MEMOP
+	JMP	DONE
+
+;		A_in M   CC_in A_exp CC_exp mask
+ADDA_N	FCN	"ADDA"
+ADDA_R	ADDA	1,X
+	RTS
+ADDA_T	FCB	6
+	FCB	$00,$00,$00,$00,$04,$2F
+	FCB	$7F,$01,$00,$80,$2A,$2F
+	FCB	$FF,$01,$00,$00,$25,$2F
+	FCB	$80,$80,$00,$00,$07,$2F
+	FCB	$12,$34,$01,$46,$00,$2F
+	FCB	$08,$08,$00,$10,$20,$2F
+
+ADCA_N	FCN	"ADCA"
+ADCA_R	ADCA	1,X
+	RTS
+ADCA_T	FCB	4
+	FCB	$FF,$00,$01,$00,$25,$2F
+	FCB	$7F,$00,$01,$80,$2A,$2F
+	FCB	$10,$20,$00,$30,$00,$2F
+	FCB	$FF,$FF,$01,$FF,$29,$2F
+
+SUBA_N	FCN	"SUBA"
+SUBA_R	SUBA	1,X
+	RTS
+SUBA_T	FCB	5
+	FCB	$00,$01,$00,$FF,$09,$0F
+	FCB	$80,$01,$00,$7F,$02,$0F
+	FCB	$05,$05,$00,$00,$04,$0F
+	FCB	$7F,$FF,$00,$80,$0B,$0F
+	FCB	$10,$01,$01,$0F,$00,$0F
+
+SBCA_N	FCN	"SBCA"
+SBCA_R	SBCA	1,X
+	RTS
+SBCA_T	FCB	4
+	FCB	$00,$00,$01,$FF,$09,$0F
+	FCB	$80,$00,$01,$7F,$02,$0F
+	FCB	$05,$04,$01,$00,$04,$0F
+	FCB	$05,$04,$00,$01,$00,$0F
+
+CMPA_N	FCN	"CMPA"
+CMPA_R	CMPA	1,X
+	RTS
+CMPA_T	FCB	4
+	FCB	$10,$20,$00,$10,$09,$0F
+	FCB	$20,$20,$00,$20,$04,$0F
+	FCB	$80,$01,$00,$80,$02,$0F
+	FCB	$FF,$00,$00,$FF,$08,$0F
+
+NEGA_N	FCN	"NEGA"
+NEGA_R	NEGA
+	RTS
+NEGA_T	FCB	4
+	FCB	$00,$00,$00,$00,$04,$0F
+	FCB	$01,$00,$00,$FF,$09,$0F
+	FCB	$80,$00,$00,$80,$0B,$0F
+	FCB	$7F,$00,$00,$81,$09,$0F
+
+COMA_N	FCN	"COMA"
+COMA_R	COMA
+	RTS
+COMA_T	FCB	3
+	FCB	$00,$00,$02,$FF,$09,$0F
+	FCB	$FF,$00,$00,$00,$05,$0F
+	FCB	$55,$00,$00,$AA,$09,$0F
+
+; LSR leaves V alone
+LSRA_N	FCN	"LSRA"
+LSRA_R	LSRA
+	RTS
+LSRA_T	FCB	3
+	FCB	$01,$00,$00,$00,$05,$0F
+	FCB	$80,$00,$00,$40,$00,$0F
+	FCB	$FF,$00,$0A,$7F,$03,$0F
+
+RORA_N	FCN	"RORA"
+RORA_R	RORA
+	RTS
+RORA_T	FCB	3
+	FCB	$01,$00,$00,$00,$05,$0D
+	FCB	$00,$00,$01,$80,$08,$0D
+	FCB	$81,$00,$01,$C0,$09,$0D
+
+ASRA_N	FCN	"ASRA"
+ASRA_R	ASRA
+	RTS
+ASRA_T	FCB	3
+	FCB	$81,$00,$00,$C0,$09,$0D
+	FCB	$40,$00,$00,$20,$00,$0D
+	FCB	$01,$00,$00,$00,$05,$0D
+
+ASLA_N	FCN	"ASLA"
+ASLA_R	ASLA
+	RTS
+ASLA_T	FCB	4
+	FCB	$40,$00,$00,$80,$0A,$0F
+	FCB	$80,$00,$00,$00,$07,$0F
+	FCB	$C0,$00,$00,$80,$09,$0F
+	FCB	$01,$00,$00,$02,$00,$0F
+
+ROLA_N	FCN	"ROLA"
+ROLA_R	ROLA
+	RTS
+ROLA_T	FCB	4
+	FCB	$80,$00,$01,$01,$03,$0F
+	FCB	$40,$00,$00,$80,$0A,$0F
+	FCB	$00,$00,$01,$01,$00,$0F
+	FCB	$FF,$00,$00,$FE,$09,$0F
+
+; DEC/INC leave C alone
+DECA_N	FCN	"DECA"
+DECA_R	DECA
+	RTS
+DECA_T	FCB	3
+	FCB	$01,$00,$00,$00,$04,$0F
+	FCB	$80,$00,$00,$7F,$02,$0F
+	FCB	$00,$00,$01,$FF,$09,$0F
+
+INCA_N	FCN	"INCA"
+INCA_R	INCA
+	RTS
+INCA_T	FCB	3
+	FCB	$7F,$00,$00,$80,$0A,$0F
+	FCB	$FF,$00,$01,$00,$05,$0F
+	FCB	$00,$00,$00,$01,$00,$0F
+
+TSTA_N	FCN	"TSTA"
+TSTA_R	TSTA
+	RTS
+TSTA_T	FCB	2
+	FCB	$00,$00,$03,$00,$05,$0F
+	FCB	$80,$00,$00,$80,$08,$0F
+
+CLRA_N	FCN	"CLRA"
+CLRA_R	CLRA
+	RTS
+CLRA_T	FCB	1
+	FCB	$55,$00,$0B,$00,$04,$0F
+
+; logic ops clear V and leave C alone
+ANDA_N	FCN	"ANDA"
+ANDA_R	ANDA	1,X
+	RTS
+ANDA_T	FCB	2
+	FCB	$F0,$0F,$03,$00,$05,$0F
+	FCB	$F0,$80,$00,$80,$08,$0F
+
+ORA_N	FCN	"ORA"
+ORA_R	ORA	1,X
+	RTS
+ORA_T	FCB	2
+	FCB	$00,$00,$02,$00,$04,$0F
+	FCB	$01,$80,$00,$81,$08,$0F
+
+EORA_N	FCN	"EORA"
+EORA_R	EORA	1,X
+	RTS
+EORA_T	FCB	2
+	FCB	$FF,$FF,$02,$00,$04,$0F
+	FCB	$0F,$F0,$01,$FF,$09,$0F
+
+BITA_N	FCN	"BITA"
+BITA_R	BITA	1,X
+	RTS
+BITA_T	FCB	2
+	FCB	$F0,$0F,$02,$F0,$04,$0F
+	FCB	$80,$80,$00,$80,$08,$0F
+
+LDA_N	FCN	"LDA"
+LDA_R	LDA	1,X
+	RTS
+LDA_T	FCB	2
+	FCB	$55,$00,$02,$00,$04,$0F
+	FCB	$55,$80,$01,$80,$09,$0F
+
+; DAA after ADDA; V is undefined
+DAA_N	FCN	"DAA"
+DAA_R	ADDA	1,X
+	DAA
+	RTS
+DAA_T	FCB	4
+	FCB	$09,$01,$00,$10,$00,$0D
+	FCB	$99,$01,$00,$00,$05,$0D
+	FCB	$19,$19,$00,$38,$00,$0D
+	FCB	$90,$90,$00,$80,$09,$0D
+
+; B-accumulator forms (TFR does not touch CC)
+BSIDE_N	FCN	"BSIDE"
+BSIDE_R	TFR	A,B
+	SUBB	1,X
+	ADDB	1,X
+	NEGB
+	TFR	B,A
+	RTS
+BSIDE_T	FCB	2
+	FCB	$01,$05,$00,$FF,$09,$0F
+	FCB	$80,$80,$00,$80,$0B,$0F
+
+; memory forms: NEG direct, COM extended, INC indexed.
+; a -> -a -> ~(-a) = a-1 -> a; COM sets C and INC leaves it set.
+MEMOP_N	FCN	"MEMOP"
+MEMOP_R	STA	<$40
+	NEG	<$40
+	LDA	<$40
+	STA	$6000
+	COM	$6000
+	LDA	$6000
+	LDU	#$6002
+	STA	,U
+	INC	,U
+	PSHS	CC
+	LDA	,U
+	PULS	CC
+	RTS
+MEMOP_T	FCB	2
+	FCB	$01,$00,$00,$01,$01,$0F
+	FCB	$80,$00,$00,$80,$0B,$0F
+	END	H_START
