@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 plm09 is a Linux compiler (`plmc`, written in C11) for a minimal "tiny core" subset of PL/M. It emits 6809 assembly for the lwasm assembler (lwtools 4.24). The target is a bare, generic 6809: all I/O goes through hook routines the user supplies. A headless 6809 simulator (`sim6809`, also C) in this repo runs the generated code in automated tests. XRoar and MAME are installed, but they are for manual spot checks only.
 
-**Status:** M0 (scaffolding), M1 (simulator) and M2 (runtime: `runtime/plm_crt0.asm`, `plm_rt.asm`, `runtime/sim/plm_hooks.asm`, tested by `sim/tests/rt_*.asm`), M3 (lexer), M4 (parser, `--ast`), M5 (symtab/sema) and M6 (codegen, `src/codegen.c`) are done. The code generator covers the whole tiny-core language; M7–M9 add the run tests for control flow, `* / MOD` (with the fuzz test), and procedures. The design and milestone list (M0–M10) are in `docs/DESIGN.md`. Update this file and commit at each milestone.
+**Status:** milestones M0–M10 from `docs/DESIGN.md` are all done: the full tiny-core language compiles and runs. User-facing documentation (language, semantics, hook ABI, options) is in `README.md`; keep it in step with the code. Commit at each milestone.
 
 Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (only to generate one sim test).
 
@@ -29,8 +29,8 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 - **sim:** `sim/tests/X.asm` + `X.out`. The expected output is stdout followed by a last line `rc=N`. An optional first line `; SIMARGS: -n 1000` passes extra options to the simulator.
 - **lex / parse:** `tests/lex/X.plm` + `.tok` and `tests/parse/X.plm` + `.ast`. These are golden files compared with `plmc --tokens` and `plmc --ast` output.
 - **err:** `tests/err/X.plm` + `.err`. Compilation must fail, and its stderr must contain the first line of `.err`.
-- **run:** `tests/run/X.plm` + `.out`, plus optional `.rc` (expected exit status, default 0) and `.in` (fed to stdin).
-- **fuzz:** `tests/gen/exprgen.c` (not written yet) generates seeded random programs and their expected output.
+- **run:** `tests/run/X.plm` + `.out`, plus optional `.rc` (expected exit status, default 0) and `.in` (fed to stdin). An optional first line `/* PLMCARGS: ... */` passes extra compiler options. The suite also checks that compiled code assembles with `runtime/example/` hooks.
+- **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
 
 **sim6809 options:**
 
@@ -82,9 +82,14 @@ How the simulator itself is tested:
   The expected values are worked out by hand from the datasheet, so when a test fails, check the expected value as well as the simulator. Watch for flag clobbering inside tests: LD/ST set N, Z and V, while TFR, LEAS/LEAU and PSH/PUL (except PULS CC) leave CC alone.
 - **Length check:** `gen_len_ops.py` generates every opcode × addressing mode as straight-line code into `build/tests/`. The runner checks that each traced (address, bytes) pair between `LEN_BEGIN` and `LEN_END` matches the lwasm listing.
 
-### Compiler (`src/`, planned; see docs/DESIGN.md)
+### Compiler (`src/`)
 
-The pipeline is lexer → recursive-descent parser → AST → symtab/sema → codegen.
+The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` nodes) → `sema.c` (with `symtab.c`) → `codegen.c`, and `main.c` is the driver. Each stage reports the first error through `error_at()` in `util.c` and exits. Error tests match these messages, so a reworded message means updating `tests/err/*.err`.
+
+- **Lexer and parser:** the parser pulls tokens from the lexer through a 3-token lookahead buffer.
+- **Unsupported features** (arrays, LITERALLY, iterative DO, and so on) are rejected in the parser with "X is not supported".
+- **Declaration order:** sema processes declarations in source order (declare before use), which is also how recursion stays detectable. A procedure's name is visible inside its own body.
+- **Output of sema:** it gives every `Expr` a `type`, resolves `sym`, sets `Stmt.proc` for RETURN, and fills `sema_vars` (the data section) and `sema_procs` (the order procedures are emitted in).
 
 What sema does:
 - annotates every expression with BYTE or ADDRESS
@@ -107,8 +112,10 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 - BYTE values live in B and ADDRESS values in D.
 - A binary operator evaluates its right operand, pushes it, evaluates the left, then combines with `op ,S+` or `op ,S++`.
 - Statement control flow uses long branches. Comparisons use unsigned branches only (BLO/BHS/BHI/BLS).
+- A BYTE result is widened with `CLRA` only where a 16-bit value is needed (`gen_as`).
+- Relational results are produced as values with a short branch. IF and WHILE conditions skip that and branch straight on the compare (`gen_cond_false`).
 - BYTE*BYTE uses `MUL` inline. Everything else calls `RT_MUL16` or `RT_DIV16` in `runtime/plm_rt.asm`, with X = left and D = right; DIV16 returns the quotient in D and the remainder in X.
-- **Internal calls:** push all arguments, pop them into the callee's static parameter slots, `JSR P_name`.
+- **Internal calls:** if no argument contains a call, each argument is stored straight into the callee's static parameter slot. Otherwise all arguments are pushed first and then popped into the slots, so that `F(1,F(2,3))` works. Then `JSR P_name`.
 - **EXTERNAL calls (the hook ABI):** each argument is pushed as a 16-bit word, the last one is also left in D, then `JSR NAME` and `LEAS 2n,S`.
 
 **Names in the output.** PL/M identifiers contain no `_`, so these prefixes never collide with user names:
@@ -131,7 +138,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 5. the `RMB` data section
 6. `END RT_START`
 
-The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/example/` as the template for real hardware. Compiler output never depends on the target.
+The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/example/` (MC6850 ACIA) as the template for real hardware. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
 
 **Planned extensions** (arrays, BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.dim` and `Symbol.storage` exist from the start for these. Keep them in place, and keep their future words reserved in the lexer.
 

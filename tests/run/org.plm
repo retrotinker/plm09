@@ -1,0 +1,8 @@
+/* PLMCARGS: --org 2000H --vectors */
+/* code at $2000 and a reset vector at $FFFE still run under the simulator */
+ORG: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE W ADDRESS;
+W = 4321;
+CALL PUTDEC(W);
+END ORG;

@@ -1,0 +1,11 @@
+/* HALT stops the program (exit status 0); nothing after it runs */
+HALTS: DO;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+STOP: PROCEDURE;
+    CALL PUTCH('H');
+    HALT;
+END STOP;
+CALL PUTCH('A');
+CALL STOP;
+CALL PUTCH('X');
+END HALTS;

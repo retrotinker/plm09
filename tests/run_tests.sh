@@ -108,10 +108,13 @@ suite_err() {
     done
 }
 
-# compile+assemble+run; stdout plus "rc=N" goes to $2
+# compile+assemble+run; stdout plus "rc=N" goes to $2.  A first line
+# "/* PLMCARGS: ... */" in the source passes extra compiler options.
 build_and_run() {
-    local base=${2%.stdout}
-    "$PLMC" -o "$base.asm" "$1" 2>"$base.plmc.err" || { cat "$base.plmc.err"; return 10; }
+    local base=${2%.stdout} args
+    args=$(sed -n '1s/^\/\* PLMCARGS: \(.*\) \*\/$/\1/p' "$1")
+    # shellcheck disable=SC2086
+    "$PLMC" $args -o "$base.asm" "$1" 2>"$base.plmc.err" || { cat "$base.plmc.err"; return 10; }
     assemble "$base.asm" "$base.s19" || { cat "$base.s19.err"; return 11; }
     "$SIM" "$base.s19" <"${3:-/dev/null}" >"$2" 2>"$base.sim.err"
     echo "rc=$?" >>"$2"
@@ -130,6 +133,16 @@ suite_run() {
         echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
         check_diff "$name" "$act" "$exp" && ok
     done
+    # the example (real hardware) hooks must assemble with compiled code
+    if [ -e "$OUT/run-hello.asm" ]; then
+        if lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/example" \
+                -o "$OUT/hello-example.s19" "$OUT/run-hello.asm" 2>"$OUT/hello-example.err"; then
+            ok
+        else
+            bad run/example-hooks "lwasm failed with runtime/example hooks"
+            cat "$OUT/hello-example.err"
+        fi
+    fi
 }
 
 suite_fuzz() {
