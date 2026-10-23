@@ -5,6 +5,9 @@
 machine: all I/O goes through a small hooks file that you supply. The repository
 also contains `sim6809`, a headless 6809 simulator used to run the test suite.
 
+Full manuals: [docs/plmc.pdf](docs/plmc.pdf) and
+[docs/sim6809.pdf](docs/sim6809.pdf) (Markdown sources next to them).
+
 ## Building
 
 Requires gcc, make and lwtools. `make test` also needs python3, and its

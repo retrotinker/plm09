@@ -17,6 +17,7 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 - A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
+- `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex. `docs/tex/footnotehyper.sty` is a stand-in for a package this TeX installation lacks. The PDFs are committed, so when compiler or simulator behavior, options or messages change, update the `.md` manual as well as README.md, and rebuild.
 
 The suites are run by `tests/run_tests.sh <suite>`. On a mismatch it prints a diff and leaves `*.diff` files and every intermediate (`.asm`, `.lst`, `.s19`, stdout, stderr) in `build/tests/`. There is no single-test switch. To repeat one test by hand, use the same commands the runner uses:
 ```

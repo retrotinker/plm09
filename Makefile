@@ -12,7 +12,7 @@ SIM  := $(BUILD)/sim6809
 
 N ?= 200
 
-.PHONY: all test sim-test lex-test parse-test err-test run-test coco-test xroar-test fuzz-test run clean
+.PHONY: all docs test sim-test lex-test parse-test err-test run-test coco-test xroar-test fuzz-test run clean
 
 all: $(PLMC) $(SIM)
 
@@ -44,6 +44,15 @@ fuzz-test: all
 run: all
 	@test -n "$(F)" || { echo "usage: make run F=file.plm" >&2; exit 2; }
 	tests/run_tests.sh one $(F)
+
+# PDF manuals.  docs/tex supplies a stand-in for footnotehyper.sty, which
+# pandoc's LaTeX template needs but this TeX installation lacks.
+DOCS := docs/sim6809.pdf docs/plmc.pdf
+
+docs: $(DOCS)
+
+docs/%.pdf: docs/%.md docs/tex/footnotehyper.sty
+	cd docs && TEXINPUTS=./tex//: pandoc $*.md -o $*.pdf --pdf-engine=xelatex
 
 clean:
 	rm -rf $(BUILD)

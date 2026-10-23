@@ -1,0 +1,8 @@
+% Minimal stand-in for footnotehyper.sty, which this TeX installation lacks.
+% Pandoc's LaTeX template uses it only to keep footnotes inside tables;
+% the plm09 manuals have none, so \makesavenoteenv can do nothing.
+% Only found when docs/tex is on TEXINPUTS (see the Makefile docs target).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{footnotehyper}[2026/10/23 plm09 stand-in]
+\providecommand\makesavenoteenv[1]{}
+\endinput
