@@ -8,13 +8,13 @@ plm09 is a Linux compiler (`plmc`, written in C11) for a minimal "tiny core" sub
 
 **Status:** milestones M0–M10 from `docs/DESIGN.md` are all done: the full tiny-core language compiles and runs. User-facing documentation (language, semantics, hook ABI, options) is in `README.md`; keep it in step with the code. Commit at each milestone.
 
-Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (only to generate one sim test).
+Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim test and decode XRoar snapshots). The optional xroar suite also uses XRoar with CoCo ROMs in `~/.xroar/roms` and toolshed's `decb`.
 
 ## Commands
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
-- `make test` runs every suite in this order: sim, lex, parse, err, run, fuzz.
-- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, or `make fuzz-test N=500`.
+- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, fuzz.
+- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
 
@@ -30,6 +30,11 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 - **lex / parse:** `tests/lex/X.plm` + `.tok` and `tests/parse/X.plm` + `.ast`. These are golden files compared with `plmc --tokens` and `plmc --ast` output.
 - **err:** `tests/err/X.plm` + `.err`. Compilation must fail, and its stderr must contain the first line of `.err`.
 - **run:** `tests/run/X.plm` + `.out`, plus optional `.rc` (expected exit status, default 0) and `.in` (fed to stdin). An optional first line `/* PLMCARGS: ... */` passes extra compiler options. The suite also checks that compiled code assembles with `runtime/example/` hooks.
+- **coco:** `tests/coco/X.plm` + `.out` (+ `.in`, `.rc`), compiled with `--org 3000H` against `runtime/coco` hooks and run in sim6809 together with `tests/coco/fakerom.asm`. The fake ROM is loaded last so its S9 entry (a fake `EXEC`) wins. Output keeps the CoCo's CR newlines, so write `.out` files with `printf '...\r'`.
+- **xroar:** the `tests/coco` programs that have a `.screen` file (and optional `.keys`, typed after `EXEC`), run on an emulated CoCo 2 (machine `cocous`, Disk Extended BASIC 1.1). Start each test program with `CALL CLS` so the screen doesn't depend on the ROM's banner. XRoar facts this suite relies on:
+  - Trap addresses need a `0x` prefix.
+  - `-load` doesn't put a `.BIN` in RAM, and `-run` starts it without going through BASIC's `EXEC`. That's why the suite builds a disk image with `decb` and types `LOADM`.
+  - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
 - **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
 
 **sim6809 options:**
@@ -138,7 +143,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 5. the `RMB` data section
 6. `END RT_START`
 
-The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/example/` (MC6850 ACIA) as the template for real hardware. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
+The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
 
 **Planned extensions** (arrays, BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.dim` and `Symbol.storage` exist from the start for these. Keep them in place, and keep their future words reserved in the lexer.
 

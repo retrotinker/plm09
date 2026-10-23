@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # plm09 test runner.
-#   run_tests.sh sim|lex|parse|err|run     run one suite
+#   run_tests.sh sim|lex|parse|err|run|coco|xroar   run one suite
 #   run_tests.sh fuzz [N]                  random expression tests
 #   run_tests.sh one FILE.plm              compile, assemble, simulate one program
 set -u
@@ -145,6 +145,74 @@ suite_run() {
     fi
 }
 
+# CoCo hooks in sim6809, against tests/coco/fakerom.asm (a stand-in for
+# the Color BASIC ROM whose fake EXEC also checks the stack on return)
+suite_coco() {
+    local rom=$OUT/coco-fakerom.s19 f name base exp
+    if ! lwasm -9 -f srec -o "$rom" "$ROOT/tests/coco/fakerom.asm" 2>"$rom.err"; then
+        bad coco/fakerom "lwasm failed"; cat "$rom.err"; return
+    fi
+    for f in "$ROOT"/tests/coco/*.plm; do
+        [ -e "$f" ] || continue
+        name=coco/$(basename "$f" .plm)
+        base=$OUT/coco-$(basename "$f" .plm)
+        if ! "$PLMC" --org 3000H -o "$base.asm" "$f" 2>"$base.plmc.err"; then
+            bad "$name" "plmc failed"; cat "$base.plmc.err"; continue
+        fi
+        if ! lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/coco" \
+                -o "$base.s19" "$base.asm" 2>"$base.s19.err"; then
+            bad "$name" "lwasm failed"; cat "$base.s19.err"; continue
+        fi
+        cat "$base.s19" "$rom" >"$base.both.s19"     # ROM last: its S9 entry wins
+        "$SIM" "$base.both.s19" <"$( [ -e "${f%.plm}.in" ] && echo "${f%.plm}.in" || echo /dev/null)" \
+            >"$base.stdout" 2>"$base.sim.err"
+        echo "rc=$?" >>"$base.stdout"
+        exp=$base.expected
+        cat "${f%.plm}.out" >"$exp"
+        echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
+        check_diff "$name" "$base.stdout" "$exp" && ok
+    done
+}
+
+# The same CoCo programs on an emulated CoCo 2 (XRoar, Disk Extended Color
+# BASIC): each X.plm with an X.screen file is put on a disk image and run
+# with  POKE&H2F00,57:LOADM"T":EXEC:EXEC&H2F00  (plus X.keys, if present,
+# typed afterwards).  XRoar traps at $2F00, which is reached only if the
+# program returned to BASIC, snapshots the machine, and the text screen is
+# compared with X.screen.  Skipped when xroar, decb or the ROMs are missing.
+suite_xroar() {
+    local f name base marker keys
+    for t in xroar decb; do
+        command -v $t >/dev/null || { echo "xroar: $t not found (skipped)"; exit 0; }
+    done
+    if ! xroar -q -machine cocous -ui null -ao null -timeout 1 >/dev/null 2>&1; then
+        echo "xroar: cannot start a cocous machine; missing ROMs? (skipped)"; exit 0
+    fi
+    for f in "$ROOT"/tests/coco/*.plm; do
+        [ -e "${f%.plm}.screen" ] || continue
+        name=xroar/$(basename "$f" .plm)
+        base=$OUT/xroar-$(basename "$f" .plm)
+        rm -f "$base.sna" "$base.dsk"
+        if ! "$PLMC" --org 3000H -o "$base.asm" "$f" 2>"$base.plmc.err" ||
+           ! lwasm -9 -f decb -I "$ROOT/runtime" -I "$ROOT/runtime/coco" \
+                -o "$base.bin" "$base.asm" 2>"$base.err" ||
+           ! decb dskini "$base.dsk" >/dev/null 2>&1 ||
+           ! decb copy -2 -b "$base.bin" "$base.dsk,T.BIN" >/dev/null 2>&1; then
+            bad "$name" "build failed"; cat "$base.plmc.err" "$base.err" 2>/dev/null; continue
+        fi
+        marker=$(od -An -tx1 -j5 -N8 "$base.bin" | tr -d ' \n')   # first 8 bytes at $3000
+        keys=$(cat "${f%.plm}.keys" 2>/dev/null)
+        timeout 120 xroar -q -machine cocous -ui null -ao null -no-ratelimit \
+            -load-fd0 "$base.dsk" -type "POKE&H2F00,57:LOADM\"T\":EXEC:EXEC&H2F00\r$keys" \
+            -trap pc=0x2F00 -trap-snap "$base.sna" -trap-timeout 0 -timeout 60 >/dev/null 2>&1
+        if [ ! -e "$base.sna" ]; then
+            bad "$name" "never returned to BASIC (no trap at \$2F00)"; continue
+        fi
+        python3 -I "$ROOT/tools/coco_screen.py" "$base.sna" "$marker" 3000 >"$base.screen"
+        check_diff "$name" "$base.screen" "${f%.plm}.screen" && ok
+    done
+}
+
 suite_fuzz() {
     local n=${1:-200} gen=$BUILD/exprgen seed act
     if [ ! -e "$ROOT/tests/gen/exprgen.c" ]; then
@@ -174,11 +242,13 @@ case ${1:-} in
     err)   suite_err ;;
     run)   suite_run ;;
     fuzz)  suite_fuzz "${2:-200}" ;;
+    coco)  suite_coco ;;
+    xroar) suite_xroar ;;
     one)
         act=$OUT/one.stdout
         build_and_run "$2" "$act" /dev/stdin || exit 1
         cat "$act"; exit 0 ;;
-    *) echo "usage: $0 sim|lex|parse|err|run|fuzz [N]|one FILE" >&2; exit 2 ;;
+    *) echo "usage: $0 sim|lex|parse|err|run|coco|xroar|fuzz [N]|one FILE" >&2; exit 2 ;;
 esac
 
 if [ $((pass + fail)) -eq 0 ] && [ "$1" != fuzz ]; then
