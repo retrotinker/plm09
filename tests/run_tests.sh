@@ -141,9 +141,16 @@ suite_fuzz() {
     for seed in $(seq 1 "$n"); do
         "$gen" "$seed" "$OUT/fuzz.plm" "$OUT/fuzz.out"
         act=$OUT/fuzz.stdout
-        build_and_run "$OUT/fuzz.plm" "$act" || { bad "fuzz/$seed" "build failed"; break; }
         echo "rc=0" >>"$OUT/fuzz.out"
-        check_diff "fuzz/$seed" "$act" "$OUT/fuzz.out" && ok || break
+        if ! build_and_run "$OUT/fuzz.plm" "$act"; then
+            bad "fuzz/$seed" "build failed"
+        elif check_diff "fuzz/$seed" "$act" "$OUT/fuzz.out"; then
+            ok
+            continue
+        fi
+        cp "$OUT/fuzz.plm" "$OUT/fuzz-fail-$seed.plm"
+        echo "  program kept as $OUT/fuzz-fail-$seed.plm"
+        break
     done
 }
 

@@ -1,0 +1,34 @@
+/* * / MOD: result types, both code paths, edge cases. Expected in comments. */
+MULDIV: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE (B1, B2) BYTE, (W1, W2) ADDRESS;
+B1 = 12; B2 = 13;
+CALL PUTDEC(B1 * B2);           /* BYTE*BYTE uses MUL: 156 */
+B1 = 200; B2 = 200;
+CALL PUTDEC(B1 * B2);           /* result is ADDRESS, no wrap: 40000 */
+B1 = 12; B2 = 13;
+CALL PUTDEC(B1 * (B2 + 1));     /* byte operand via stack: 168 */
+W1 = 1000;
+CALL PUTDEC(W1 * 70);           /* 70000 mod 65536 = 4464 */
+CALL PUTDEC(300 * 300);         /* 90000 mod 65536 = 24464 */
+B1 = 2; W2 = 30000;
+CALL PUTDEC(B1 * W2);           /* mixed: 60000 */
+CALL PUTDEC(W1 * (B1 + 1));     /* 16-bit, right side via stack: 3000 */
+CALL PUTDEC(W1 / 7);            /* 142 */
+CALL PUTDEC(W1 MOD 7);          /* 6 */
+B1 = 200;
+CALL PUTDEC(B1 / 7);            /* 28 */
+CALL PUTDEC(B1 MOD 7);          /* 4 */
+/* BYTE MOD BYTE is BYTE (wraps when added to a BYTE); / is ADDRESS */
+CALL PUTDEC(B1 MOD 7 + 255);    /* 4+255 as BYTE: 3 */
+CALL PUTDEC(B1 / 7 + 255);      /* 28+255 as ADDRESS: 283 */
+CALL PUTDEC(0FFFFH / 1);        /* 65535 */
+CALL PUTDEC(0FFFFH / 0FFFFH);   /* 1 */
+CALL PUTDEC(0FFFFH MOD 256);    /* 255 */
+CALL PUTDEC(12345 / 100 MOD 10);/* left to right: 123 MOD 10 = 3 */
+CALL PUTDEC(2 + 3 * 4);         /* 14 */
+CALL PUTDEC(100 - 10 / 3);      /* 97 */
+CALL PUTDEC(7 * 8 MOD 5);       /* 56 MOD 5 = 1 */
+W1 = 0FFFFH; W2 = 0FFFFH;
+CALL PUTDEC(W1 * W2);           /* (2^16-1)^2 mod 2^16 = 1 */
+END MULDIV;
