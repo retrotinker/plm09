@@ -1,0 +1,6 @@
+build/
+*.o
+*.s19
+*.lst
+*.stdout
+*.rc.actual
