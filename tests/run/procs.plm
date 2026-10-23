@@ -1,0 +1,128 @@
+/* procedures: parameters, results, conversions, nesting, nested calls.
+   Expected values in comments. */
+PROCS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (G, I) BYTE;
+
+BUMP: PROCEDURE;                    /* untyped, no parameters */
+    G = G + 1;
+END BUMP;
+
+ADDB: PROCEDURE (A, B) BYTE;
+    DECLARE (A, B) BYTE;
+    RETURN A + B;
+END ADDB;
+
+MAC: PROCEDURE (A, B, C) ADDRESS;
+    DECLARE A ADDRESS, (B, C) BYTE;
+    RETURN A + B * C;
+END MAC;
+
+ID8: PROCEDURE (X) BYTE; DECLARE X BYTE; RETURN X; END ID8;
+ID16: PROCEDURE (X) ADDRESS; DECLARE X ADDRESS; RETURN X; END ID16;
+TRUNC: PROCEDURE (X) BYTE; DECLARE X ADDRESS; RETURN X; END TRUNC;
+WIDEN: PROCEDURE (X) ADDRESS; DECLARE X BYTE; RETURN X; END WIDEN;
+
+PRINTUPTO: PROCEDURE (N);           /* early RETURN out of a loop */
+    DECLARE (N, K) BYTE;
+    K = 0;
+    DO WHILE 1;
+        IF K = N THEN RETURN;
+        CALL PUTCH('0' + K);
+        K = K + 1;
+    END;
+END PRINTUPTO;
+
+OUTER: PROCEDURE (N) ADDRESS;       /* nested procedure uses N and ACC */
+    DECLARE N ADDRESS, ACC ADDRESS;
+    STEP: PROCEDURE (K);
+        DECLARE K BYTE;
+        ACC = ACC + N * K;
+    END STEP;
+    ACC = 0;
+    CALL STEP(1);
+    CALL STEP(2);
+    CALL STEP(3);
+    RETURN ACC;
+END OUTER;
+
+F: PROCEDURE (A, B) ADDRESS;
+    DECLARE (A, B) ADDRESS;
+    RETURN A * 10 + B;
+END F;
+
+SEVEN: PROCEDURE BYTE;
+    RETURN 7;
+END SEVEN;
+
+GCD: PROCEDURE (A, B) ADDRESS;
+    DECLARE (A, B, T) ADDRESS;
+    DO WHILE B <> 0;
+        T = A MOD B;
+        A = B;
+        B = T;
+    END;
+    RETURN A;
+END GCD;
+
+PRINTNUM: PROCEDURE (V);            /* decimal printer in PL/M */
+    DECLARE V ADDRESS, (D, STARTED) BYTE, P ADDRESS;
+    P = 10000;
+    STARTED = 0;
+    DO WHILE P > 0;
+        D = V / P;
+        V = V MOD P;
+        IF D <> 0 OR STARTED OR P = 1 THEN DO;
+            CALL PUTCH('0' + D);
+            STARTED = 1;
+        END;
+        P = P / 10;
+    END;
+    CALL PUTCH(10);
+END PRINTNUM;
+
+FIB: PROCEDURE (N) ADDRESS;
+    DECLARE N BYTE, (A, B, T) ADDRESS;
+    A = 0;
+    B = 1;
+    DO WHILE N > 0;
+        T = A + B;
+        A = B;
+        B = T;
+        N = N - 1;
+    END;
+    RETURN A;
+END FIB;
+
+G = 0;
+CALL BUMP;
+CALL BUMP;
+CALL PUTDEC(G);                     /* 2 */
+CALL PUTDEC(ADDB(200, 100));        /* BYTE result wraps: 44 */
+CALL PUTDEC(MAC(1000, 20, 30));     /* 1600 */
+CALL PUTDEC(ID8(1234H));            /* ADDRESS arg to BYTE param: 52 */
+CALL PUTDEC(ID16(255) + 1);         /* 256 */
+CALL PUTDEC(TRUNC(1FFH));           /* RETURN converts to BYTE: 255 */
+CALL PUTDEC(WIDEN(255) + 1);        /* RETURN converts to ADDRESS: 256 */
+CALL PRINTUPTO(5);                  /* 01234 */
+CALL PUTCH(10);
+CALL PUTDEC(OUTER(100));            /* 600 */
+CALL PUTDEC(F(1, F(2, 3)));         /* 33 */
+CALL PUTDEC(F(F(4, 5), 6));         /* 456 */
+CALL PUTDEC(F(F(1, 2), F(3, 4)));   /* 154 */
+CALL PUTDEC(SEVEN * SEVEN + SEVEN); /* 56 */
+CALL PUTDEC(GCD(1071, 462));        /* 21 */
+CALL PUTDEC(GCD(65535, 255));       /* 255 */
+CALL PRINTNUM(0);
+CALL PRINTNUM(65535);
+CALL PRINTNUM(1007);
+I = 0;
+DO WHILE I <= 24;
+    CALL PUTDEC(FIB(I));            /* 0 8 144 2584 46368 */
+    I = I + 6;
+END;
+IF ID8(3) THEN CALL PUTCH('Y'); ELSE CALL PUTCH('N');
+IF ADDB(1, 1) = 2 THEN CALL PUTCH('Y');
+CALL PUTCH(10);
+END PROCS;
