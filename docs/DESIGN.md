@@ -72,8 +72,9 @@ The test then compares stdout and the exit code against the expected files.
 **Semantics** (PL/M-80)
 - BYTE is 8-bit unsigned and ADDRESS is 16-bit unsigned. All comparisons are unsigned.
 - Constants of 255 or less are BYTE.
-- `+ - AND OR XOR`: BYTE op BYTE wraps at 8 bits. If either side is ADDRESS, the result is ADDRESS.
-- `* / MOD` always give an ADDRESS result. Check this rule against the PL/M-80 manual; it is a single rule in sema, so changing it later is cheap.
+- `+ - MOD AND OR XOR`: BYTE op BYTE gives BYTE (wrapping at 8 bits for `+ -`). If either side is ADDRESS, the result is ADDRESS.
+- `*` and `/` always give an ADDRESS result. `MOD` follows the `+ -` rule (BYTE MOD BYTE is BYTE). Verified against the z80pack PL/M-80 language summary; the Intel PL/M-80 Programming Manual (9800268B) is the primary source.
+- One-character string constants are BYTE and two-character ones ADDRESS.
 - Relationals give 0FFH or 0.
 - IF and WHILE test only bit 0 of the condition.
 - AND and OR are evaluated in full, without short-circuiting.

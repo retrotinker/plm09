@@ -95,8 +95,9 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 
 **Semantic rules that are easy to get wrong:**
 - All arithmetic and comparisons are unsigned.
-- BYTE op BYTE for `+ - AND OR XOR` wraps at 8 bits *before* any widening.
-- `* / MOD` always give an ADDRESS result.
+- BYTE op BYTE for `+ - MOD AND OR XOR` gives BYTE; `+ -` wrap at 8 bits *before* any widening.
+- `*` and `/` always give an ADDRESS result. `MOD` follows the `+ -` rule: BYTE MOD BYTE is BYTE. (Checked against the z80pack PL/M-80 summary; Intel manual 9800268B is the primary source.)
+- One-character string constants are BYTE, two-character ones ADDRESS.
 - Relationals give 0FFH or 00H.
 - IF and WHILE test only bit 0 of the condition.
 - AND and OR do not short-circuit.

@@ -1,0 +1,5 @@
+/* punctuation; comments may span
+   lines */
+; : , ( ) + - * / = <> < > <= >= . :=
+A<=B;C<>D;E:=F
+	X=1; /* tab advances to column 9 */

@@ -1,0 +1,6 @@
+/* every number form */
+0 255 256 65535 12D 1$000
+0FFH 0ffh 1234H 0$FF$FFH
+101B 1111$1111B
+17O 17Q 177777Q
+'A' 'a' '''' 'AB' '0'
