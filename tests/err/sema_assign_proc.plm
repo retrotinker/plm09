@@ -1,0 +1,5 @@
+T: DO;
+P: PROCEDURE;
+END P;
+P = 1;
+END T;

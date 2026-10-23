@@ -1,0 +1,4 @@
+T: DO;
+DECLARE X BYTE;
+CALL X;
+END T;

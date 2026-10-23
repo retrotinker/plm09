@@ -2,6 +2,7 @@
 #include "ast.h"
 #include "lexer.h"
 #include "parser.h"
+#include "sema.h"
 #include "util.h"
 
 #include <errno.h>
@@ -108,6 +109,7 @@ int main(int argc, char **argv)
         ast_dump(prog);
         return 0;
     }
+    sema_program(prog);
     (void)vectors;
     (void)out_path;
     (void)org;

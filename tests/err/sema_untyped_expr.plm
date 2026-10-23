@@ -1,0 +1,6 @@
+T: DO;
+DECLARE X BYTE;
+P: PROCEDURE;
+END P;
+X = P;
+END T;

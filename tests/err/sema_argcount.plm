@@ -1,0 +1,6 @@
+T: DO;
+P: PROCEDURE (A);
+DECLARE A BYTE;
+END P;
+CALL P(1, 2);
+END T;
