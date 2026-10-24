@@ -84,6 +84,17 @@ static void dump_expr(const Expr *e)
         dump_expr(e->lhs);
         putchar(')');
         break;
+    case E_ADDR:
+        printf("(ADDR ");
+        if (e->lhs) {
+            dump_expr(e->lhs);
+        } else {
+            printf("DATA");
+            for (int i = 0; i < e->ndata; i++)
+                printf(" %u", e->data[i]);
+        }
+        putchar(')');
+        break;
     }
 }
 
@@ -182,10 +193,12 @@ static void dump_block(const Block *b, int depth)
         const Decl *d = b->decls.items[i];
         indent(depth);
         if (d->kind == D_VAR) {
+            printf("DECLARE %s", d->var->name);
+            if (d->var->base)
+                printf(" BASED %s", d->var->base);
             if (d->var->dim)
-                printf("DECLARE %s(%u) %s\n", d->var->name, d->var->dim, type_name(d->var->type));
-            else
-                printf("DECLARE %s %s\n", d->var->name, type_name(d->var->type));
+                printf("(%u)", d->var->dim);
+            printf(" %s\n", type_name(d->var->type));
             continue;
         }
         const Proc *p = d->proc;

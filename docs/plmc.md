@@ -37,6 +37,7 @@ include path. Four hooks files come with plmc:
   `LAST`.
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
 * `LITERALLY` macros, scoped like other declarations.
+* Pointers: `BASED` variables and the address-of (dot) operator `.X`.
 * `IF`/`THEN`/`ELSE`, `DO` blocks with their own declarations, `DO WHILE`
   and iterative `DO I = ... TO ... BY ...` loops, `DO CASE`, `HALT`.
 * Procedures: typed and untyped, with parameters, nested inside each other, and
@@ -270,6 +271,52 @@ DO WHILE I < LENGTH(BUF);
 END;
 ```
 
+## BASED variables and the dot operator
+
+```
+DECLARE (NORTH$ERROR, EAST$ERROR) BYTE;
+DECLARE ERROR$POINTER ADDRESS;
+DECLARE ERROR BASED ERROR$POINTER BYTE;
+
+ERROR$POINTER = .NORTH$ERROR;
+ERROR = 0;                          /* clears NORTH$ERROR */
+```
+
+A **BASED variable** has no storage of its own. Each reference to it uses
+the memory whose address is, *at that moment*, in its **base**.
+
+* **Declaring:** `BASED base` must come right after the variable's name:
+  * `DECLARE ITEM BASED PTR BYTE;`
+  * `DECLARE (A BASED P, B BASED Q) ADDRESS;`
+  * `DECLARE (LIST BASED LP) (100) ADDRESS;` (the parentheses are
+    optional)
+* **The base:** an ADDRESS scalar declared earlier. It can't be an array,
+  an element, or itself BASED. Parameters and locals make good bases.
+* **Arrays:** a BASED array's element `A(i)` is at `base + i` (BYTE) or
+  `base + 2*i` (ADDRESS), and `A` alone means `A(0)`. As with ordinary
+  arrays nothing is range-checked, so `DECLARE (BUF BASED P) (1) BYTE` can
+  index any amount of memory.
+* **Not allowed:** a BASED variable can't be a parameter or the index of an
+  iterative DO.
+
+The **dot operator** gives an ADDRESS value:
+
+| Form | Value |
+|---|---|
+| `.X` | the address of variable `X` (of element 0 if `X` is an array) |
+| `.A(i)` | the address of element `A(i)` |
+| `.B` for a BASED `B` | the current value of its base (plus the offset for `.B(i)`) |
+| `.P` | the entry address of procedure `P`. `P` must be declared at the outer level, and is written without arguments |
+| `.(constants)` | the address of the listed bytes, stored with the program: numbers from 0 to 255 and strings of any length up to 255, as in `.('HELLO', 13, 0)` |
+
+Together they give PL/M its pointers: pass `.BUF` to a procedure whose
+parameter is the base of a BASED array, walk a string by adding 1 to a
+base, or keep tables of addresses. The 6809 stores ADDRESS values high byte
+first, so a BYTE BASED on an ADDRESS variable sees its high byte.
+
+In an `--os9` module, `.X` gives the variable's actual run-time address
+inside the process's data area, and constant lists live in the module.
+
 ## Procedures
 
 ```
@@ -482,9 +529,8 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | Feature | Error message |
 |---|---|
 | an implicit dimension, `DECLARE X(*) BYTE` (only meaningful with `INITIAL`/`DATA`) | `an implicit dimension '(*)' is not supported` |
-| `BASED` variables, `STRUCTURE`, `LABEL` declarations | `... is not supported` |
+| `STRUCTURE`, `LABEL` declarations | `... is not supported` |
 | `INITIAL` and `DATA` | `initialized data is not supported` |
-| the address-of operator `.X` | `the address-of operator '.' is not supported` |
 | `GOTO`, `GO TO` | `GOTO is not supported` |
 | a label on anything but `DO` | `a label on this statement (only DO blocks may be labeled) is not supported` |
 | `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
@@ -532,7 +578,13 @@ next multiple of 8 plus 1.
 | `expected a string, found ...` | `LITERALLY` not followed by a string |
 | `strings are limited to 255 characters` | a string over 255 characters |
 | `strings longer than 2 characters are not supported` | a long string used as a value |
-| `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, or undeclared |
+| `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, BASED, or undeclared |
+| `P, the base of X, is not declared` | `BASED` names an undeclared base |
+| `the base of a BASED variable must be an ADDRESS scalar that is not itself BASED` | base is BYTE, an array, a procedure, or BASED |
+| `parameter X cannot be BASED`, `a LITERALLY declaration cannot be BASED` | `BASED` in the wrong place |
+| `the dot operator needs a variable, an array element or a procedure` | e.g. `.LENGTH(A)` |
+| `the address of a procedure needs a procedure declared at the outer level, written without arguments` | `.P` for a nested procedure, or `.P(1)` |
+| `a number in a constant list must fit in a byte`, `expected a number or a string, ...` | bad item in `.(...)` |
 | `typed procedure F must be used in an expression, not CALLed` | `CALL` of a BYTE or ADDRESS procedure |
 | `untyped procedure P cannot be used in an expression` | value taken from an untyped procedure |
 | `cannot assign to procedure P` | procedure name on the left of `=` |
@@ -894,6 +946,16 @@ listing and simulator traces easy to follow.
     `FDB case-table` *offsets*. Offsets rather than addresses keep the code
     position-independent, so the same sequence works in `--os9` modules.
   * Each case ends with `LBRA` past the block.
+* **BASED variables:**
+  * The base is loaded into X (`LDX P`, or `LDX P,U`), and the variable is
+    used as `,X` or `k,X`, so a store needs no extra registers.
+  * Computed subscripts use the same `D,X` sequence as ordinary arrays, with
+    the base's value as X.
+* **Dot operator:**
+  * Normally `LDD #V_X`. In `--os9` modules it is `LEAX V_X,U` / `TFR X,D`
+    for a variable, and `LEAX P_X,PCR` / `TFR X,D` for a procedure, so the
+    code stays position-independent.
+  * Constant lists become `FCB` data after the procedures.
 * **Array elements:**
   * *Constant subscript:* the element is an ordinary operand, `V_A+6` (or
     `V_A+6,U` in an OS-9 module).
@@ -970,8 +1032,8 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, and DO CASE, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, and pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

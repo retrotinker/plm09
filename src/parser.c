@@ -266,8 +266,47 @@ static Expr *parse_primary(void)
         expect(T_RPAREN);
         return e;
     }
-    case T_DOT:
-        unsupported(t->loc, "the address-of operator '.'");
+    case T_DOT: {
+        /* .name, .name(subscript), or .(constant list) */
+        Expr *e = new_expr(E_ADDR, next().loc);
+        if (accept(T_LPAREN)) {
+            size_t cap = 16;
+            e->data = xmalloc(cap);
+            do {
+                Token *c = peek();
+                if (c->type == T_NUMBER) {
+                    if (c->value > 0xff)
+                        error_at(c->loc, "a number in a constant list must fit in a byte");
+                } else if (c->type != T_STRING) {
+                    unexpected("a number or a string");
+                }
+                Token tok = next();
+                const char *bytes = tok.type == T_STRING ? tok.text : NULL;
+                size_t n = bytes ? strlen(bytes) : 1;
+                while (e->ndata + n > cap)
+                    e->data = xrealloc(e->data, cap *= 2);
+                if (bytes)
+                    memcpy(e->data + e->ndata, bytes, n);
+                else
+                    e->data[e->ndata] = (unsigned char)tok.value;
+                e->ndata += (int)n;
+            } while (accept(T_COMMA));
+            expect(T_RPAREN);
+            return e;
+        }
+        Token id = expect(T_IDENT);
+        Expr *v = new_expr(E_NAME, id.loc);
+        v->name = id.text;
+        if (accept(T_LPAREN)) {
+            v->kind = E_CALL;
+            do
+                vec_push(&v->args, parse_expr());
+            while (accept(T_COMMA));
+            expect(T_RPAREN);
+        }
+        e->lhs = v;
+        return e;
+    }
     case K_PLUS:
     case K_MINUS:
         unsupported(t->loc, "PLUS/MINUS (add/subtract with carry)");
@@ -394,7 +433,6 @@ static Type parse_type(void)
     if (accept(K_ADDRESS))
         return TY_ADDRESS;
     switch (t->type) {
-    case K_BASED: unsupported(t->loc, "BASED variables");
     case K_LABEL: unsupported(t->loc, "LABEL declarations");
     case K_STRUCTURE: unsupported(t->loc, "STRUCTURE");
     case K_DATA:
@@ -403,26 +441,38 @@ static Type parse_type(void)
     }
 }
 
+/* a declared name, read raw, and an optional "BASED base" right after it */
+static void decl_name(Vec *names, Vec *bases)
+{
+    Token *copy = xmalloc(sizeof *copy);
+    Token *base = NULL;
+
+    *copy = next_raw_ident();
+    vec_push(names, copy);
+    if (accept(K_BASED)) {
+        base = xmalloc(sizeof *base);
+        *base = expect(T_IDENT);
+    }
+    vec_push(bases, base);
+}
+
 /* DECLARE item {, item} ;
-   item := (IDENT | '(' IDENT {, IDENT} ')') ['(' NUMBER ')'] type */
+   item := (name | '(' name {, name} ')') ['(' NUMBER ')'] type
+   name := IDENT [BASED IDENT] */
 static void parse_declare(Block *b)
 {
     expect(K_DECLARE);
     do {
-        Vec names = { 0 };
+        Vec names = { 0 }, bases = { 0 };
         /* names are read raw: declaring a name hides an outer literal */
         if (raw_type(0) == T_LPAREN) {
             next();
-            do {
-                Token *copy = xmalloc(sizeof *copy);
-                *copy = next_raw_ident();
-                vec_push(&names, copy);
-            } while (accept(T_COMMA));
+            do
+                decl_name(&names, &bases);
+            while (accept(T_COMMA));
             expect(T_RPAREN);
         } else {
-            Token *copy = xmalloc(sizeof *copy);
-            *copy = next_raw_ident();
-            vec_push(&names, copy);
+            decl_name(&names, &bases);
         }
         Token *first = names.items[0];
         unsigned dim = 0;
@@ -444,6 +494,8 @@ static void parse_declare(Block *b)
                 error_at(lit_loc, "a LITERALLY declaration cannot be factored");
             if (dim)
                 error_at(dim_loc, "a LITERALLY declaration cannot have a dimension");
+            if (bases.items[0])
+                error_at(lit_loc, "a LITERALLY declaration cannot be BASED");
             if (peek_type(0) != T_STRING)
                 unexpected("a string");
             declare_name(first->text, next().text, first->loc);
@@ -460,6 +512,11 @@ static void parse_declare(Block *b)
             v->type = type;
             v->dim = dim;
             v->dim_loc = dim_loc;
+            if (bases.items[i]) {
+                Token *base = bases.items[i];
+                v->base = base->text;
+                v->base_loc = base->loc;
+            }
             d->kind = D_VAR;
             d->var = v;
             vec_push(&b->decls, d);

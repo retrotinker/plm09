@@ -19,6 +19,7 @@ typedef enum ExprKind {
     E_UNARY,
     E_BINARY,
     E_INDEX,    /* array element: name(lhs) */
+    E_ADDR,     /* .lhs (a variable, element or procedure), or .(constants) */
 } ExprKind;
 
 struct Symbol;
@@ -34,7 +35,10 @@ typedef struct Expr {
     struct Symbol *sym;     /* E_NAME, E_CALL, E_INDEX: set by sema */
     Vec args;               /* E_CALL: Expr* */
     Op op;                  /* E_UNARY, E_BINARY */
-    struct Expr *lhs, *rhs; /* E_UNARY uses lhs; E_INDEX: lhs = subscript */
+    struct Expr *lhs, *rhs; /* E_UNARY uses lhs; E_INDEX: lhs = subscript;
+                               E_ADDR: lhs = operand, or NULL with data */
+    unsigned char *data;    /* E_ADDR of a constant list: the bytes */
+    int ndata;
 } Expr;
 
 typedef enum StmtKind {
@@ -62,6 +66,8 @@ typedef struct VarDecl {
     Type type;
     unsigned dim;           /* number of elements; 0 for a scalar */
     Loc dim_loc;
+    char *base;             /* BASED variable: name of its base, else NULL */
+    Loc base_loc;
     struct Symbol *sym;
 } VarDecl;
 

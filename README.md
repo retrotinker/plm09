@@ -95,6 +95,10 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - The text, up to 255 characters, is substituted for the name before parsing, so `DCL LITERALLY 'DECLARE'` works too.
   - Literals follow block scope, and inner declarations can hide them.
   - `--ast` shows the result of the substitution.
+- **Pointers:**
+  - `DECLARE ITEM BASED PTR BYTE;` makes `ITEM` mean whatever `PTR` points at; BASED arrays work too.
+  - `.X`, `.A(i)` and `.P` give the address of a variable, an element or an outer-level procedure.
+  - `.('TEXT', 0)` gives the address of constant bytes stored with the program.
 - **Arrays:**
   - `DECLARE BUF(80) BYTE;` declares `BUF(0)` to `BUF(79)`.
   - Elements can be used anywhere a variable can, including as assignment targets.
@@ -133,9 +137,8 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- `BASED` variables, structures
+- structures
 - `INITIAL` and `DATA`
-- the address-of operator `.`
 - `GOTO` and labels on other statements
 - `REENTRANT`, `INTERRUPT`, `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)

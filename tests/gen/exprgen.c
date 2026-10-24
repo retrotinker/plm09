@@ -11,7 +11,10 @@
  * range.  Two more statement kinds exercise control flow: an iterative DO
  * over random bounds and step (printing the sum of the index values and
  * the final index, modelled step by step as in the PL/M-80 manual 5.1.4),
- * and a DO CASE with a "(expr) AND 3" selector and four cases.  The expected output comes from an
+ * and a DO CASE with a "(expr) AND 3" selector and four cases.  Pointer
+ * statements set P to the address of an array element (.BA(k), .WA(k), or
+ * .BA / .WA) and read or write through the BASED variables PB, PW, PBA(i)
+ * and PWA(i).  The expected output comes from an
  * independent C model of the PL/M-80 rules:
  *   constants <= 255 are BYTE
  *   + - MOD AND OR XOR: BYTE if both operands BYTE (wrapping), else ADDRESS
@@ -258,6 +261,40 @@ static void gen_case(FILE *plm, FILE *exp)
     fprintf(exp, "%u\n", chosen);
 }
 
+/* P = .BA(k) / .WA(k), then read or write through PB / PW; or P = .BA /
+   .WA and read through PBA(i) / PWA(i) */
+static void gen_pointer(FILE *plm, FILE *exp)
+{
+    char sub[BUFSZ], e[BUFSZ];
+    int word = rnd(2);
+    const char *arr = word ? "WA" : "BA";
+    unsigned *vals = word ? warr : barr;
+    unsigned k;
+
+    do {
+        div_by_zero = 0;
+        k = subscript(sub, 1);
+    } while (div_by_zero);
+    switch (rnd(3)) {
+    case 0:                                     /* read through PB / PW */
+        fprintf(plm, "P = .%s(%s);\nRW = %s;\nCALL PUTDEC(RW);\n", arr, sub, word ? "PW" : "PB");
+        fprintf(exp, "%u\n", vals[k]);
+        break;
+    case 1: {                                   /* write through PB / PW */
+        Val v = small_expr(e);
+        fprintf(plm, "P = .%s(%s);\n%s = %s;\nCALL PUTDEC(%s(%u));\n",
+                arr, sub, word ? "PW" : "PB", e, arr, k);
+        vals[k] = word ? v.v : v.v & 0xff;
+        fprintf(exp, "%u\n", vals[k]);
+        break;
+    }
+    default:                                    /* a BASED array over BA / WA */
+        fprintf(plm, "P = .%s;\nRW = %s(%s);\nCALL PUTDEC(RW);\n", arr, word ? "PWA" : "PBA", sub);
+        fprintf(exp, "%u\n", vals[k]);
+        break;
+    }
+}
+
 int main(int argc, char **argv)
 {
     FILE *plm, *exp;
@@ -277,6 +314,8 @@ int main(int argc, char **argv)
     fprintf(plm, "PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;\n");
     fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
     fprintf(plm, "DECLARE BA(4) BYTE, WA(4) ADDRESS, IB BYTE, (IW, SUM) ADDRESS;\n");
+    fprintf(plm, "DECLARE P ADDRESS, PB BASED P BYTE, PW BASED P ADDRESS;\n");
+    fprintf(plm, "DECLARE (PBA BASED P) (4) BYTE, (PWA BASED P) (4) ADDRESS;\n");
     for (int i = 0; i < NVARS; i++) {
         bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
         wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
@@ -293,7 +332,7 @@ int main(int argc, char **argv)
             div_by_zero = 0;
             v = expr(buf, 0);
         } while (div_by_zero);
-        switch (rnd(6)) {
+        switch (rnd(7)) {
         case 0:
             fprintf(plm, "RW = %s;\nCALL PUTDEC(RW);\n", buf);
             fprintf(exp, "%u\n", v.v);
@@ -327,6 +366,9 @@ int main(int argc, char **argv)
             break;
         case 5:
             gen_case(plm, exp);
+            break;
+        case 6:
+            gen_pointer(plm, exp);
             break;
         default:
             fprintf(plm, "IF %s THEN CALL PUTDEC(1); ELSE CALL PUTDEC(0);\n", buf);

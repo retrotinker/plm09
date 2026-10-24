@@ -131,19 +131,57 @@ static unsigned elem_size(const Expr *e)
     return e->type == TY_BYTE ? 1 : 2;
 }
 
-/* a variable, or an array element with a constant subscript: a fixed
-   location, described by the variable and a byte offset */
+/* a (non-BASED) variable, or an array element with a constant subscript:
+   a fixed location, described by the variable and a byte offset */
 static int fixed_location(const Expr *e, unsigned *offset)
 {
-    if (is_var(e)) {
+    if (is_var(e) && !e->sym->base) {
         *offset = 0;
         return 1;
     }
-    if (e->kind == E_INDEX && e->lhs->kind == E_NUM) {
+    if (e->kind == E_INDEX && e->lhs->kind == E_NUM && !e->sym->base) {
         *offset = (e->lhs->value * elem_size(e)) & 0xffff;
         return 1;
     }
     return 0;
+}
+
+/* a BASED scalar, or a BASED element with a constant subscript: reached as
+   `offset,X` once X holds the base (gen_base_x) */
+static int based_location(const Expr *e, unsigned *offset)
+{
+    if (is_var(e) && e->sym->base) {
+        *offset = 0;
+        return 1;
+    }
+    if (e->kind == E_INDEX && e->lhs->kind == E_NUM && e->sym->base) {
+        *offset = (e->lhs->value * elem_size(e)) & 0xffff;
+        return 1;
+    }
+    return 0;
+}
+
+static const char *x_offset(unsigned offset)
+{
+    static char buf[16];
+
+    if (offset)
+        snprintf(buf, sizeof buf, "%u,X", offset & 0xffff);
+    else
+        strcpy(buf, ",X");
+    return buf;
+}
+
+/* X = the address of the start of variable sym: the value of its base if
+   it is BASED, otherwise its own location.  D is not changed. */
+static void gen_base_x(const Symbol *sym)
+{
+    if (sym->base)
+        emit("LDX\t%s", var_ref(sym->base->asm_name, 0));
+    else if (pic)
+        emit("LEAX\t%s", var_ref(sym->asm_name, 0));
+    else
+        emit("LDX\t#%s", sym->asm_name);
 }
 
 /* can e be used directly as a w-bit instruction operand? */
@@ -177,6 +215,8 @@ static int contains_call(const Expr *e)
         return contains_call(e->lhs) || contains_call(e->rhs);
     case E_INDEX:
         return contains_call(e->lhs);
+    case E_ADDR:
+        return e->lhs && e->lhs->sym->kind == SYM_VAR && contains_call(e->lhs);
     }
     return 1;
 }
@@ -278,10 +318,66 @@ static void gen_elem_offset(const Expr *e)
         emit("LSLB");
         emit("ROLA");
     }
-    if (pic)
-        emit("LEAX\t%s", var_ref(e->sym->asm_name, 0));
-    else
-        emit("LDX\t#%s", e->sym->asm_name);
+    gen_base_x(e->sym);
+}
+
+/* constant lists of .(...) operands, emitted with the code */
+typedef struct Pool {
+    int label;
+    const Expr *e;
+} Pool;
+
+static Pool *pools;
+static int npools;
+
+/* D = the address given by a dot operator */
+static void gen_addr(const Expr *e)
+{
+    const Expr *v = e->lhs;
+    unsigned off;
+
+    if (!v) {                                   /* .(constant list) */
+        pools = xrealloc(pools, (npools + 1) * sizeof *pools);
+        pools[npools].label = new_label();
+        pools[npools].e = e;
+        if (pic) {
+            emit("LEAX\tL%d,PCR", pools[npools].label);
+            emit("TFR\tX,D");
+        } else {
+            emit("LDD\t#L%d", pools[npools].label);
+        }
+        npools++;
+        return;
+    }
+    if (v->sym->kind == SYM_PROC) {             /* entry point */
+        if (pic) {
+            emit("LEAX\t%s,PCR", v->sym->asm_name);
+            emit("TFR\tX,D");
+        } else {
+            emit("LDD\t#%s", v->sym->asm_name);
+        }
+        return;
+    }
+    if (fixed_location(v, &off)) {
+        if (pic) {
+            emit("LEAX\t%s", var_ref(v->sym->asm_name, off));
+            emit("TFR\tX,D");
+        } else if (off) {
+            emit("LDD\t#%s+%u", v->sym->asm_name, off);
+        } else {
+            emit("LDD\t#%s", v->sym->asm_name);
+        }
+        return;
+    }
+    if (based_location(v, &off)) {              /* the base's value */
+        emit("LDD\t%s", var_ref(v->sym->base->asm_name, 0));
+        if (off)
+            emit("ADDD\t#%u", off);
+        return;
+    }
+    gen_elem_offset(v);                         /* computed subscript */
+    emit("LEAX\tD,X");
+    emit("TFR\tX,D");
 }
 
 static void gen_call(const Expr *e);
@@ -366,6 +462,11 @@ static void gen_expr(const Expr *e)
             gen_call(e);
             break;
         }
+        if (e->sym->base) {
+            gen_base_x(e->sym);
+            emit("%s\t,X", e->type == TY_BYTE ? "LDB" : "LDD");
+            break;
+        }
         emit("%s\t%s", e->type == TY_BYTE ? "LDB" : "LDD", var_ref(e->sym->asm_name, 0));
         break;
     case E_CALL:
@@ -395,12 +496,18 @@ static void gen_expr(const Expr *e)
         const char *ld = e->type == TY_BYTE ? "LDB" : "LDD";
         if (fixed_location(e, &off)) {
             emit("%s\t%s", ld, var_ref(e->sym->asm_name, off));
+        } else if (based_location(e, &off)) {
+            gen_base_x(e->sym);
+            emit("%s\t%s", ld, x_offset(off));
         } else {
             gen_elem_offset(e);
             emit("%s\tD,X", ld);
         }
         break;
     }
+    case E_ADDR:
+        gen_addr(e);
+        break;
     }
 }
 
@@ -562,6 +669,9 @@ static void gen_stmt(const Stmt *s)
             unsigned off;
             if (fixed_location(t, &off)) {
                 emit("%s\t%s", st, var_ref(t->sym->asm_name, off));
+            } else if (based_location(t, &off)) {
+                gen_base_x(t->sym);             /* leaves the value in D alone */
+                emit("%s\t%s", st, x_offset(off));
             } else {
                 /* computing the element's address needs D: save the value */
                 push(w);
@@ -653,6 +763,21 @@ static void emit_code(const Program *prog)
         emit("RTS");
     }
 
+    if (npools)
+        fprintf(out, "\n; constant lists\n");
+    for (int i = 0; i < npools; i++) {
+        const Expr *e = pools[i].e;
+        fprintf(out, "L%d", pools[i].label);
+        for (int k = 0; k < e->ndata; k++) {
+            if (k % 16 == 0)
+                fprintf(out, "%s\tFCB\t", k ? "\n" : "");
+            else
+                fputc(',', out);
+            fprintf(out, "$%02X", e->data[k]);
+        }
+        fputc('\n', out);
+    }
+
     fputc('\n', out);
     emit("INCLUDE\t\"plm_rt.asm\"");
     emit("INCLUDE\t\"plm_hooks.asm\"");
@@ -662,6 +787,7 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
 {
     out = f;
     label_no = 0;
+    npools = 0;
     last_comment_line = 0;
     pic = opt->os9;
 

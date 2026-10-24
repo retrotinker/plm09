@@ -12,6 +12,8 @@
  *   unary - and NOT: type of the operand
  *   array element A(i): the array's type; an unsubscripted array name
  *   means element 0.  LENGTH(A) and LAST(A) are ADDRESS constants.
+ *   .X (address of a variable, element or outer-level procedure) and
+ *   .(constants): ADDRESS.
  */
 #include "sema.h"
 
@@ -134,6 +136,25 @@ static void check_expr(Expr *e, Scope *scope)
         check_expr(e->rhs, scope);
         e->type = binary_type(e->op, e->lhs->type, e->rhs->type);
         break;
+    case E_ADDR: {
+        e->type = TY_ADDRESS;
+        if (!e->lhs)
+            break;                      /* .(constant list) */
+        Expr *v = e->lhs;
+        sym = scope_lookup(scope, v->name);
+        if (sym && sym->kind == SYM_PROC) {
+            if (v->kind != E_NAME || sym->scope_id != 0)
+                error_at(v->loc, "the address of a procedure needs a procedure declared at "
+                         "the outer level, written without arguments");
+            v->sym = sym;
+            v->type = TY_ADDRESS;
+            break;
+        }
+        check_expr(v, scope);       /* NAME(i) on an array becomes E_INDEX */
+        if (!((v->kind == E_NAME || v->kind == E_INDEX) && v->sym && v->sym->kind == SYM_VAR))
+            error_at(v->loc, "the dot operator needs a variable, an array element or a procedure");
+        break;
+    }
     case E_INDEX:       /* only assignment targets arrive here already indexed */
         sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind != SYM_VAR)
@@ -148,6 +169,20 @@ static void check_expr(Expr *e, Scope *scope)
 
 /* ------------------------------------------------------------ declarations */
 
+/* the base of a BASED variable: a declared ADDRESS scalar, not itself
+   based (PL/M-80 manual 3.6.3) */
+static Symbol *resolve_base(VarDecl *v, Scope *scope)
+{
+    Symbol *b = scope_lookup(scope, v->base);
+
+    if (!b)
+        error_at(v->base_loc, "%s, the base of %s, is not declared", v->base, v->name);
+    if (b->kind != SYM_VAR || b->type != TY_ADDRESS || b->dim || b->base)
+        error_at(v->base_loc, "the base of a BASED variable must be an ADDRESS scalar "
+                 "that is not itself BASED");
+    return b;
+}
+
 static void declare_var(VarDecl *v, Scope *scope)
 {
     Symbol *sym = scope_lookup_local(scope, v->name);
@@ -159,15 +194,20 @@ static void declare_var(VarDecl *v, Scope *scope)
     if (sym && sym->is_param && sym->type == TY_NONE) {
         if (v->dim)
             error_at(v->loc, "parameter %s cannot be an array", v->name);
+        if (v->base)
+            error_at(v->loc, "parameter %s cannot be BASED", v->name);
         sym->type = v->type;
         v->sym = sym;
         return;
     }
+    Symbol *base = v->base ? resolve_base(v, scope) : NULL;
     sym = scope_define(scope, v->name, SYM_VAR, v->loc);
     sym->type = v->type;
     sym->dim = (int)v->dim;
+    sym->base = base;
     v->sym = sym;
-    vec_push(&sema_vars, sym);
+    if (!base)                  /* a BASED variable has no storage of its own */
+        vec_push(&sema_vars, sym);
 }
 
 static int is_register_name(const char *name)
@@ -212,6 +252,8 @@ static void declare_proc(Proc *p, Scope *scope)
                          "an EXTERNAL procedure may only declare its parameters");
             if (d->var->dim)
                 error_at(d->var->loc, "parameter %s cannot be an array", d->var->name);
+            if (d->var->base)
+                error_at(d->var->loc, "parameter %s cannot be BASED", d->var->name);
             ps->type = d->var->type;
             d->var->sym = ps;
         }
@@ -307,7 +349,7 @@ static void check_stmt(Stmt *s, Scope *scope)
     case S_ITER: {
         Expr *v = s->var;
         Symbol *sym = v->sym = scope_lookup(scope, v->name);
-        if (!sym || sym->kind != SYM_VAR || sym->dim)
+        if (!sym || sym->kind != SYM_VAR || sym->dim || sym->base)
             error_at(v->loc, "the index of an iterative DO must be a scalar variable%s",
                      sym ? "" : " (not declared)");
         v->type = sym->type;

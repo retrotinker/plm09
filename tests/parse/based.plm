@@ -1,0 +1,9 @@
+/* BASED declarations and the dot operator */
+P: DO;
+DECLARE (PTR, Q) ADDRESS, ITEM BASED PTR BYTE;
+DECLARE (LIST BASED Q) (10) ADDRESS, I BYTE;
+PTR = .I;
+Q = .LIST(I + 1);
+ITEM = LIST(2);
+PTR = .('AB', 13, 0);
+END P;

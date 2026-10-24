@@ -82,6 +82,15 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
 **Program structure**
 - A program is `NAME: DO; decls stmts END [NAME];`, optionally followed by `EOF`.
 - Declarations: `DECLARE X BYTE`, `DECLARE (A,B) ADDRESS`, `DECLARE A(10) BYTE`, `DECLARE (A,B)(5) ADDRESS`, `DECLARE X LITERALLY 'text'`, or a comma-separated list. They must precede the statements of their block.
+- BASED variables (manual 3.6.3):
+  - `X BASED P` must come right after the name, and the base must be an already declared ADDRESS scalar that isn't BASED.
+  - A BASED variable has no storage; every reference uses P's value at that moment.
+  - BASED arrays are allowed. Parameters and iterative DO indexes can't be BASED.
+- The dot operator (manual 4.1.3) gives an ADDRESS:
+  - `.X`, `.A(i)`, and `.A` (element 0)
+  - for a BASED variable, the base's value (plus the element offset)
+  - `.P` for an outer-level procedure written without arguments
+  - `.(constant list)` for numbers 0–255 and strings, stored with the code
 - LITERALLY (PL/M-80 manual 6.4) is a parameterless macro whose text, up to 255 characters, is substituted as tokens:
   - Literals are block-scoped, and an inner declaration of any kind hides an outer literal.
   - A name can't be declared twice in one block if either declaration is a literal.
@@ -154,8 +163,8 @@ Operators group left to right.
 - **Mixed lookahead:** `NAME: PROC` works with `PROC LITERALLY 'PROCEDURE'`, because the name and ':' are checked raw and only the third token is expanded.
 
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
-- `(*)` dimensions, BASED, STRUCTURE, LABEL declarations
-- INITIAL/DATA, `.` (address-of)
+- `(*)` dimensions, STRUCTURE, LABEL declarations
+- INITIAL/DATA
 - GOTO
 - REENTRANT, INTERRUPT, PUBLIC
 - PLUS/MINUS, `:=`, ENABLE/DISABLE
@@ -181,6 +190,16 @@ The full list of messages is in `plmc.md`.
 - If the condition's root is a relational, emit the compare followed by a long branch on the inverse condition.
 - Otherwise use `LSRB` + `LBCC`.
 - Statement control flow uses long branches (`LBxx`/`LBRA`).
+
+**BASED variables and `.`:**
+- `fixed_location()` excludes BASED variables. `based_location()` covers BASED scalars and constant-subscript elements, which are reached as `k,X` after `gen_base_x()` has loaded X with the base's value (`LDX P` / `LDX P,U`). Loading X doesn't disturb D, so stores need no push.
+- `gen_elem_offset()` also uses `gen_base_x()`, so computed subscripts on BASED arrays work unchanged.
+- `gen_addr()` builds the address in D:
+  - `LDD #V+k`, or `LEAX V+k,U` / `TFR X,D` when position-independent
+  - for BASED variables, the base's value plus k
+  - for computed subscripts, `LEAX D,X` / `TFR X,D`
+  - for procedures, `#P` or `LEAX P,PCR`
+  - for constant lists, the label of `FCB` data emitted after the procedures (the `Pool` entries)
 
 **Iterative DO** (`gen_iter`):
 1. store the start value in the index
@@ -356,7 +375,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | lex, parse | `--tokens` / `--ast` golden files |
 | err | programs that must fail; the `.err` file holds the expected message, with position |
 | run | complete programs in sim6809, covering every operator and conversion rule, control flow, input, procedures, HALT, `--org`/`--vectors`, and an assembly check with the example hooks |
-| fuzz | `exprgen` seeded random programs against an independent C model of the language rules. They include elements of `BA(4)`/`WA(4)` (constant or `(expr) AND 3` subscripts), assignments to elements, iterative DO loops over random bounds and steps (the model follows the manual's four steps and rejects loops of over 300 passes), and `DO CASE (expr) AND 3`. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
+| fuzz | `exprgen` seeded random programs against an independent C model of the language rules. They include pointer statements (`P = .BA(k)` with reads and writes through BASED `PB`/`PW` and the BASED arrays `PBA`/`PWA`). They include elements of `BA(4)`/`WA(4)` (constant or `(expr) AND 3` subscripts), assignments to elements, iterative DO loops over random bounds and steps (the model follows the manual's four steps and rejects loops of over 300 passes), and `DO CASE (expr) AND 3`. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
@@ -407,9 +426,10 @@ How the nitros9 suite works:
 - arrays, with `LENGTH`/`LAST`; the run tests `arrays` and `bigdata`, and arrays in the fuzz generator
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
 - LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
+- BASED variables and the dot operator: the run test `based`, pointer statements in the fuzz generator, a parse golden and error tests
 
 ## Known gaps
-- **Language:** BASED, STRUCTURE, INITIAL/DATA (and so `(*)` dimensions), address-of, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** STRUCTURE, INITIAL/DATA (and so `(*)` dimensions), GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

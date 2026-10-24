@@ -20,6 +20,7 @@ typedef struct Symbol {
     char *asm_name;         /* label in the generated assembly */
     Loc loc;
     int is_param;
+    struct Symbol *base;    /* BASED variable: its base (an ADDRESS scalar) */
     Proc *proc;             /* SYM_PROC */
     struct Symbol *next;    /* next symbol in the same scope */
 } Symbol;

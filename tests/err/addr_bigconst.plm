@@ -1,0 +1,4 @@
+T: DO;
+DECLARE W ADDRESS;
+W = .(1, 300);
+END T;

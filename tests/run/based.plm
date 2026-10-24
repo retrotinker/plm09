@@ -1,0 +1,88 @@
+/* BASED variables and the dot operator (PL/M-80 manual 3.6.3, 4.1.3).
+   Expected values in comments; only address differences are printed, so
+   the output doesn't depend on where the program is loaded. */
+PTRS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (NORTH$ERROR, EAST$ERROR, HEIGHT$ERROR) BYTE;
+DECLARE ERROR$POINTER ADDRESS;
+DECLARE ERROR BASED ERROR$POINTER BYTE;
+DECLARE (AGE$PTR, INCOME$PTR, CATEGORY$PTR) ADDRESS;
+DECLARE AGE BASED AGE$PTR BYTE;
+DECLARE (INCOME BASED INCOME$PTR) ADDRESS;
+DECLARE (CATEGORY BASED CATEGORY$PTR) (100) ADDRESS;
+DECLARE TABLE(10) ADDRESS, BYTES(8) BYTE, I BYTE, (W, S) ADDRESS;
+DECLARE CH BASED S BYTE;
+
+SUM: PROCEDURE (P, N) ADDRESS;      /* an address as a parameter, with a */
+    DECLARE (P, T) ADDRESS, N BYTE; /* BASED array over it */
+    DECLARE (V BASED P) (1) ADDRESS, K BYTE;
+    T = 0;
+    DO K = 0 TO N - 1;
+        T = T + V(K);               /* no bounds checks: V(1) and up are fine */
+    END;
+    RETURN T;
+END SUM;
+
+PRINT: PROCEDURE (P);               /* print a 0-terminated string */
+    DECLARE P ADDRESS, C BASED P BYTE;
+    DO WHILE C <> 0;
+        CALL PUTCH(C);
+        P = P + 1;
+    END;
+END PRINT;
+
+NORTH$ERROR = 1;
+EAST$ERROR = 2;
+HEIGHT$ERROR = 3;
+ERROR$POINTER = .NORTH$ERROR;       /* the manual's example */
+CALL PUTDEC(ERROR);                 /* 1 */
+ERROR$POINTER = .HEIGHT$ERROR;
+CALL PUTDEC(ERROR);                 /* 3 */
+ERROR = 30;                         /* a store through the base */
+CALL PUTDEC(HEIGHT$ERROR);          /* 30 */
+
+DO I = 0 TO 9;
+    TABLE(I) = I * 100;
+END;
+CATEGORY$PTR = .TABLE;              /* a BASED array over TABLE */
+CALL PUTDEC(CATEGORY(5));           /* 500 */
+I = 7;
+CALL PUTDEC(CATEGORY(I));           /* 700 */
+CATEGORY(I) = 7777;
+CALL PUTDEC(TABLE(7));              /* 7777 */
+CALL PUTDEC(CATEGORY);              /* unsubscripted: element 0 = 0 */
+CATEGORY$PTR = .TABLE(2);           /* now CATEGORY(0) is TABLE(2) */
+CALL PUTDEC(CATEGORY(1));           /* TABLE(3) = 300 */
+CALL PUTDEC(.CATEGORY(3) - .TABLE); /* (2 + 3) * 2 = 10 */
+CALL PUTDEC(.TABLE(9) - .TABLE(0)); /* 18 */
+CALL PUTDEC(.BYTES(5) - .BYTES);    /* 5 */
+
+INCOME$PTR = .W;
+W = 4321;
+CALL PUTDEC(INCOME);                /* 4321 */
+INCOME = INCOME + 1;
+CALL PUTDEC(W);                     /* 4322 */
+AGE$PTR = .W;                       /* a BYTE view of an ADDRESS: the 6809 */
+CALL PUTDEC(AGE);                   /* stores the high byte first: 10E2H -> 16 */
+AGE$PTR = AGE$PTR + 1;
+CALL PUTDEC(AGE);                   /* 0E2H = 226 */
+
+DO I = 0 TO 7;                      /* the base is read at each reference */
+    BYTES(I) = 'A' + I;
+END;
+S = .BYTES;
+DO I = 0 TO 7;
+    CALL PUTCH(CH);
+    S = S + 1;
+END;
+CALL PUTCH(10);                     /* ABCDEFGH */
+
+CALL PUTDEC(SUM(.TABLE, 4));        /* 0 + 100 + 200 + 300 = 600 */
+CALL PRINT(.('NEXT VALUE', 10, 0)); /* a constant list */
+CALL PRINT(.('X', 0));
+CALL PUTCH(10);                     /* X */
+W = .SUM;                           /* the address of a procedure */
+CALL PUTDEC(W = .SUM);              /* 255 */
+CALL PUTDEC(.SUM <> .PRINT);        /* 255 */
+END PTRS;

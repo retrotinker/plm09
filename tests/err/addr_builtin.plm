@@ -1,0 +1,4 @@
+T: DO;
+DECLARE W ADDRESS, A(3) BYTE;
+W = .LENGTH(A);
+END T;
