@@ -17,7 +17,7 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 - A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
-- `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex. `docs/tex/footnotehyper.sty` is a stand-in for a package this TeX installation lacks. The PDFs are committed, so when compiler or simulator behavior, options or messages change, update the `.md` manual as well as README.md, and rebuild.
+- `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
 
 The suites are run by `tests/run_tests.sh <suite>`. On a mismatch it prints a diff and leaves `*.diff` files and every intermediate (`.asm`, `.lst`, `.s19`, stdout, stderr) in `build/tests/`. There is no single-test switch. To repeat one test by hand, use the same commands the runner uses:
 ```
@@ -56,6 +56,16 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 | 124 | instruction limit reached |
 | 125 | illegal opcode, or SWI/SWI2/SWI3/SYNC/CWAI (registers are dumped to stderr) |
 | 2 | usage or load error |
+
+## Documentation rule
+
+Every changed or added feature must update the matching files in `docs/`, in the same commit as the feature:
+- `docs/plmc.md`: compiler options, language, semantics, diagnostics, hooks, code generation
+- `docs/sim6809.md`: simulator options, machine, CPU behavior, I/O, tracing
+- `docs/DESIGN.md`: architecture, repository layout, test suites, milestones and differences from the plan
+- `README.md` as well, whenever anything users see changes
+
+Then run `make docs` and commit the regenerated PDFs. The manuals quote real output and messages, so take them from actual runs and check them against the code (for example `plmc --help`, and the `error_at`/`unsupported` strings in `src/`).
 
 ## Architecture
 

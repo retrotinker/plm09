@@ -322,7 +322,8 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | `INITIAL` and `DATA` | `initialized data is not supported` |
 | the address-of operator `.X` | `the address-of operator '.' is not supported` |
 | iterative `DO I = 1 TO 10` and `DO CASE` | `iterative DO is not supported`, `DO CASE is not supported` |
-| `GOTO`, `GO TO`, labels on other statements | `GOTO is not supported`, ... |
+| `GOTO`, `GO TO` | `GOTO is not supported` |
+| a label on anything but `DO` | `a label on this statement (only DO blocks may be labeled) is not supported` |
 | `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
