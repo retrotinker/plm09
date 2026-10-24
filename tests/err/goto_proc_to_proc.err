@@ -1,0 +1,1 @@
+4:6: error: a GOTO out of a procedure must go to a label at the outer level of the main program

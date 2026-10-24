@@ -22,6 +22,7 @@
 
 Vec sema_vars;      /* Symbol*: every variable, for the data section */
 Vec sema_procs;     /* Proc*: every procedure, in declaration order */
+int sema_goto_out;  /* some GOTO leaves a procedure */
 
 static const char *const register_names[] = {
     "A", "B", "D", "X", "Y", "U", "S", "PC", "CC", "DP", "PCR",
@@ -108,6 +109,8 @@ static void check_expr(Expr *e, Scope *scope)
         if (!scope_lookup(scope, e->name) && check_builtin(e, scope))
             break;
         sym = e->sym = lookup(scope, e->name, e->loc);
+        if (sym->kind == SYM_LABEL)
+            error_at(e->loc, "%s is a label, not a variable or procedure", e->name);
         if (sym->kind == SYM_VAR) {
             if (e->kind == E_CALL) {
                 /* NAME(i) on an array is an element, not a call */
@@ -158,7 +161,8 @@ static void check_expr(Expr *e, Scope *scope)
     case E_INDEX:       /* only assignment targets arrive here already indexed */
         sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind != SYM_VAR)
-            error_at(e->loc, "cannot assign to procedure %s", e->name);
+            error_at(e->loc, "cannot assign to %s %s",
+                     sym->kind == SYM_LABEL ? "label" : "procedure", e->name);
         if (!sym->dim)
             error_at(e->loc, "%s is not an array", e->name);
         check_expr(e->lhs, scope);
@@ -280,9 +284,49 @@ static void declare_proc(Proc *p, Scope *scope)
 
 /* ------------------------------------------------------------- statements */
 
+/* Labels are declared implicitly in the smallest enclosing block (PL/M-80
+   manual 6.3.1, 9.3) and may be used before their definition, so each
+   block's labels are collected before its declarations (procedure bodies)
+   and statements are checked.  An IF
+   is not a block; every DO is, and its own labels belong outside it. */
+static void collect_labels(Stmt *s, Scope *scope)
+{
+    for (int i = 0; i < s->labels.len; i++) {
+        Expr *l = s->labels.items[i];
+        Symbol *sym = scope_define(scope, l->name, SYM_LABEL, l->loc);
+        sym->owner = scope->proc;
+        l->sym = sym;
+    }
+    if (s->kind == S_IF) {
+        collect_labels(s->then_s, scope);
+        if (s->else_s)
+            collect_labels(s->else_s, scope);
+    }
+}
+
+static void check_goto(Stmt *s, Scope *scope)
+{
+    Expr *l = s->expr;
+    Symbol *sym = l->sym = lookup(scope, l->name, l->loc);
+
+    if (sym->kind != SYM_LABEL)
+        error_at(l->loc, "%s is not a label", l->name);
+    if (sym->owner == scope->proc)
+        return;                         /* a jump within one procedure (or main) */
+    /* leaving a procedure: only to the outer level of the main program */
+    if (sym->owner || sym->scope_id != 0)
+        error_at(l->loc, "a GOTO out of a procedure must go to a label at the outer "
+                 "level of the main program");
+    s->goto_out = 1;
+    sema_goto_out = 1;
+}
+
 static void check_block(Block *b, Scope *scope)
 {
     b->scope = scope;
+    /* labels first: procedures declared in this block may GOTO them */
+    for (int i = 0; i < b->stmts.len; i++)
+        collect_labels(b->stmts.items[i], scope);
     for (int i = 0; i < b->decls.len; i++) {
         Decl *d = b->decls.items[i];
         if (d->kind == D_VAR)
@@ -318,7 +362,8 @@ static void check_stmt(Stmt *s, Scope *scope)
             }
             Symbol *sym = t->sym = lookup(scope, t->name, t->loc);
             if (sym->kind != SYM_VAR)
-                error_at(t->loc, "cannot assign to procedure %s", t->name);
+                error_at(t->loc, "cannot assign to %s %s",
+                         sym->kind == SYM_LABEL ? "label" : "procedure", t->name);
             t->type = sym->type;
         }
         break;
@@ -340,11 +385,11 @@ static void check_stmt(Stmt *s, Scope *scope)
             check_stmt(s->else_s, scope);
         break;
     case S_DO:
-        check_block(s->block, s->block->decls.len ? scope_new(scope, cur) : scope);
+        check_block(s->block, scope_new(scope, cur));   /* every DO is a block */
         break;
     case S_WHILE:
         check_expr(s->expr, scope);
-        check_block(s->block, scope);
+        check_block(s->block, scope_new(scope, cur));
         break;
     case S_ITER: {
         Expr *v = s->var;
@@ -357,12 +402,15 @@ static void check_stmt(Stmt *s, Scope *scope)
         check_expr(s->to, scope);
         if (s->by)
             check_expr(s->by, scope);
-        check_block(s->block, scope);
+        check_block(s->block, scope_new(scope, cur));
         break;
     }
     case S_CASE:
         check_expr(s->expr, scope);
-        check_block(s->block, scope);
+        check_block(s->block, scope_new(scope, cur));
+        break;
+    case S_GOTO:
+        check_goto(s, scope);
         break;
     case S_RETURN:
         if (!cur)

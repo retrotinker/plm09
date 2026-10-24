@@ -39,7 +39,8 @@ include path. Four hooks files come with plmc:
 * `LITERALLY` macros, scoped like other declarations.
 * Pointers: `BASED` variables and the address-of (dot) operator `.X`.
 * `IF`/`THEN`/`ELSE`, `DO` blocks with their own declarations, `DO WHILE`
-  and iterative `DO I = ... TO ... BY ...` loops, `DO CASE`, `HALT`.
+  and iterative `DO I = ... TO ... BY ...` loops, `DO CASE`, labels and
+  `GOTO`, `HALT`.
 * Procedures: typed and untyped, with parameters, nested inside each other, and
   `EXTERNAL` procedures written in assembly.
 * Error messages that give the file, line and column. Every unsupported PL/M
@@ -383,15 +384,64 @@ convention is described under [Hooks].
 | Return | `RETURN;` or `RETURN expression;` (inside procedures only) |
 | Halt | `HALT;` stops the program through the hooks' `PLM_HALT` |
 | Empty | `;` |
+| Jump | `GOTO label;` or `GO TO label;` (see [Labels and GOTO]) |
 
 * **ELSE:** an `ELSE` belongs to the nearest `IF` that doesn't already have
   one. To put several statements under `THEN` or `ELSE`, wrap them in
   `DO; ... END;`.
-* **Labels:** only `DO` blocks may be labeled, and the label exists only so
-  that `END` can be checked against it.
+* **Labels:** any executable statement may carry labels, `L1: L2: stmt`.
+  `END name` after a `DO` block must match one of the DO's labels. See
+  [Labels and GOTO].
 * **Loop and case blocks:** `DO WHILE`, iterative `DO` and `DO CASE` blocks
   may not contain declarations at their top level. A simple `DO` block inside
   them may.
+
+## Labels and GOTO
+
+```
+        I = 0;
+AGAIN:  I = I + 1;
+        IF I < 10 THEN GOTO AGAIN;
+
+        DO WHILE 1;
+            IF DONE THEN GOTO FINISHED;     /* leave the loop */
+            ...
+        END;
+FINISHED: ;
+```
+
+**Labels** (PL/M-80 manual 5.3, 9.3):
+
+* **Where:** a label can be put on any executable statement, and a statement
+  can have several (`L1: L2: N = 0;`). A labeled null statement `L: ;` marks
+  a place, for example just before an `END`. Declarations and procedures
+  can't be labeled.
+* **Scope:** a label belongs to the **smallest block** that contains it.
+  Every `DO` block counts as a block (simple, WHILE, iterative and CASE), and
+  so does every procedure, but an `IF` does not.
+  * A label may be used **before** it is defined.
+  * The same name can be a label in two different blocks.
+  * A label shares the block's names with its variables and procedures, so
+    a clash is an error.
+* **Labels on a DO:** a label on a `DO` statement belongs to the enclosing
+  block, not to the DO's own block. So `GOTO L` to the label of
+  `L: DO; ... END;` runs the whole block again.
+* **The program's name:** the label on the program's first `DO` is outside
+  every block, and can't be a GOTO target.
+
+**GOTO** transfers control to a label that is visible from where the GOTO is:
+
+* **Allowed:** a label in the same block, or in any block that encloses it.
+  This lets you leave loops, `DO CASE` blocks and nested blocks early.
+* **Not allowed:** jumping **into** a block. Its labels aren't visible from
+  outside, so this is reported as `L is not declared`.
+* **Leaving a procedure:** a GOTO in a procedure may jump out of it, even
+  through several nested calls, but **only to a label at the outer level of
+  the main program**. Anything else is an error. plmc then discards
+  everything those calls left on the stack, which is safe because procedures
+  keep their parameters and locals in fixed storage.
+
+`GO TO`, written as two words, is the same as `GOTO`.
 
 ## Iterative DO
 
@@ -531,8 +581,6 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | an implicit dimension, `DECLARE X(*) BYTE` (only meaningful with `INITIAL`/`DATA`) | `an implicit dimension '(*)' is not supported` |
 | `STRUCTURE`, `LABEL` declarations | `... is not supported` |
 | `INITIAL` and `DATA` | `initialized data is not supported` |
-| `GOTO`, `GO TO` | `GOTO is not supported` |
-| a label on anything but `DO` | `a label on this statement (only DO blocks may be labeled) is not supported` |
 | `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
@@ -579,6 +627,10 @@ next multiple of 8 plus 1.
 | `strings are limited to 255 characters` | a string over 255 characters |
 | `strings longer than 2 characters are not supported` | a long string used as a value |
 | `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, BASED, or undeclared |
+| `L is not a label` | `GOTO X` where X is a variable or procedure |
+| `a GOTO out of a procedure must go to a label at the outer level of the main program` | the target is in an enclosing procedure, or in a block of the main program |
+| `a label must be followed by a statement (use 'L: ;')` | a label right before `END` |
+| `L is a label, not a variable or procedure`, `cannot assign to label L` | a label used as a value |
 | `P, the base of X, is not declared` | `BASED` names an undeclared base |
 | `the base of a BASED variable must be an ADDRESS scalar that is not itself BASED` | base is BYTE, an array, a procedure, or BASED |
 | `parameter X cannot be BASED`, `a LITERALLY declaration cannot be BASED` | `BASED` in the wrong place |
@@ -946,6 +998,13 @@ listing and simulator traces easy to follow.
     `FDB case-table` *offsets*. Offsets rather than addresses keep the code
     position-independent, so the same sequence works in `--os9` modules.
   * Each case ends with `LBRA` past the block.
+* **GOTO:**
+  * Every statement leaves the stack as it found it, so a GOTO within a
+    procedure, or within the main program, is just `LBRA`.
+  * If any GOTO leaves a procedure, `PLM_MAIN` saves its stack pointer in
+    `RT_MAINS` on entry (`STS RT_MAINS`). Such a GOTO is
+    `LDS RT_MAINS` / `LBRA label`, which discards the return addresses and
+    intermediate values of the calls it leaves.
 * **BASED variables:**
   * The base is loaded into X (`LDX P`, or `LDX P,U`), and the variable is
     used as `,X` or `k,X`, so a store needs no extra registers.
@@ -981,6 +1040,7 @@ listing and simulator traces easy to follow.
   | `V_X` | variable `X` of the program |
   | `Vn_X` | variable or parameter `X` of nested scope *n* |
   | `P_X`, `Pn_X` | procedure `X` |
+  | `G_X`, `Gn_X` | statement label `X` (in scope *n*) |
   | `Lnnn` | compiler-generated label |
   | `RT_*` | runtime routine or data |
   | `PLM_*` | entry point the hooks provide |
@@ -1032,7 +1092,7 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), `HALT`, `--org` and `--vectors` |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, and pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |

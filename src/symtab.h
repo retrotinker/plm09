@@ -4,7 +4,7 @@
 
 #include "ast.h"
 
-typedef enum SymKind { SYM_VAR, SYM_PROC } SymKind;
+typedef enum SymKind { SYM_VAR, SYM_PROC, SYM_LABEL } SymKind;
 
 /* where a variable lives; only ST_STATIC is generated today.  ST_FRAME is
    reserved for REENTRANT procedures (U-relative slots). */
@@ -22,6 +22,7 @@ typedef struct Symbol {
     int is_param;
     struct Symbol *base;    /* BASED variable: its base (an ADDRESS scalar) */
     Proc *proc;             /* SYM_PROC */
+    Proc *owner;            /* SYM_LABEL: enclosing procedure, NULL in main */
     struct Symbol *next;    /* next symbol in the same scope */
 } Symbol;
 

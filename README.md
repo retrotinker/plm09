@@ -119,7 +119,10 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - Each parameter must be declared in the procedure body.
   - Procedures may be nested, and a nested procedure can see the variables of the procedures around it.
   - A typed procedure with no parameters is called just by naming it in an expression.
-- **Labels:** `DO` blocks may be labeled, and `END label` is checked against the label.
+- **Labels and GOTO:**
+  - Any statement may be labeled (`L1: L2: stmt`), and `GOTO L` / `GO TO L` jumps to a label in the same block or an enclosing one (never into a block).
+  - A GOTO out of a procedure may only go to the outer level of the main program; the stack is reset.
+  - `END name` after a DO is checked against its labels.
 
 **Semantics** (following PL/M-80)
 - **Unsigned:** all arithmetic and comparisons are unsigned.
@@ -139,7 +142,6 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 **Not supported yet:**
 - structures
 - `INITIAL` and `DATA`
-- `GOTO` and labels on other statements
 - `REENTRANT`, `INTERRUPT`, `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)
 - embedded assignment `:=`
@@ -242,6 +244,7 @@ lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
   | `V_X` | global variable |
   | `Vn_X` | variable in nested scope n |
   | `P_X` / `Pn_X` | procedure |
+  | `G_X` / `Gn_X` | statement label |
   | `Lnnn` | compiler-generated label |
   | `RT_*` | runtime routine |
   | `PLM_*` | hook entry point |

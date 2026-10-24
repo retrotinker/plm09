@@ -1,0 +1,9 @@
+T: DO;
+DO;
+P: PROCEDURE;
+GOTO L;
+END P;
+CALL P;
+L: ;
+END;
+END T;

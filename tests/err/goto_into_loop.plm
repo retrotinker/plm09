@@ -1,0 +1,7 @@
+T: DO;
+DECLARE I BYTE;
+GOTO L;
+DO I = 1 TO 2;
+L: ;
+END;
+END T;

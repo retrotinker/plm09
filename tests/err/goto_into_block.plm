@@ -1,0 +1,6 @@
+T: DO;
+GOTO L;
+DO;
+L: ;
+END;
+END T;

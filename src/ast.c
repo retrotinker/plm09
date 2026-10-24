@@ -103,6 +103,8 @@ static void dump_block(const Block *b, int depth);
 static void dump_stmt(const Stmt *s, int depth)
 {
     indent(depth);
+    for (int i = 0; i < s->labels.len; i++)
+        printf("%s: ", ((Expr *)s->labels.items[i])->name);
     switch (s->kind) {
     case S_ASSIGN:
         printf("ASSIGN");
@@ -133,20 +135,16 @@ static void dump_stmt(const Stmt *s, int depth)
         }
         break;
     case S_DO:
-        printf("DO%s%s\n", s->label ? " " : "", s->label ? s->label : "");
+        printf("DO\n");
         dump_block(s->block, depth + 1);
         break;
     case S_WHILE:
-        if (s->label)
-            printf("%s: ", s->label);
         printf("DO WHILE ");
         dump_expr(s->expr);
         putchar('\n');
         dump_block(s->block, depth + 1);
         break;
     case S_ITER:
-        if (s->label)
-            printf("%s: ", s->label);
         printf("DO %s = ", s->var->name);
         dump_expr(s->from);
         printf(" TO ");
@@ -159,8 +157,6 @@ static void dump_stmt(const Stmt *s, int depth)
         dump_block(s->block, depth + 1);
         break;
     case S_CASE:
-        if (s->label)
-            printf("%s: ", s->label);
         printf("DO CASE ");
         dump_expr(s->expr);
         putchar('\n');
@@ -183,6 +179,9 @@ static void dump_stmt(const Stmt *s, int depth)
         break;
     case S_NULL:
         printf("NULL\n");
+        break;
+    case S_GOTO:
+        printf("GOTO %s\n", s->expr->name);
         break;
     }
 }

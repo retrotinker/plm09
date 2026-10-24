@@ -43,6 +43,7 @@ typedef struct Expr {
 
 typedef enum StmtKind {
     S_ASSIGN, S_CALL, S_IF, S_DO, S_WHILE, S_ITER, S_CASE, S_RETURN, S_HALT, S_NULL,
+    S_GOTO,
 } StmtKind;
 
 struct Block;
@@ -56,7 +57,8 @@ typedef struct Stmt {
     Expr *var, *from, *to, *by;     /* S_ITER: DO var = from TO to [BY by] */
     struct Stmt *then_s, *else_s;   /* S_IF */
     struct Block *block;    /* S_DO, S_WHILE, S_ITER; S_CASE: stmts = cases */
-    char *label;            /* S_DO: optional label */
+    Vec labels;             /* Expr* (E_NAME): labels on this statement */
+    int goto_out;           /* S_GOTO (expr = label) leaving a procedure */
     struct Proc *proc;      /* S_RETURN: enclosing procedure, set by sema */
 } Stmt;
 

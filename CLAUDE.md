@@ -114,7 +114,8 @@ The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` node
   - A name being *defined* must be read with `next_raw_ident()`, and tested with `raw_type()`, never with an expanding peek. Otherwise an outer literal would be substituted for it.
   - The parser has its own scope stack (`lit_push`/`lit_pop`/`declare_name`) for literals and the names that hide them.
   - Strings are `T_STRING` tokens: one or two characters make a constant, and longer ones are only valid as LITERALLY text.
-- **Unsupported features** (GOTO, STRUCTURE, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (STRUCTURE, INITIAL, and so on) are rejected in the parser with "X is not supported".
+- **Labels:** any statement can carry labels (`Stmt.labels`). Every DO body is its own scope, and `collect_labels()` must run before a block's declarations and statements are checked, because labels may be used before they are defined, even from procedures.
 - **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST` into constants. Assignment targets are parsed as `E_INDEX` directly.
 - **Declaration order:** sema processes declarations in source order (declare before use), which is also how recursion stays detectable. A procedure's name is visible inside its own body.
 - **Output of sema:** it gives every `Expr` a `type`, resolves `sym`, sets `Stmt.proc` for RETURN, and fills `sema_vars` (the data section) and `sema_procs` (the order procedures are emitted in).
@@ -158,6 +159,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 | `V_X` | global variable |
 | `Vn_X` | variable local to procedure scope n |
 | `P_X` | procedure |
+| `G_X` / `Gn_X` | statement label |
 | `Lnnn` | compiler label |
 | `RT_*` | runtime routine |
 | `PLM_*` | hook entry point |
@@ -172,6 +174,8 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 6. `END RT_START`
 
 The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
+
+**GOTO in codegen:** within a procedure (or main) a GOTO is just `LBRA`, because statements leave the stack balanced. A GOTO out of a procedure (`Stmt.goto_out`) must `LDS RT_MAINS`, which `PLM_MAIN` saves at entry when `sema_goto_out` is set. Keep that invariant if you add anything that leaves data on the stack across statements.
 
 **BASED and `.` in codegen:**
 - BASED variables are never `fixed_location()`. They are reached through `based_location()` / `gen_base_x()`, which loads X with the base's value, or through `gen_elem_offset()`.

@@ -653,6 +653,8 @@ static void gen_stmt(const Stmt *s)
 {
     if (s->kind != S_DO)
         emit_source(s->loc);
+    for (int i = 0; i < s->labels.len; i++)
+        fprintf(out, "%s\n", ((Expr *)s->labels.items[i])->sym->asm_name);
 
     switch (s->kind) {
     case S_ASSIGN: {
@@ -724,6 +726,14 @@ static void gen_stmt(const Stmt *s)
             gen_as(s->expr, width(s->proc->ret));
         emit("RTS");
         break;
+    case S_GOTO:
+        /* Statements leave the stack balanced, so a jump within a procedure
+           needs nothing else.  Leaving a procedure (only to the main
+           program's outer level) restores the main program's S. */
+        if (s->goto_out)
+            emit("LDS\t%s", var_ref("RT_MAINS", 0));
+        emit("LBRA\t%s", s->expr->sym->asm_name);
+        break;
     case S_HALT:
         emit_jump("PLM_HALT");
         break;
@@ -741,6 +751,8 @@ static void gen_block(const Block *b)
 static void emit_variables(void)
 {
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
+    if (sema_goto_out)
+        fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
         unsigned n = (v->dim ? (unsigned)v->dim : 1) * (v->type == TY_BYTE ? 1 : 2);
@@ -751,6 +763,8 @@ static void emit_variables(void)
 static void emit_code(const Program *prog)
 {
     fprintf(out, "\n; program %s\nPLM_MAIN\n", prog->name);
+    if (sema_goto_out)
+        emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
     gen_block(prog->body);
     emit("RTS");
 

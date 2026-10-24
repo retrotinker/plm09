@@ -1,0 +1,11 @@
+PROGRAM G
+  DECLARE X BYTE
+  A: B: ASSIGN X = 0
+  IF X
+  THEN
+    C: GOTO A
+  ELSE
+    GOTO B
+  L: DO
+    GOTO L
+  D: NULL

@@ -1,0 +1,10 @@
+/* labels on any statement, GOTO and GO TO */
+G: DO;
+DECLARE X BYTE;
+A: B: X = 0;
+IF X THEN C: GOTO A; ELSE GO TO B;
+L: DO;
+    GOTO L;
+END L;
+D: ;
+END G;

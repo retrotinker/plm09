@@ -82,6 +82,12 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
 **Program structure**
 - A program is `NAME: DO; decls stmts END [NAME];`, optionally followed by `EOF`.
 - Declarations: `DECLARE X BYTE`, `DECLARE (A,B) ADDRESS`, `DECLARE A(10) BYTE`, `DECLARE (A,B)(5) ADDRESS`, `DECLARE X LITERALLY 'text'`, or a comma-separated list. They must precede the statements of their block.
+- Labels and GOTO (manual 5.3, 9.1–9.3):
+  - Any executable statement may carry labels (`A: B: stmt`).
+  - A label is implicitly declared in the smallest enclosing block. Every DO block, of any kind, and every procedure is a block; an IF isn't.
+  - Labels may be used before their definition.
+  - A label on a DO statement belongs to the enclosing block.
+  - A GOTO may target any visible label, so not one inside a nested block. Leaving a procedure is allowed only to a label at the outer level of the main program.
 - BASED variables (manual 3.6.3):
   - `X BASED P` must come right after the name, and the base must be an already declared ADDRESS scalar that isn't BASED.
   - A BASED variable has no storage; every reference uses P's value at that moment.
@@ -165,7 +171,6 @@ Operators group left to right.
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
 - `(*)` dimensions, STRUCTURE, LABEL declarations
 - INITIAL/DATA
-- GOTO
 - REENTRANT, INTERRUPT, PUBLIC
 - PLUS/MINUS, `:=`, ENABLE/DISABLE
 
@@ -190,6 +195,16 @@ The full list of messages is in `plmc.md`.
 - If the condition's root is a relational, emit the compare followed by a long branch on the inverse condition.
 - Otherwise use `LSRB` + `LBCC`.
 - Statement control flow uses long branches (`LBxx`/`LBRA`).
+
+**Labels and GOTO:**
+- **Parser:** a statement's labels are read raw into `Stmt.labels` (each an `E_NAME`). Any of a DO's labels can close it with `END`. Literal scopes are pushed for every DO block.
+- **Sema:**
+  - Every DO body gets its own `Scope`.
+  - `check_block()` first runs `collect_labels()` over the block's statements, descending into IF branches but not into nested blocks, so labels exist before the block's procedure bodies and statements are checked.
+  - Labels are `SYM_LABEL` symbols with `owner` = the enclosing procedure; their assembler names are `G_X` / `Gn_X`.
+  - `check_goto()` resolves the target through normal scope lookup, so labels in nested blocks are invisible. If the label's owner differs from the current procedure, it must be in scope 0 (the main program's outer level). Such a jump sets `Stmt.goto_out` and `sema_goto_out`.
+  - A label/declaration clash is reported at the label.
+- **Codegen:** labels are emitted before their statement's code, and a GOTO is `LBRA`. With `sema_goto_out`, `PLM_MAIN` starts with `STS RT_MAINS`, and a `goto_out` GOTO does `LDS RT_MAINS` first.
 
 **BASED variables and `.`:**
 - `fixed_location()` excludes BASED variables. `based_location()` covers BASED scalars and constant-subscript elements, which are reached as `k,X` after `gen_base_x()` has loaded X with the base's value (`LDX P` / `LDX P,U`). Loading X doesn't disturb D, so stores need no push.
@@ -244,6 +259,7 @@ The full list of messages is in `plmc.md`.
 - global variables `V_X`
 - variables and parameters of nested scope n: `Vn_X`
 - procedures `P_X` / `Pn_X`
+- statement labels `G_X` / `Gn_X`
 - compiler labels `Lnnn`
 - runtime routines and data `RT_*`
 - fixed hook entry points `PLM_*`
@@ -427,9 +443,10 @@ How the nitros9 suite works:
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
 - LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
 - BASED variables and the dot operator: the run test `based`, pointer statements in the fuzz generator, a parse golden and error tests
+- labels and GOTO: the run test `goto` (including 10000 GOTOs out of three nested calls, which crashes if the stack isn't reset), a parse golden and error tests
 
 ## Known gaps
-- **Language:** STRUCTURE, INITIAL/DATA (and so `(*)` dimensions), GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** STRUCTURE, INITIAL/DATA (and so `(*)` dimensions), LABEL declarations (and so PUBLIC/EXTERNAL labels), REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

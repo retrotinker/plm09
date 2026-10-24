@@ -539,6 +539,24 @@ static void parse_end(const char *label, const char *what)
     expect(T_SEMI);
 }
 
+/* END [name] ; for a DO block -- name must be one of its labels */
+static void parse_end_labels(const Vec *labels)
+{
+    expect(K_END);
+    if (raw_type(0) == T_IDENT) {
+        Token id = next_raw_ident();
+        if (!labels->len)
+            error_at(id.loc, "END %s does not match an unlabeled DO block", id.text);
+        int found = 0;
+        for (int i = 0; i < labels->len; i++)
+            found |= !strcmp(((Expr *)labels->items[i])->name, id.text);
+        if (!found)
+            error_at(id.loc, "END %s does not match DO block %s", id.text,
+                     ((Expr *)labels->items[labels->len - 1])->name);
+    }
+    expect(T_SEMI);
+}
+
 /* name: PROCEDURE [(params)] [type] [EXTERNAL] ; block END [name] ; */
 static Proc *parse_procedure(void)
 {
@@ -591,22 +609,27 @@ static Proc *parse_procedure(void)
 static Stmt *parse_stmt(void);
 
 /* DO ; block END   or   DO WHILE expr ; stmts END  (DO already consumed) */
-static Stmt *parse_do(Loc loc, char *label)
+static Stmt *parse_do(Loc loc, const Vec *labels)
 {
     Token *t = peek();
     Stmt *s;
 
+    /* every DO block is a block: it scopes labels (and so literal names) */
     if (accept(K_WHILE)) {
         s = new_stmt(S_WHILE, loc);
         s->expr = parse_expr();
         expect(T_SEMI);
+        lit_push();
         s->block = parse_block(0);
+        lit_pop();
     } else if (accept(K_CASE)) {
         /* DO CASE expr; one statement per case */
         s = new_stmt(S_CASE, loc);
         s->expr = parse_expr();
         expect(T_SEMI);
+        lit_push();
         s->block = parse_block(0);
+        lit_pop();
     } else if (t->type == T_IDENT) {
         /* DO var = from TO to [BY by]; */
         Token id = next();
@@ -620,7 +643,9 @@ static Stmt *parse_do(Loc loc, char *label)
         if (accept(K_BY))
             s->by = parse_expr();
         expect(T_SEMI);
+        lit_push();
         s->block = parse_block(0);
+        lit_pop();
     } else {
         expect(T_SEMI);
         s = new_stmt(S_DO, loc);
@@ -628,8 +653,7 @@ static Stmt *parse_do(Loc loc, char *label)
         s->block = parse_block(1);
         lit_pop();
     }
-    s->label = label;
-    parse_end(label, "DO block");
+    parse_end_labels(labels);
     return s;
 }
 
@@ -665,21 +689,35 @@ static Stmt *parse_assignment(void)
     return s;
 }
 
+static Stmt *parse_unlabeled(const Vec *labels);
+
+/* [label: ...] statement -- labels are read raw (they are definitions) */
 static Stmt *parse_stmt(void)
 {
-    /* NAME: is a label, read raw; anything else may start with a literal */
-    if (raw_type(0) == T_IDENT && raw_type(1) == T_COLON) {
-        Token label = next_raw_ident();
-        next();
-        if (peek_type(0) == K_DO) {
-            next();
-            return parse_do(label.loc, label.text);
-        }
-        if (peek_type(0) == K_PROCEDURE)
-            error_at(label.loc, "declarations must come before statements");
-        unsupported(label.loc, "a label on this statement (only DO blocks may be labeled)");
-    }
+    Vec labels = { 0 };
 
+    while (raw_type(0) == T_IDENT && raw_type(1) == T_COLON) {
+        Token l = next_raw_ident();
+        Expr *e = new_expr(E_NAME, l.loc);
+        next();
+        e->name = l.text;
+        declare_name(l.text, NULL, l.loc);
+        vec_push(&labels, e);
+    }
+    if (labels.len) {
+        Loc at = ((Expr *)labels.items[0])->loc;
+        if (peek_type(0) == K_PROCEDURE || peek_type(0) == K_DECLARE)
+            error_at(at, "declarations must come before statements");
+        if (peek_type(0) == K_END || peek_type(0) == T_EOF)
+            error_at(peek()->loc, "a label must be followed by a statement (use 'L: ;')");
+    }
+    Stmt *s = parse_unlabeled(&labels);
+    s->labels = labels;
+    return s;
+}
+
+static Stmt *parse_unlabeled(const Vec *labels)
+{
     Token *t = peek();
     Loc loc = t->loc;
     Stmt *s;
@@ -715,7 +753,7 @@ static Stmt *parse_stmt(void)
         return s;
     case K_DO:
         next();
-        return parse_do(loc, NULL);
+        return parse_do(loc, labels);
     case K_RETURN:
         next();
         s = new_stmt(S_RETURN, loc);
@@ -733,9 +771,20 @@ static Stmt *parse_stmt(void)
         return new_stmt(S_NULL, loc);
     case K_DECLARE:
         error_at(loc, "declarations must come before statements");
-    case K_GO:
-    case K_GOTO:
-        unsupported(loc, "GOTO");
+    case K_GO:                              /* GO TO label; */
+        next();
+        expect(K_TO);
+        goto label_ref;
+    case K_GOTO: {                          /* GOTO label; */
+        next();
+    label_ref:;
+        Token id = expect(T_IDENT);
+        s = new_stmt(S_GOTO, loc);
+        s->expr = new_expr(E_NAME, id.loc);
+        s->expr->name = id.text;
+        expect(T_SEMI);
+        return s;
+    }
     case K_ENABLE:
     case K_DISABLE:
         unsupported(loc, "ENABLE/DISABLE");

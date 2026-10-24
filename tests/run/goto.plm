@@ -1,0 +1,96 @@
+/* GOTO and labels (PL/M-80 manual 5.3, 9.3).  Expected values in comments. */
+GOTOS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE (I, N) BYTE, (W, K, B) ADDRESS;
+
+P3: PROCEDURE BYTE;                 /* every third call leaves P3, P2 and P1 */
+    N = N + 1;                      /* at once, for a main-program label */
+    IF N = 3 THEN GOTO BAILOUT;
+    RETURN 1;
+END P3;
+
+P2: PROCEDURE ADDRESS;
+    DECLARE T ADDRESS;
+    T = 1000;
+    RETURN P3 * 2 + (T - 1);        /* (T - 1) is on the stack when P3 jumps */
+END P2;
+
+P1: PROCEDURE ADDRESS;
+    RETURN P2 + (K - K);
+END P1;
+
+I = 0;                              /* a loop made with GOTO */
+AGAIN: I = I + 1;
+IF I < 5 THEN GOTO AGAIN;
+CALL PUTDEC(I);                     /* 5 */
+GOTO SKIP;                          /* forward */
+CALL PUTDEC(999);
+SKIP: CALL PUTDEC(6);               /* 6 */
+
+N = 0;                              /* two labels on one statement */
+A1: A2: N = N + 1;
+IF N = 1 THEN GOTO A1;
+IF N = 2 THEN GO TO A2;
+CALL PUTDEC(N);                     /* 3 */
+
+DO I = 0 TO 100;                    /* leaving an iterative DO early */
+    IF I = 7 THEN GOTO FOUND;
+END;
+FOUND: CALL PUTDEC(I);              /* 7 */
+
+W = 0;                              /* leaving an endless DO WHILE from a DO CASE */
+DO WHILE 1;
+    W = W + 3;
+    DO CASE W AND 1;
+        ;
+        IF W > 20 THEN GOTO DONE1;
+    END;
+END;
+DONE1: CALL PUTDEC(W);              /* first odd multiple of 3 above 20: 21 */
+
+DO;                                 /* from an inner block to an enclosing one */
+    DECLARE X BYTE;
+    X = 1;
+    INNER: DO;
+        IF X THEN GOTO OUTSIDE;
+        CALL PUTDEC(888);
+    END INNER;
+    OUTSIDE: CALL PUTDEC(X + 10);   /* 11 */
+END;
+
+DO;                                 /* the same label name in two blocks */
+    GOTO HERE;
+    CALL PUTDEC(777);
+    HERE: CALL PUTDEC(1);           /* 1 */
+END;
+DO;
+    GOTO HERE;
+    HERE: CALL PUTDEC(2);           /* 2 */
+END;
+
+N = 0;                              /* the label of a DO is outside it: */
+RESTART: DO;                        /* GOTO RESTART runs the block again */
+    N = N + 1;
+    IF N < 3 THEN GOTO RESTART;
+END RESTART;
+CALL PUTDEC(N);                     /* 3 */
+
+IF N = 3 THEN T1: N = 10; ELSE T2: N = 20;
+CALL PUTDEC(N);                     /* 10 */
+IF N = 10 THEN GOTO T2;             /* into the ELSE branch above: N = 20, */
+CALL PUTDEC(N);                     /* then on after that IF, so 20 is printed */
+                                    /* twice: there, and here */
+
+K = 0;                              /* GOTO out of procedures, 10000 times: */
+B = 0;                              /* the stack must not grow */
+N = 0;
+RETRY: K = K + 1;
+IF K > 30000 THEN GOTO FINISH;
+W = P1;                             /* 1001 unless P3 bails out */
+GOTO RETRY;
+BAILOUT: B = B + 1;
+N = 0;
+GOTO RETRY;
+FINISH: CALL PUTDEC(B);             /* 30000 / 3 = 10000 */
+CALL PUTDEC(W);                     /* 2 + 999 = 1001 */
+END GOTOS;
