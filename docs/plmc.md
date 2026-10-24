@@ -21,12 +21,13 @@ needs: S-records, Disk BASIC `.BIN` files, raw images and so on.
 
 The compiler is not tied to any particular machine. Everything that depends on
 the hardware lives in a small **hooks file** that lwasm includes, chosen with an
-include path. Three hooks files come with plmc:
+include path. Four hooks files come with plmc:
 
 | Hooks | Target |
 |---|---|
 | `runtime/sim/` | `sim6809`, the headless simulator used by the test suite |
 | `runtime/coco/` | the Tandy Color Computer 1, 2 and 3 under Color BASIC |
+| `runtime/os9/` | OS-9 and NitrOS-9 (Level 1 and 2), for modules built with `--os9` |
 | `runtime/example/` | a template for a board with an MC6850 ACIA serial port |
 
 **Main features**
@@ -42,6 +43,8 @@ include path. Three hooks files come with plmc:
   feature is rejected with a clear message rather than misread.
 * Readable output: each source statement appears as a comment above the code
   generated for it.
+* With `--os9`, position-independent, reentrant OS-9 program modules that
+  run under OS-9 and NitrOS-9.
 
 # Building and quick start
 
@@ -92,12 +95,17 @@ plmc [options] file.plm
 | `-o FILE` | Write the assembly to *FILE*. The default is standard output. |
 | `--org ADDR` | Address where the program is loaded and starts. The default is `$0100`. |
 | `--vectors` | Also emit `ORG $FFFE` / `FDB RT_START`, setting the 6809 reset vector, for programs that run from ROM or straight from reset. |
+| `--os9` | Generate a position-independent OS-9 program module instead of a program for a fixed address. See [OS-9 modules]. |
+| `--stack N` | With `--os9`: bytes of stack to reserve in the module's data area (default 256, at least 32). |
+| `--name NAME` | With `--os9`: the module name (default: the PL/M program's name). |
 | `--tokens` | Print the token stream and stop. See [Inspecting the compiler's view]. |
 | `--ast` | Print the syntax tree and stop. |
 | `-h`, `--help` | Print a usage summary and exit. |
 
-The `--org` address can be written as decimal (`8192`), `0x2000`, `$2000`
-(quote it for the shell) or PL/M style `2000H`. It must fit in 16 bits.
+The `--org` address and `--stack` size can be written as decimal (`8192`),
+`0x2000`, `$2000` (quote it for the shell) or PL/M style `2000H`, and must fit
+in 16 bits. `--org` and `--vectors` can't be combined with `--os9`, and
+`--stack` and `--name` need `--os9`; violations are reported as errors.
 
 **Exit status**
 
@@ -371,6 +379,9 @@ next multiple of 8 plus 1.
 | `invalid digit`, `invalid number`, `number ... does not fit in 16 bits` | bad numeric constant |
 | `invalid character`, `unterminated comment`, `unterminated string`, `empty string` | lexical errors |
 | warning: `typed procedure F may reach its END without RETURN` | last statement is not `RETURN` or `HALT` |
+| `plmc: --org and --vectors cannot be used with --os9 ...` | OS-9 modules have no fixed address |
+| `plmc: --stack is only used with --os9`, `--name is only used with --os9` | option without `--os9` |
+| `plmc: bad --stack size ...`, `bad --name ...` | stack below 32 bytes, or an invalid module name |
 
 # Hooks
 
@@ -421,6 +432,9 @@ started the program (BASIC, a monitor or an operating system) with
   **D**.
 * **Registers:** a hook may change A, B, X, Y, U, DP and CC. Only S must be
   preserved. Keep DP at 0 if the hook calls code that relies on it.
+  **In `--os9` modules, U must be preserved too**, because it points at the
+  data area, and hooks must themselves be position-independent (see
+  [OS-9 modules]).
 * **Runtime routines:** hooks are assembled after `plm_rt.asm`, so they may
   call `RT_MUL16` and `RT_DIV16`.
 
@@ -435,7 +449,7 @@ POKE    LDX     4,S         ; first argument: ADDR
 
 ## Hooks provided
 
-All three hooks files implement the same procedures, so a program that uses
+All four hooks files implement the same procedures, so a program that uses
 only these runs unchanged on any of the targets:
 
 ```
@@ -447,15 +461,15 @@ EXIT:   PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE; END EXIT;
 
 `PUTDEC` prints a number in decimal followed by a newline.
 
-| | `runtime/sim` | `runtime/coco` | `runtime/example` |
-|---|---|---|---|
-| `PUTCH` | simulator I/O port | Color BASIC CHROUT; LF sent as CR | MC6850 ACIA, waits until ready to send |
-| `GETCH` | stdin; 0 at end of input | waits for a key (POLCAT); ENTER gives 13 | ACIA, waits for a character |
-| `PUTDEC` | simulator decimal port | via `RT_DIV16` and CHROUT | via `RT_DIV16`, ends with CR LF |
-| `EXIT`, end of program | simulator exit status | back to BASIC (status discarded) | stops in a loop |
-| `HALT` | exit status 0 | back to BASIC | stops in a loop |
-| extra | | `CLS` clears the screen | |
-| stack | `$FF00` | BASIC's | `$8000` |
+| | `runtime/sim` | `runtime/coco` | `runtime/os9` | `runtime/example` |
+|---|---|---|---|---|
+| `PUTCH` | simulator I/O port | Color BASIC CHROUT; LF sent as CR | `I$Write` to path 1; LF sent as CR | MC6850 ACIA, waits until ready to send |
+| `GETCH` | stdin; 0 at end of input | waits for a key (POLCAT); ENTER gives 13 | `I$Read` from path 0; 0 at end of file | ACIA, waits for a character |
+| `PUTDEC` | simulator decimal port | via `RT_DIV16` and CHROUT | via `RT_DIV16`, one `I$Write`, ends with CR | via `RT_DIV16`, ends with CR LF |
+| `EXIT`, end of program | simulator exit status | back to BASIC (status discarded) | `F$Exit` with the status | stops in a loop |
+| `HALT` | exit status 0 | back to BASIC | `F$Exit` with status 0 | stops in a loop |
+| extra | | `CLS` clears the screen | | |
+| stack | `$FF00` | BASIC's | in the data area (`--stack`) | `$8000` |
 
 ## Writing hooks for a new machine
 
@@ -465,6 +479,133 @@ Add any extra routines your programs need as further labels, and declare them
 in PL/M as `EXTERNAL`. The example file's `ACIA_BASE` and `RT_STACKTOP` are
 wrapped in `IFNDEF`, so they can also be overridden from the lwasm command
 line with `-D`.
+
+# OS-9 modules
+
+With `--os9`, plmc produces an **OS-9 program module** for Microware OS-9 and
+NitrOS-9, Level 1 or Level 2. Like every OS-9 command, the module can be
+loaded at any address and shared by several processes at once.
+
+```
+build/plmc --os9 -o sum.asm sum.plm
+lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
+```
+
+`lwasm -f os9` writes the finished module, with its header parity and CRC.
+Copy it to the `CMDS` directory of an OS-9 disk (with toolshed:
+`os9 copy sum disk.dsk,CMDS/sum` and `os9 attr -e -pe disk.dsk,CMDS/sum`),
+then run it from the shell like any other command:
+
+```
+OS9: sum
+55
+OS9: sum >/d0/result
+```
+
+`sim6809 --os9 sum` runs the module without OS-9, by emulating the system
+calls the hooks use (see the sim6809 manual).
+
+## What `--os9` changes {#os9-changes}
+
+**Position-independent code.** Calls are `LBSR` rather than `JSR`, and jumps
+are `LBRA` rather than `JMP`. Every other branch is already relative, so the
+module contains no absolute addresses.
+
+**Data in the process's data area.** OS-9 gives each process its own data
+area and points U at it.
+
+* **Variables:** declared as `RMB` offsets inside the module (which lwasm
+  allocates in the data area, not the module), and every access is
+  U-relative, as in `STB V_I,U`. Because the module never writes to itself,
+  it is reentrant.
+* **Order in the source:** variables come first, so lwasm knows their
+  offsets and uses short indexed forms.
+* **Hooks and stack:** the hooks' own buffers and the stack reserve follow
+  the code.
+
+**Startup.** `runtime/plm_crt0_os9.asm` keeps the stack, U and DP that OS-9
+set up, calls the program, and ends with `F$Exit`.
+
+**Module header.**
+
+| Field | Value |
+|---|---|
+| type/language | `$11` (Prgrm+Objct) |
+| attributes/revision | `$81` (ReEnt, revision 1) |
+| edition | 1 |
+| data size | variables + hook buffers + `--stack` bytes |
+| name | the PL/M program name, or `--name` |
+
+The beginning of the `SUM` example compiled with `--os9`:
+
+```
+        PRAGMA  6809
+        MOD     RT_EOM,RT_NAME,$11,$81,RT_START,RT_SIZE
+
+; variables (data area, U-relative)
+V_I     RMB     1
+V_TOTAL RMB     2
+
+RT_NAME FCS     /SUM/
+        FCB     1               ; edition
+        INCLUDE "plm_crt0_os9.asm"
+
+; program SUM
+PLM_MAIN
+; 4: TOTAL = 0;
+        LDB     #$00
+        CLRA
+        STD     V_TOTAL,U
+...
+RT_STACK RMB    256             ; stack space (--stack)
+RT_SIZE EQU     .               ; data area size
+        EMOD
+RT_EOM  EQU     *
+```
+
+## Module names
+
+OS-9 finds a command by the **module name** inside the file, and expects it
+to match the file name in `CMDS`. By default plmc uses the PL/M program name.
+
+* **Matching the file name:** use `--name` to give the module the name of the
+  file you'll install, for example `--name sum`.
+* **Avoiding clashes:** if a module with the same name is already in memory
+  (or in the boot file), OS-9 runs *that* module instead. A PL/M program
+  called `ECHO`, for instance, would run NitrOS-9's own `echo` command.
+  Choose a program name, or `--name`, that doesn't clash.
+
+Module names are 1 to 29 characters: a letter followed by letters, digits,
+`_`, `.` or `$`.
+
+## The OS-9 hooks
+
+`runtime/os9/plm_hooks.asm` provides `PUTCH`, `GETCH`, `PUTDEC` and `EXIT`.
+They use these system calls:
+
+| Hook | System call |
+|---|---|
+| `PUTCH`, `PUTDEC` | `I$Write` on path 1 (standard output) |
+| `GETCH` | `I$Read` on path 0 (standard input) |
+| `EXIT`, end of program, `HALT` | `F$Exit`, which gives the shell the exit status |
+
+* **Newlines:** OS-9 ends lines with CR, so `PUTCH(10)` is sent as CR and
+  `PUTDEC` ends its number with CR. Terminals add the line feed, and files
+  get standard OS-9 text. Programs written for the simulator therefore print
+  the same way under OS-9.
+* **End of input:** `GETCH` returns 0 at end of file (`E$EOF`).
+* **Errors:** any other I/O error ends the program with the OS-9 error code
+  as its exit status, which the shell reports as `ERROR #nnn`.
+* **Redirection:** standard input and output can be redirected as usual, for
+  example `sum <data >/d0/out`.
+
+**Rules for your own OS-9 hooks:**
+* **Calls and jumps:** use only relative ones (`BSR`/`LBSR`/`BRA`/`LBRA`, or
+  `JSR label,PCR`).
+* **Data:** put it in `RMB` storage and address it through U (`LEAX buf,U`).
+* **Registers:** preserve U and S.
+* **System calls:** use `OS9 F$xxx`, which lwasm assembles as `SWI2` plus the
+  function code.
 
 # Running on a Color Computer
 
@@ -524,6 +665,9 @@ V_X     RMB     1                     ; variables, parameters, locals
   S-record or `.BIN` files.
 * **Total size:** for a typical small program, the code is a few hundred bytes
   and the runtime about 70 bytes.
+
+With `--os9` the layout is that of an OS-9 module instead; see
+[What `--os9` changes](#os9-changes).
 
 ## Example
 
@@ -633,6 +777,8 @@ group of instructions.
 | `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow, input, procedures (including nested calls), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs with thousands of random expressions, checked against an independent C model of the typing rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
+| `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
+| `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |
 
 # Source code
@@ -644,5 +790,5 @@ group of instructions.
 | `src/parser.c`, `ast.c` | recursive-descent parser, syntax tree, `--ast` |
 | `src/symtab.c`, `sema.c` | scopes, name resolution, types, call checks, recursion detection |
 | `src/codegen.c` | assembly output |
-| `runtime/plm_crt0.asm`, `plm_rt.asm` | startup code, 16-bit multiply and divide |
-| `runtime/*/plm_hooks.asm` | hooks for the simulator, the CoCo, and the ACIA template |
+| `runtime/plm_crt0.asm`, `plm_crt0_os9.asm`, `plm_rt.asm` | startup code (normal and OS-9), 16-bit multiply and divide |
+| `runtime/*/plm_hooks.asm` | hooks for the simulator, the CoCo, OS-9, and the ACIA template |

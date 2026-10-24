@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # plm09 test runner.
 #   run_tests.sh sim|lex|parse|err|run|coco|xroar   run one suite
+#   run_tests.sh os9 [N]                   run tests + N fuzz seeds as OS-9 modules
 #   run_tests.sh fuzz [N]                  random expression tests
 #   run_tests.sh one FILE.plm              compile, assemble, simulate one program
 set -u
@@ -42,15 +43,24 @@ len_pairs() {
 }
 
 # sim test: assemble, run, compare stdout+rc with .out.  Optional first-line
-# "; SIMARGS: ..." passes extra simulator options.  Files whose listing has
+# "; SIMARGS: ..." passes extra simulator options.  os9_*.asm files are OS-9
+# modules: assembled with -f os9 and run with --os9.  Files whose listing has
 # LEN_BEGIN/LEN_END also get the trace-vs-listing instruction length check.
 sim_one() {    # $1 = asm, $2 = expected .out
     local name s19 lst args b e
     name=sim/$(basename "$1" .asm)
     s19=$OUT/$(basename "$1" .asm).s19
     lst=${s19%.s19}.lst
-    if ! assemble "$1" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; return; fi
     args=$(sed -n '1s/^; SIMARGS: *//p' "$1")
+    case $(basename "$1") in
+    os9_*)      # OS-9 module tests: assembled with -f os9, run with --os9
+        if ! lwasm -9 -f os9 --list="$lst" -o "$s19" "$1" 2>"$s19.err"; then
+            bad "$name" "lwasm failed"; cat "$s19.err"; return
+        fi
+        args="--os9 $args" ;;
+    *)
+        if ! assemble "$1" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; return; fi ;;
+    esac
     b=$(awk '/LEN_BEGIN/ { print $1; exit }' "$lst")
     e=$(awk '/LEN_END/ { print $1; exit }' "$lst")
     [ -n "$b" ] && args="$args -t"
@@ -93,12 +103,14 @@ suite_golden() {    # $1 = dir, $2 = plmc flag, $3 = expected extension
 }
 
 suite_err() {
-    local f name act want
+    local f name act want args
     for f in "$ROOT"/tests/err/*.plm; do
         [ -e "$f" ] || continue
         name=err/$(basename "$f" .plm)
         act=$OUT/err-$(basename "$f" .plm).stderr
-        if "$PLMC" -o "$OUT/err.asm" "$f" 2>"$act" >/dev/null; then
+        args=$(sed -n '1s/^\/\* PLMCARGS: \(.*\) \*\/$/\1/p' "$f")
+        # shellcheck disable=SC2086
+        if "$PLMC" $args -o "$OUT/err.asm" "$f" 2>"$act" >/dev/null; then
             bad "$name" "compiled without error"; continue
         fi
         want=$(head -1 "${f%.plm}.err")
@@ -213,6 +225,139 @@ suite_xroar() {
     done
 }
 
+# Every run test (and some fuzz programs) again as OS-9 modules: compiled
+# with --os9, assembled with -f os9 and the runtime/os9 hooks, and run by
+# sim6809 --os9 at two different module and data addresses, which must give
+# the same output.  The generated code must contain no absolute calls or
+# jumps and no variable reference that isn't U-relative, and (if toolshed is
+# installed) "os9 ident" must accept the module.
+OS9_PLACES=("" "--load 0x3123 --data 0x9E00")
+
+os9_build() {     # $1 = source, $2 = base path, [$3 = module name]; module in $2.mod
+    "$PLMC" --os9 ${3:+--name "$3"} -o "$2.asm" "$1" 2>"$2.plmc.err" || { cat "$2.plmc.err"; return 1; }
+    lwasm -9 -f os9 -I "$ROOT/runtime" -I "$ROOT/runtime/os9" \
+        --list="$2.lst" -o "$2.mod" "$2.asm" 2>"$2.err" || { cat "$2.err"; return 1; }
+}
+
+os9_check_pic() {   # $1 = name, $2 = generated .asm
+    if grep -nE '^[[:space:]]+(JSR|JMP)[[:space:]]' "$2" >"$2.pic"; then
+        bad "$1" "absolute JSR/JMP in --os9 output"; cat "$2.pic"; return 1
+    fi
+    if grep -nE '^[[:space:]]+[A-Z]+[[:space:]]+V[0-9]*_[A-Z0-9]+(\+1)?([[:space:]]|$)' "$2" >"$2.pic"; then
+        bad "$1" "variable reference that is not U-relative"; cat "$2.pic"; return 1
+    fi
+    if command -v os9 >/dev/null && ! os9 ident "${2%.asm}.mod" 2>&1 | grep -q 'CRC.*(Good)'; then
+        bad "$1" "os9 ident does not accept the module"; return 1
+    fi
+}
+
+os9_run() {    # $1 = name, $2 = module, $3 = input, $4 = expected; all places
+    local place out=${2%.mod}.stdout
+    for place in "${OS9_PLACES[@]}"; do
+        # shellcheck disable=SC2086
+        "$SIM" --os9 $place "$2" <"$3" >"$out" 2>"$out.err"
+        echo "rc=$?" >>"$out"
+        check_diff "$1 ${place:-(default addresses)}" "$out" "$4" || return 1
+    done
+}
+
+suite_os9() {
+    local f name base exp n=${1:-25} seed gen=$BUILD/exprgen
+    for f in "$ROOT"/tests/run/*.plm; do
+        [ -e "$f" ] || continue
+        grep -q '^/\* PLMCARGS:' "$f" && continue     # --org/--vectors tests
+        name=os9/$(basename "$f" .plm)
+        base=$OUT/os9-$(basename "$f" .plm)
+        os9_build "$f" "$base" || { bad "$name" "build failed"; continue; }
+        os9_check_pic "$name" "$base.asm" || continue
+        exp=$base.expected
+        cat "${f%.plm}.out" >"$exp"
+        echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
+        os9_run "$name" "$base.mod" "$( [ -e "${f%.plm}.in" ] && echo "${f%.plm}.in" || echo /dev/null)" "$exp" && ok
+    done
+    cc -std=c11 -O2 -Wall -Wextra -Werror -o "$gen" "$ROOT/tests/gen/exprgen.c" || { bad os9/fuzz "generator build"; return; }
+    for seed in $(seq 1001 $((1000 + n))); do
+        base=$OUT/os9-fuzz
+        "$gen" "$seed" "$base.plm" "$base.expected"
+        echo "rc=0" >>"$base.expected"
+        if os9_build "$base.plm" "$base" && os9_check_pic "os9/fuzz/$seed" "$base.asm" &&
+           os9_run "os9/fuzz/$seed" "$base.mod" /dev/null "$base.expected"; then
+            ok
+        else
+            cp "$base.plm" "$OUT/os9-fuzz-fail-$seed.plm"
+            bad "os9/fuzz/$seed" "program kept as $OUT/os9-fuzz-fail-$seed.plm"
+            break
+        fi
+    done
+}
+
+# The run tests as OS-9 modules on real NitrOS-9: all of them are put in
+# CMDS on a copy of a bootable NitrOS-9 Level 2 disk ($NITROS9_DISK), whose
+# startup script runs each one with output redirected to a file; XRoar boots
+# it on an emulated CoCo 3 ($COCO3_ROM is the Super Extended BASIC ROM), and
+# the output files are copied back off the disk and compared with .out.
+# Exit statuses are not visible this way and are not checked.  Skipped when
+# xroar, toolshed's os9 tool, the disk image or the ROM are missing.
+suite_nitros9() {
+    local disk=${NITROS9_DISK:-$HOME/coco/nitros9.os9}
+    local rom=${COCO3_ROM:-/usr/share/mame/roms/coco3.rom}
+    local img=$OUT/nitros9.os9 script=$OUT/nitros9-startup f name base lname n=0
+    for t in xroar os9; do
+        command -v $t >/dev/null || { echo "nitros9: $t not found (skipped)"; exit 0; }
+    done
+    [ -r "$disk" ] || { echo "nitros9: no NitrOS-9 disk image at $disk (set NITROS9_DISK; skipped)"; exit 0; }
+    [ -r "$rom" ] || { echo "nitros9: no CoCo 3 ROM at $rom (set COCO3_ROM; skipped)"; exit 0; }
+
+    cp "$disk" "$img"
+    : >"$OUT/nitros9-empty"
+    os9 copy -r "$OUT/nitros9-empty" "$img,empty.in" >/dev/null
+    # -x: keep going when a command fails (exit.plm exits with status 42)
+    printf -- '-x\r' >"$script"
+    for f in "$ROOT"/tests/run/*.plm; do
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        name=$(basename "$f" .plm)
+        # module and file both named t<name>: a module named after an
+        # existing command (ECHO) would run that command instead
+        lname=t$name
+        base=$OUT/nitros9-$name
+        os9_build "$f" "$base" "$lname" || { bad "nitros9/$name" "build failed"; continue; }
+        os9 copy -r "$base.mod" "$img,CMDS/$lname" >/dev/null &&
+            os9 attr -e -pe "$img,CMDS/$lname" >/dev/null || { bad "nitros9/$name" "os9 copy failed"; continue; }
+        if [ -e "${f%.plm}.in" ]; then
+            os9 copy -r -l "${f%.plm}.in" "$img,$name.in" >/dev/null
+            printf '%s </dd/%s.in >/dd/%s.out\r' "$lname" "$name" "$name" >>"$script"
+        else
+            printf '%s </dd/empty.in >/dd/%s.out\r' "$lname" "$name" >>"$script"
+        fi
+        n=$((n + 1))
+    done
+    # last: tdone reads $FF6A, which XRoar traps on to quit
+    if ! lwasm -9 -f os9 -o "$OUT/nitros9-done.mod" "$ROOT/tests/nitros9/done.asm" 2>"$OUT/nitros9-done.err" ||
+       ! os9 copy -r "$OUT/nitros9-done.mod" "$img,CMDS/tdone" >/dev/null ||
+       ! os9 attr -e -pe "$img,CMDS/tdone" >/dev/null; then
+        bad nitros9 "cannot build tests/nitros9/done.asm"; return
+    fi
+    printf 'echo done >/dd/done.txt\rtdone\r' >>"$script"
+    os9 copy -r -l "$script" "$img,startup" >/dev/null
+
+    # -timeout (emulated seconds, about 20x real time here) only guards
+    # against a hang; normally the trap on tdone's read ends the run
+    timeout 900 xroar -q -machine coco3 -extbas "$rom" -ui null -ao null -no-ratelimit \
+        -load-fd0 "$img" -type 'DOS\r' -trap read=0xFF6A -trap-timeout 1 \
+        -timeout $((600 + 150 * n)) >/dev/null 2>&1
+    if ! os9 dir "$img" 2>/dev/null | grep -qw done.txt; then
+        bad nitros9 "startup script did not finish (see $img)"; return
+    fi
+    for f in "$ROOT"/tests/run/*.plm; do
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        name=$(basename "$f" .plm)
+        base=$OUT/nitros9-$name
+        rm -f "$base.out"
+        os9 copy -l "$img,$name.out" "$base.out" >/dev/null 2>&1 || : >"$base.out"
+        check_diff "nitros9/$name" "$base.out" "${f%.plm}.out" && ok
+    done
+}
+
 suite_fuzz() {
     local n=${1:-200} gen=$BUILD/exprgen seed act
     if [ ! -e "$ROOT/tests/gen/exprgen.c" ]; then
@@ -243,12 +388,14 @@ case ${1:-} in
     run)   suite_run ;;
     fuzz)  suite_fuzz "${2:-200}" ;;
     coco)  suite_coco ;;
+    os9)   suite_os9 "${2:-25}" ;;
+    nitros9) suite_nitros9 ;;
     xroar) suite_xroar ;;
     one)
         act=$OUT/one.stdout
         build_and_run "$2" "$act" /dev/stdin || exit 1
         cat "$act"; exit 0 ;;
-    *) echo "usage: $0 sim|lex|parse|err|run|coco|xroar|fuzz [N]|one FILE" >&2; exit 2 ;;
+    *) echo "usage: $0 sim|lex|parse|err|run|coco|xroar|os9 [N]|nitros9|fuzz [N]|one FILE" >&2; exit 2 ;;
 esac
 
 if [ $((pass + fail)) -eq 0 ] && [ "$1" != fuzz ]; then

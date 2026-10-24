@@ -6,11 +6,14 @@ plan; sections now describe what was implemented, and
 the plan. The user manuals are `plmc.md` and `sim6809.md` (PDFs alongside).
 
 ## Context
-`plmc` is a Linux compiler, written in C11, for a "tiny core" subset of PL/M-80. It produces 6809 assembly that lwasm (lwtools 4.24) accepts. Everything machine-specific lives in a hooks file chosen through lwasm's include path. Hooks are provided for the simulator, the Tandy Color Computer under Color BASIC, and an MC6850 ACIA board (template).
+`plmc` is a Linux compiler, written in C11, for a "tiny core" subset of PL/M-80. It produces 6809 assembly that lwasm (lwtools 4.24) accepts. Everything machine-specific lives in a hooks file chosen through lwasm's include path. Hooks are provided for the simulator, the Tandy Color Computer under Color BASIC, OS-9/NitrOS-9, and an MC6850 ACIA board (template). With `--os9` the compiler emits position-independent, reentrant OS-9 program modules.
 
 Testing is automated with `sim6809`, a headless 6809 simulator kept in the same repo. The CoCo hooks are also tested automatically on an emulated CoCo 2 under XRoar (the `xroar` suite).
 
-**Status:** milestones M0–M10 are complete. Since then, the Color Computer hooks, their two test suites and the PDF manuals have been added.
+**Status:** milestones M0–M10 are complete. Since then, these have been added:
+- the Color Computer hooks, with their two test suites
+- the PDF manuals
+- OS-9 support (`--os9`, the OS-9 hooks, `sim6809 --os9`, and the `os9` and `nitros9` suites)
 
 Probes of lwasm 4.24 settled several design choices:
 - **lwasm defaults to 6309 mode.** Generated files contain `PRAGMA 6809` and every build passes `-9`.
@@ -26,14 +29,15 @@ The repository is `/home/linville/claude/plm09/`, a git repo with one commit per
 ```
 Makefile  README.md  CLAUDE.md  .gitignore
 src/      main.c util.[ch] lexer.[ch] ast.[ch] parser.[ch] symtab.[ch] sema.[ch] codegen.[ch]
-runtime/  plm_crt0.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
-          sim/plm_hooks.asm  coco/plm_hooks.asm  example/plm_hooks.asm   (chosen with -I)
-sim/      cpu6809.[ch] disasm.c srec.[ch] main.c
+runtime/  plm_crt0.asm  plm_crt0_os9.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
+          sim/ coco/ os9/ example/  plm_hooks.asm   (chosen with -I)
+sim/      cpu6809.[ch] disasm.c srec.[ch] os9.[ch] main.c
           tests/*.asm + *.out, harness.inc (check macros), gen_len_ops.py (length test)
 tests/    run_tests.sh
           lex/*.plm+.tok  parse/*.plm+.ast  err/*.plm+.err
           run/*.plm+.out[+.rc][+.in]
           coco/*.plm+.out[+.in][+.rc][+.screen][+.keys], coco/fakerom.asm
+          nitros9/done.asm (completion signal for the nitros9 suite)
           gen/exprgen.c (random expressions + C reference evaluator)
 tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
 docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
@@ -44,8 +48,9 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 | Target | Effect |
 |---|---|
 | `all` | builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror` |
-| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, fuzz |
-| `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test` | one suite each |
+| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, fuzz |
+| `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
+| `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |
 | `fuzz-test N=200` | the fuzz suite, with N seeds |
 | `run F=x.plm` | compile, assemble and run one program |
 | `docs` | build `docs/*.pdf` from the Markdown (pandoc + xelatex) |
@@ -59,7 +64,8 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
 ```
 - The runner compares stdout, plus a final `rc=N` line, with `.out` and `.rc` (default 0).
 - A first line `/* PLMCARGS: ... */` in the source passes extra compiler options.
-- Sim tests accept a first line `; SIMARGS: ...`.
+- Sim tests accept a first line `; SIMARGS: ...`. Sim tests named `os9_*.asm` are OS-9 modules, assembled with `-f os9` and run with `--os9`.
+- Err tests accept a `PLMCARGS` first line too, which is how the option-conflict errors are tested.
 - The run suite also checks that compiled code assembles with the `runtime/example` hooks.
 - Intermediate files and `.diff` files go to `build/tests/`.
 
@@ -208,11 +214,41 @@ Other details:
 - `-o FILE`
 - `--org ADDR` (decimal, `0x`, `$` or trailing `H`)
 - `--vectors`
+- `--os9`, `--stack N`, `--name NAME` (see [OS-9 modules](#os-9-modules); `--org`/`--vectors` are rejected with `--os9`)
 - `--tokens`, `--ast` (debug dumps, used by the golden tests)
 - `-h`
 
+## OS-9 modules
+`--os9` sets `CodegenOptions.os9`, which turns on position-independent mode (`pic` in `codegen.c`):
+- **Variables:** every variable reference goes through `var_ref()`, which appends `,U`.
+- **Calls and jumps:** go through `emit_call()`/`emit_jump()`, giving `LBSR`/`LBRA` instead of `JSR`/`JMP`.
+- **Other code:** everything else was already relative.
+
+The file becomes an OS-9 module:
+1. `MOD RT_EOM,RT_NAME,$11,$81,RT_START,RT_SIZE`
+2. the variables as `RMB`. Inside a module lwasm allocates these in the data area; they come first so offsets are known and indexed forms stay short.
+3. `RT_NAME FCS /name/` and the edition
+4. `INCLUDE "plm_crt0_os9.asm"` (`LBSR PLM_MAIN`, `CLRB`, `LBRA PLM_EXIT`; it keeps OS-9's S, U and DP)
+5. the code, the runtime and the hooks (whose `RMB` buffers also go in the data area)
+6. `RT_STACK RMB --stack`, `RT_SIZE EQU .`
+7. `EMOD`
+
+**Hooks contract in this mode:**
+- hooks must preserve U as well as S, and be position-independent
+- `RT_STACKTOP` is not used
+
+**Module name.** The name is the program name unless `--name` is given. A name that matches a module already in memory makes OS-9 run that module instead. This was found when the run test `ECHO` ran NitrOS-9's own `echo`; the nitros9 suite therefore names every module after its file, `t<name>`.
+
+**Simulator support.** sim6809 `--os9`:
+- loads a module at `--load`, checking the sync bytes, header parity, CRC and type
+- sets up registers as `F$Fork` does, with the data area at `--data` and `--param`
+- emulates `F$Exit`, `I$Read`, `I$ReadLn`, `I$Write` and `I$WritLn` through `Cpu.swi2_hook`, translating CR to and from newline
+- enforces memory protection: writes only to the data area, reads only from the module or the data area, PC only in the module
+
+**What the protection doesn't catch.** With under 256 bytes of data, a variable reference that lost its `,U` would still work, because lwasm assembles it as direct-page addressing and OS-9's DP is the data page. The os9 suite therefore also checks the generated text for `JSR`/`JMP` and for variable operands without `,U`.
+
 ## Targets (runtime/*/plm_hooks.asm)
-All three provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
+All four provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 
 - **sim:**
   - MMIO at $FF00, stack at $FF00
@@ -225,6 +261,12 @@ All three provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
   - `RT_STACKTOP = 0`: the program runs on BASIC's stack, and PLM_EXIT/HALT/EXIT return to BASIC with `LDS RT_ENTRYS` / `RTS`
   - Build with `--org 3000H` (below $0E00 is unsafe because $0100–$0111 holds BASIC's interrupt vectors) and `lwasm -f decb`
   - PUTDEC saves Y around ROM calls
+- **os9** (OS-9 / NitrOS-9 Level 1 and 2, for `--os9` modules):
+  - PUTCH/PUTDEC use `I$Write` on path 1, sending LF as CR; PUTDEC writes its digits and CR in one call
+  - GETCH uses `I$Read` on path 0, returning 0 at `E$EOF`
+  - EXIT, end of program and HALT use `F$Exit`
+  - any other I/O error exits with the error code
+  - buffers are `RMB` in the data area
 - **example:**
   - MC6850 ACIA template (`ACIA_BASE`, default $A000; `RT_STACKTOP`, default $8000)
   - both can be overridden with lwasm `-D`
@@ -270,6 +312,8 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | fuzz | `exprgen` seeded random expression programs against an independent C model of the typing rules; a failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
+| os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
+| nitros9 | the same run programs on real NitrOS-9 Level 2, booted from `$NITROS9_DISK` on XRoar's `coco3` with `$COCO3_ROM`; outputs compared, exit statuses not checked; skipped if any prerequisite is missing |
 
 How the xroar suite works:
 - The program is written to a disk image with toolshed's `decb`.
@@ -280,6 +324,12 @@ How the xroar suite works:
 XRoar details the suite relies on:
 - Trap addresses need a `0x` prefix.
 - `-load` doesn't place a `.BIN` in RAM, and `-run` bypasses BASIC's EXEC. That is why the suite uses a disk image and `LOADM`.
+
+How the nitros9 suite works:
+- Each module and its `.in` file go onto a copy of the boot disk.
+- The `startup` script starts with `-x`, so that `exit.plm`'s status 42 doesn't abort it. It then runs `t<name> </dd/<name>.in >/dd/<name>.out` for each program, with an empty file as stdin for programs that have no `.in`.
+- The script ends with `tdone` (`tests/nitros9/done.asm`), which reads the unused I/O address `$FF6A`. XRoar traps on that read (`-trap read=0xFF6A`) and quits, so no time budget has to be guessed. XRoar's `-timeout` counts emulated seconds and only guards against hangs.
+- XRoar writes the disk back, and `os9 copy -l` extracts each output with its CRs turned into newlines.
 
 ## Milestones
 | # | Milestone | Verification | Status |
@@ -306,12 +356,17 @@ XRoar details the suite relies on:
 - crt0's `RT_ENTRYS` / `RT_STACKTOP = 0`
 - the `coco` and `xroar` suites, and `tools/coco_screen.py`
 - the PDF manuals and `make docs`
+- OS-9 support: `--os9`/`--stack`/`--name`, `plm_crt0_os9.asm`, `runtime/os9`, sim6809 `--os9` with memory protection, and the `os9` and `nitros9` suites
 
 ## Known gaps
 - **Language:** arrays, BASED, STRUCTURE, LITERALLY, INITIAL/DATA, address-of, iterative DO, DO CASE, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins such as HIGH, LOW and SHL are not supported.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).
+- **OS-9:**
+  - Modules are tested on NitrOS-9 Level 2 only (emulated CoCo 3), not on Level 1 or Microware OS-9.
+  - Exit statuses are only checked in the simulator.
+  - Command-line parameters (X/D at entry) aren't available to PL/M programs.
 
 ## Verification (end-to-end)
 - `make && make test` runs every suite. The xroar suite skips itself if XRoar, toolshed or the ROMs are missing.

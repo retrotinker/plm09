@@ -9,6 +9,10 @@
 typedef struct CodegenOptions {
     unsigned org;       /* ORG address */
     int vectors;        /* emit FDB RT_START at $FFFE */
+    int os9;            /* OS-9 program module: position-independent code,
+                           U-relative data */
+    unsigned stack;     /* --os9: stack space reserved in the data area */
+    const char *name;   /* --os9: module name, or NULL for the program name */
 } CodegenOptions;
 
 /* write lwasm source for a checked program */

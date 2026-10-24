@@ -5,6 +5,7 @@
  * unsupported trap, 2 on usage or load errors.
  */
 #include "cpu6809.h"
+#include "os9.h"
 #include "srec.h"
 
 #include <errno.h>
@@ -22,7 +23,13 @@ static void usage(FILE *f)
             "  -n N          stop after N instructions (default 100000000)\n"
             "  --io BASE     MMIO base address (default $FF00)\n"
             "  --entry ADDR  start address (default: from S9 record)\n"
-            "  --zero        clear memory instead of filling with $A5\n");
+            "  --zero        clear memory instead of filling with $A5\n"
+            "  --os9         prog is an OS-9 program module (not S-records); emulate\n"
+            "                F$Fork and the system calls F$Exit, I$Read, I$ReadLn,\n"
+            "                I$Write and I$WritLn\n"
+            "  --load ADDR   with --os9: module load address (default $2000)\n"
+            "  --data ADDR   with --os9: data area address, page aligned (default $8000)\n"
+            "  --param STR   with --os9: parameter string (default empty)\n");
 }
 
 /* parse a number: decimal, 0x hex, or $ hex */
@@ -69,7 +76,9 @@ int main(int argc, char **argv)
 {
     static Cpu cpu;
     unsigned long limit = 100000000UL, io = 0xff00, entry_opt = 0, v;
-    int tracing = 0, have_entry_opt = 0, has_entry;
+    unsigned long load = 0x2000, data = 0x8000;
+    int tracing = 0, have_entry_opt = 0, has_entry, os9 = 0;
+    const char *params = "";
     uint8_t fill = 0xa5;
     const char *path = NULL;
     uint16_t entry;
@@ -83,6 +92,16 @@ int main(int argc, char **argv)
             tracing = 1;
         } else if (!strcmp(a, "--zero")) {
             fill = 0;
+        } else if (!strcmp(a, "--os9")) {
+            os9 = 1;
+        } else if (i + 1 < argc && !strcmp(a, "--load")) {
+            if (!parse_num(argv[++i], 0xffff, &load))
+                goto bad;
+        } else if (i + 1 < argc && !strcmp(a, "--data")) {
+            if (!parse_num(argv[++i], 0xffff, &data))
+                goto bad;
+        } else if (i + 1 < argc && !strcmp(a, "--param")) {
+            params = argv[++i];
         } else if (i + 1 < argc && !strcmp(a, "-n")) {
             if (!parse_num(argv[++i], ~0UL, &limit))
                 goto bad;
@@ -103,15 +122,22 @@ int main(int argc, char **argv)
         goto bad;
 
     cpu_init(&cpu, (uint16_t)io, fill);
-    if (srec_load(path, cpu.mem, &entry, &has_entry) < 0)
-        return RC_USAGE;
-    if (have_entry_opt)
-        entry = (uint16_t)entry_opt;
-    else if (!has_entry) {
-        fprintf(stderr, "sim6809: %s has no S9 entry record; use --entry\n", path);
-        return RC_USAGE;
+    if (os9) {
+        if (os9_load(&cpu, path, (uint16_t)load, (uint16_t)data, params) < 0)
+            return RC_USAGE;
+        if (have_entry_opt)
+            cpu.pc = (uint16_t)entry_opt;
+    } else {
+        if (srec_load(path, cpu.mem, &entry, &has_entry) < 0)
+            return RC_USAGE;
+        if (have_entry_opt)
+            entry = (uint16_t)entry_opt;
+        else if (!has_entry) {
+            fprintf(stderr, "sim6809: %s has no S9 entry record; use --entry\n", path);
+            return RC_USAGE;
+        }
+        cpu.pc = entry;
     }
-    cpu.pc = entry;
 
     for (v = 0; v < limit; v++) {
         if (tracing)

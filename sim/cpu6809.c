@@ -1,7 +1,8 @@
 /* MC6809 CPU core for sim6809.
  *
  * Full documented 6809 instruction set and addressing modes.  No interrupts,
- * no cycle counting.  SWI/SWI2/SWI3/SYNC/CWAI stop the simulator (STOP_TRAP);
+ * no cycle counting.  SWI/SWI2/SWI3/SYNC/CWAI stop the simulator (STOP_TRAP),
+ * except that SWI2 calls swi2_hook when one is set (OS-9 system calls);
  * undocumented opcodes and indexed postbytes stop it (STOP_ILLEGAL).
  */
 #include "cpu6809.h"
@@ -32,8 +33,17 @@ static int is_io(Cpu *c, uint16_t addr)
     return (uint16_t)(addr - c->io_base) < IO_SIZE;
 }
 
+static int in(uint32_t a, uint32_t lo, uint32_t hi)
+{
+    return a >= lo && a < hi;
+}
+
 uint8_t cpu_read8(Cpu *c, uint16_t addr)
 {
+    if (c->protect && !in(addr, c->data_lo, c->data_hi) && !in(addr, c->mod_lo, c->mod_hi)) {
+        cpu_stop(c, STOP_ILLEGAL, "read outside the module and data area");
+        return 0;
+    }
     if (is_io(c, addr)) {
         if (addr - c->io_base == IO_GETCH) {
             int ch = getchar();
@@ -46,6 +56,10 @@ uint8_t cpu_read8(Cpu *c, uint16_t addr)
 
 void cpu_write8(Cpu *c, uint16_t addr, uint8_t v)
 {
+    if (c->protect && !in(addr, c->data_lo, c->data_hi)) {
+        cpu_stop(c, STOP_ILLEGAL, "write outside the data area");
+        return;
+    }
     if (!is_io(c, addr)) {
         c->mem[addr] = v;
         return;
@@ -211,7 +225,7 @@ static int cond(Cpu *c, int n)
 
 /* -------------------------------------------------------------- stopping */
 
-static int stop(Cpu *c, int why, const char *msg)
+int cpu_stop(Cpu *c, int why, const char *msg)
 {
     if (!c->stop) {
         c->stop = why;
@@ -247,7 +261,7 @@ static uint16_t ea_indexed(Cpu *c)
     switch (pb & 0x0f) {
     case 0x0:
         if (ind)
-            return stop(c, STOP_ILLEGAL, "illegal indexed mode [,R+]"), 0;
+            return cpu_stop(c, STOP_ILLEGAL, "illegal indexed mode [,R+]"), 0;
         ea = *r;
         *r += 1;
         break;
@@ -257,7 +271,7 @@ static uint16_t ea_indexed(Cpu *c)
         break;
     case 0x2:
         if (ind)
-            return stop(c, STOP_ILLEGAL, "illegal indexed mode [,-R]"), 0;
+            return cpu_stop(c, STOP_ILLEGAL, "illegal indexed mode [,-R]"), 0;
         *r -= 1;
         ea = *r;
         break;
@@ -283,11 +297,11 @@ static uint16_t ea_indexed(Cpu *c)
     }
     case 0xf:
         if (!ind)
-            return stop(c, STOP_ILLEGAL, "illegal indexed postbyte"), 0;
+            return cpu_stop(c, STOP_ILLEGAL, "illegal indexed postbyte"), 0;
         ea = fetch16(c);
         break;
     default:
-        return stop(c, STOP_ILLEGAL, "illegal indexed postbyte"), 0;
+        return cpu_stop(c, STOP_ILLEGAL, "illegal indexed postbyte"), 0;
     }
     return ind ? read16(c, ea) : ea;
 }
@@ -473,7 +487,7 @@ static int mem_unary(Cpu *c, int op)
     int k;
 
     if (n == 0x1 || n == 0x2 || n == 0x5 || n == 0xb)
-        return stop(c, STOP_ILLEGAL, "illegal opcode");
+        return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
     ea = ea_mode(c, mode);
     if (c->stop)
         return c->stop;
@@ -517,7 +531,7 @@ static int alu(Cpu *c, int op)
     /* stores: STA STB STX STU STD */
     if (n == 0x7 || n == 0xf || (bside && n == 0xd)) {
         if (mode == 0)
-            return stop(c, STOP_ILLEGAL, "illegal opcode (store immediate)");
+            return cpu_stop(c, STOP_ILLEGAL, "illegal opcode (store immediate)");
         ea = ea_mode(c, mode);
         if (c->stop)
             return c->stop;
@@ -595,19 +609,22 @@ static int page2(Cpu *c)
             c->pc = (uint16_t)(c->pc + off);
         return 0;
     }
-    if (op == 0x3f)
-        return stop(c, STOP_TRAP, "SWI2");
+    if (op == 0x3f) {
+        if (c->swi2_hook)
+            return c->swi2_hook(c);
+        return cpu_stop(c, STOP_TRAP, "SWI2");
+    }
     if (op < 0x80)
-        return stop(c, STOP_ILLEGAL, "illegal opcode");
+        return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
 
     int n = op & 0x0f, bside = op & 0x40;
     int store = n == 0xf;
     /* valid: CMPD ($x3) and CMPY ($xC) on the A side, LDY/STY on the A side,
        LDS/STS on the B side */
     if (!((n == 0x3 && !bside) || (n == 0xc && !bside) || n == 0xe || n == 0xf))
-        return stop(c, STOP_ILLEGAL, "illegal opcode");
+        return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
     if (mode == 0 && store)
-        return stop(c, STOP_ILLEGAL, "illegal opcode (store immediate)");
+        return cpu_stop(c, STOP_ILLEGAL, "illegal opcode (store immediate)");
 
     if (mode == 0) {
         m16 = fetch16(c);
@@ -646,9 +663,9 @@ static int page3(Cpu *c)
     uint16_t m16;
 
     if (op == 0x3f)
-        return stop(c, STOP_TRAP, "SWI3");
+        return cpu_stop(c, STOP_TRAP, "SWI3");
     if (op < 0x80 || op >= 0xc0 || ((op & 0x0f) != 0x3 && (op & 0x0f) != 0xc))
-        return stop(c, STOP_ILLEGAL, "illegal opcode");
+        return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
     if (mode == 0) {
         m16 = fetch16(c);
     } else {
@@ -688,6 +705,8 @@ int cpu_step(Cpu *c)
     if (c->stop)
         return c->stop;
     c->stop_pc = c->pc;
+    if (c->protect && !in(c->pc, c->mod_lo, c->mod_hi))
+        return cpu_stop(c, STOP_ILLEGAL, "PC outside the module");
     op = fetch8(c);
 
     if (op < 0x10 || (op >= 0x60 && op < 0x80))
@@ -697,7 +716,7 @@ int cpu_step(Cpu *c)
     if (op >= 0x40) {                   /* inherent A / B unary ops */
         uint8_t *acc = op < 0x50 ? &c->a : &c->b;
         if (unary(c, op & 0x0f, *acc, &r) < 0)
-            return stop(c, STOP_ILLEGAL, "illegal opcode");
+            return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
         if ((op & 0x0f) != 0xd)
             *acc = r;
         return 0;
@@ -713,7 +732,7 @@ int cpu_step(Cpu *c)
     case 0x10: return page2(c);
     case 0x11: return page3(c);
     case 0x12: return 0;                                        /* NOP */
-    case 0x13: return stop(c, STOP_TRAP, "SYNC");
+    case 0x13: return cpu_stop(c, STOP_TRAP, "SYNC");
     case 0x16: {                                                /* LBRA */
         uint16_t off = fetch16(c);
         c->pc = (uint16_t)(c->pc + off);
@@ -763,14 +782,14 @@ int cpu_step(Cpu *c)
             op_pul(c, &c->s, &c->u, 0x7e);
         c->pc = pull16(c, &c->s);
         return c->stop;
-    case 0x3c: return stop(c, STOP_TRAP, "CWAI");
+    case 0x3c: return cpu_stop(c, STOP_TRAP, "CWAI");
     case 0x3d:                                                  /* MUL */
         set_d(c, (uint16_t)(c->a * c->b));
         setf(c, CC_Z, DREG(c) == 0);
         setf(c, CC_C, c->b & 0x80);
         return 0;
-    case 0x3f: return stop(c, STOP_TRAP, "SWI");
+    case 0x3f: return cpu_stop(c, STOP_TRAP, "SWI");
     default:
-        return stop(c, STOP_ILLEGAL, "illegal opcode");
+        return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
     }
 }

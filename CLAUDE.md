@@ -13,8 +13,8 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 ## Commands
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
-- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, fuzz.
-- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, or `make fuzz-test N=500`.
+- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, fuzz.
+- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
 - `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
@@ -36,6 +36,12 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
   - Trap addresses need a `0x` prefix.
   - `-load` doesn't put a `.BIN` in RAM, and `-run` starts it without going through BASIC's `EXEC`. That's why the suite builds a disk image with `decb` and types `LOADM`.
   - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
+- **os9:** reuses `tests/run/*.plm` (except `PLMCARGS` ones) plus fuzz seeds, built with `--os9` and run by `sim6809 --os9` at two placements. It also fails on `JSR`/`JMP` or a variable operand without `,U` in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
+- **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
+  - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
+  - The startup script needs `-x` to survive non-zero exit statuses.
+  - `tests/nitros9/done.asm` reads `$FF6A`, which XRoar traps on to quit.
+  - `-timeout` counts emulated seconds.
 - **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
 
 **sim6809 options:**
@@ -134,6 +140,11 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 - **Internal calls:** if no argument contains a call, each argument is stored straight into the callee's static parameter slot. Otherwise all arguments are pushed first and then popped into the slots, so that `F(1,F(2,3))` works. Then `JSR P_name`.
 - **EXTERNAL calls (the hook ABI):** each argument is pushed as a 16-bit word, the last one is also left in D, then `JSR NAME` and `LEAS 2n,S`.
 
+**OS-9 mode (`--os9`, `pic` in codegen.c):**
+- Variable operands must go through `var_ref()`, which adds `,U`, and calls and jumps through `emit_call()`/`emit_jump()`, which give LBSR/LBRA. Never emit a variable label or `JSR`/`JMP` directly.
+- The module layout is `MOD`, the variables (`RMB` = data area), the name, `plm_crt0_os9.asm`, the code, the runtime and hooks, the stack `RMB`, `EMOD`.
+- In this mode, hooks must preserve U and be position-independent.
+
 **Names in the output.** PL/M identifiers contain no `_`, so these prefixes never collide with user names:
 
 | Name | Meaning |
@@ -154,7 +165,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 5. the `RMB` data section
 6. `END RT_START`
 
-The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
+The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
 
 **Planned extensions** (arrays, BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.dim` and `Symbol.storage` exist from the start for these. Keep them in place, and keep their future words reserved in the lexer.
 

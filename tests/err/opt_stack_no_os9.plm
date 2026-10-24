@@ -1,0 +1,3 @@
+/* PLMCARGS: --stack 512 */
+T: DO;
+END T;

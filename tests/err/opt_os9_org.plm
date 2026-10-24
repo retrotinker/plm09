@@ -1,0 +1,3 @@
+/* PLMCARGS: --os9 --org 2000H */
+T: DO;
+END T;

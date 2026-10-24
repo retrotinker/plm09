@@ -1,0 +1,3 @@
+/* PLMCARGS: --os9 --vectors */
+T: DO;
+END T;

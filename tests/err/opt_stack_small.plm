@@ -1,0 +1,3 @@
+/* PLMCARGS: --os9 --stack 8 */
+T: DO;
+END T;

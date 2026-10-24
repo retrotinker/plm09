@@ -55,6 +55,9 @@ format, such as `-f decb` or `-f raw`.
 | `-o FILE` | output file (default: stdout) |
 | `--org ADDR` | load and start address, default `$0100` (`$2000`, `2000H` and `0x2000` are all accepted) |
 | `--vectors` | also emit `FDB RT_START` at `$FFFE`, the reset vector |
+| `--os9` | generate a position-independent OS-9 program module |
+| `--stack N` | with `--os9`: stack bytes in the data area (default 256) |
+| `--name NAME` | with `--os9`: module name (default: the program's name) |
 | `--tokens` | print the tokens and stop |
 | `--ast` | print the syntax tree and stop |
 
@@ -161,6 +164,7 @@ PUTCH   STB   $FF00     ; PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE;
 **Provided hooks files**
 - **`runtime/sim/`**, for `sim6809`, which has its I/O at `$FF00`. It provides `PUTCH`, `PUTDEC` (prints a number and a newline), `GETCH` (returns 0 at end of input) and `EXIT`.
 - **`runtime/coco/`**, for the Tandy Color Computer 1/2/3 under Color BASIC. It provides `PUTCH`, `PUTDEC`, `GETCH`, `EXIT` and `CLS`. See [Color Computer](#color-computer).
+- **`runtime/os9/`**, for OS-9 and NitrOS-9 program modules built with `--os9`. See [OS-9](#os-9).
 - **`runtime/example/`**, a template for an MC6850 ACIA board. It has the same four procedures, with `PUTDEC` written on top of `RT_DIV16`. Copy it and adjust the addresses for your machine. The test suite only checks that it assembles.
 
 ## Color Computer
@@ -190,6 +194,26 @@ LOADM"HELLO":EXEC
 - `make coco-test` runs the CoCo hooks in `sim6809` with a stand-in for the ROM (`tests/coco/fakerom.asm`). The stand-in also checks that the program returns to BASIC with the stack intact.
 - `make xroar-test` runs the same programs on an emulated CoCo 2 with Disk Extended Color BASIC 1.1. It writes each program to a disk image with toolshed's `decb`, has XRoar type `LOADM"T":EXEC`, and compares the text screen with `tests/coco/*.screen`. It is skipped when XRoar, `decb` or the ROMs are missing.
 
+## OS-9
+
+```
+build/plmc --os9 --name sum -o sum.asm sum.plm
+lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
+```
+
+* **Running it:** copy `sum` to `CMDS` on an OS-9 disk (with toolshed:
+  `os9 copy sum disk.dsk,CMDS/sum` and `os9 attr -e -pe disk.dsk,CMDS/sum`)
+  and run it from the shell. `build/sim6809 --os9 sum` runs it without OS-9.
+* **What `--os9` produces:**
+  * The module is position-independent (`LBSR`/`LBRA` instead of
+    `JSR`/`JMP`) and reentrant.
+  * All variables live in the process's data area and are addressed through
+    U.
+  * The hooks use `I$Write`, `I$Read` and `F$Exit`.
+* **Choosing the module name:** give it the name of the file it will be
+  installed as. If it matches a command already in memory (for example
+  `echo`), OS-9 runs that command instead.
+
 ## Generated code
 
 - **Memory layout:** the code starts at `--org`. It begins with `RT_START`, which sets up the stack and DP=0, then calls the main program (`PLM_MAIN`). The procedures, the runtime and the hooks follow, and the variables come last (`RMB`, so they add nothing to the load file).
@@ -212,6 +236,7 @@ LOADM"HELLO":EXEC
 
 ```
 build/sim6809 [-t] [-n N] [--io BASE] [--entry ADDR] [--zero] prog.s19
+build/sim6809 --os9 [--load ADDR] [--data ADDR] [--param STR] module
 ```
 
 | Option | Meaning |
@@ -249,5 +274,7 @@ It implements the full MC6809 instruction set, but not interrupts or cycle timin
 | `err` | each program must fail to compile with the expected message |
 | `run` | compile, assemble, run, and compare output and exit status |
 | `coco` | the CoCo hooks in `sim6809` against a stand-in ROM |
+| `os9` | the run programs and fuzz programs as OS-9 modules in `sim6809 --os9`, at two load addresses |
+| `nitros9` | the run programs on NitrOS-9 Level 2 booted under XRoar (skipped without XRoar, toolshed, `$NITROS9_DISK` and `$COCO3_ROM`) |
 | `xroar` | the CoCo programs on an emulated CoCo 2, comparing the screen (skipped without XRoar, ROMs and toolshed) |
 | `fuzz` | random expression programs checked against a C model of the typing rules; `make fuzz-test N=2000` runs more |

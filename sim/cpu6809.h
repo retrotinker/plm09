@@ -36,9 +36,22 @@ typedef struct Cpu {
     int exit_code;
     uint16_t stop_pc;       /* PC of the instruction that stopped */
     const char *stop_msg;
+
+    /* if set, SWI2 calls this instead of stopping (OS-9 system calls).
+       PC points just past the SWI2 opcode; return c->stop. */
+    int (*swi2_hook)(struct Cpu *c);
+
+    /* memory protection (sim6809 --os9): when set, data reads must fall in
+       the module or the data area, writes in the data area, and the PC in
+       the module; otherwise the CPU stops with STOP_ILLEGAL.  Ranges are
+       [lo, hi), with hi up to 0x10000. */
+    int protect;
+    uint32_t mod_lo, mod_hi, data_lo, data_hi;
 } Cpu;
 
 void cpu_init(Cpu *c, uint16_t io_base, uint8_t fill);
+/* stop the CPU with reason why (STOP_*) and message; returns why */
+int cpu_stop(Cpu *c, int why, const char *msg);
 /* execute one instruction; returns c->stop */
 int cpu_step(Cpu *c);
 
