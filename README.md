@@ -91,6 +91,10 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   5. `NOT`
   6. `AND`
   7. `OR XOR`
+- **Macros:** `DECLARE TRUE LITERALLY '0FFH';` and the like.
+  - The text, up to 255 characters, is substituted for the name before parsing, so `DCL LITERALLY 'DECLARE'` works too.
+  - Literals follow block scope, and inner declarations can hide them.
+  - `--ast` shows the result of the substitution.
 - **Arrays:**
   - `DECLARE BUF(80) BYTE;` declares `BUF(0)` to `BUF(79)`.
   - Elements can be used anywhere a variable can, including as assignment targets.
@@ -129,7 +133,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- `BASED` variables, structures, `LITERALLY`
+- `BASED` variables, structures
 - `INITIAL` and `DATA`
 - the address-of operator `.`
 - `GOTO` and labels on other statements

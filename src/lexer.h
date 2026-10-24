@@ -5,7 +5,7 @@
 #include "util.h"
 
 typedef enum TokType {
-    T_EOF, T_IDENT, T_NUMBER,
+    T_EOF, T_IDENT, T_NUMBER, T_STRING,
     /* punctuation */
     T_SEMI, T_COLON, T_COMMA, T_LPAREN, T_RPAREN, T_PLUS, T_MINUS, T_STAR,
     T_SLASH, T_EQ, T_NE, T_LT, T_GT, T_LE, T_GE, T_DOT, T_ASSIGN,
@@ -22,13 +22,20 @@ typedef enum TokType {
 typedef struct Token {
     TokType type;
     Loc loc;
-    char *text;         /* identifier name (upper case, '$' removed) */
-    unsigned value;     /* T_NUMBER */
-    int is_address;     /* T_NUMBER from a two-character string */
+    char *text;         /* T_IDENT: name (upper case, '$' removed);
+                           T_STRING: contents ('' already turned into ') */
+    unsigned value;     /* T_NUMBER; T_STRING of 1-2 characters */
+    int is_address;     /* T_STRING of 2 characters (an ADDRESS constant) */
+    int depth;          /* LITERALLY expansion depth (parser) */
+    int raw;            /* never expand this token (parser) */
 } Token;
 
 void lex_init(const char *src);
 Token lex_next(void);
+
+/* tokenize text (a LITERALLY body) into a Vec of Token*, all located at
+   `at`; the main input's position is saved and restored */
+Vec lex_tokens(const char *text, Loc at);
 
 /* describe a token type for messages: "';'", "DO", "identifier" */
 const char *tok_name(TokType t);

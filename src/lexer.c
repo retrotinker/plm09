@@ -2,8 +2,10 @@
  *
  * Case-insensitive; identifiers and keywords are folded to upper case.
  * '$' is ignored inside identifiers and numbers.  Numbers take a base
- * suffix H, B, O, Q or D (hex must start with a digit).  One- and
- * two-character strings are numeric constants.
+ * suffix H, B, O, Q or D (hex must start with a digit).  Strings of up to
+ * 255 characters become T_STRING tokens; the parser treats one- and
+ * two-character strings as numeric constants and longer ones as LITERALLY
+ * bodies.
  */
 #include "lexer.h"
 
@@ -42,6 +44,8 @@ const char *tok_name(TokType t)
         return "identifier";
     if (t == T_NUMBER)
         return "number";
+    if (t == T_STRING)
+        return "string";
     if (t >= K_FIRST)
         return keywords[t - K_FIRST];
     snprintf(buf, sizeof buf, "'%s'", punct_names[t]);
@@ -170,7 +174,8 @@ static unsigned number_value(Loc loc, const char *w)
 
 static Token scan_string(Loc loc)
 {
-    Token t = { T_NUMBER, loc, NULL, 0, 0 };
+    Token t = { T_STRING, loc, NULL, 0, 0, 0, 0 };
+    char buf[256];
     int n = 0;
 
     advance();                          /* opening quote */
@@ -182,21 +187,24 @@ static Token scan_string(Loc loc)
                 break;
             advance();                  /* '' is a quote character */
         }
-        if (++n > 2)
-            error_at(loc, "strings longer than 2 characters are not supported");
-        t.value = t.value << 8 | (unsigned char)*p;
+        if (n == 255)
+            error_at(loc, "strings are limited to 255 characters");
+        buf[n++] = *p;
+        if (n <= 2)
+            t.value = t.value << 8 | (unsigned char)*p;
         advance();
     }
     advance();                          /* closing quote */
     if (n == 0)
         error_at(loc, "empty string");
+    t.text = xstrndup(buf, n);
     t.is_address = n == 2;
     return t;
 }
 
 Token lex_next(void)
 {
-    Token t = { T_EOF, { 0, 0 }, NULL, 0, 0 };
+    Token t = { T_EOF, { 0, 0 }, NULL, 0, 0, 0, 0 };
     int c;
 
     skip_space();
@@ -267,6 +275,28 @@ Token lex_next(void)
     return t;
 }
 
+Vec lex_tokens(const char *text, Loc at)
+{
+    const char *save_p = p;
+    int save_line = line, save_col = col;
+    Vec v = { 0 };
+    Token t;
+
+    p = text;
+    line = at.line;
+    col = at.col;
+    while ((t = lex_next()).type != T_EOF) {
+        Token *copy = xmalloc(sizeof *copy);
+        t.loc = at;
+        *copy = t;
+        vec_push(&v, copy);
+    }
+    p = save_p;
+    line = save_line;
+    col = save_col;
+    return v;
+}
+
 void lex_dump(const char *text)
 {
     Token t;
@@ -283,7 +313,13 @@ void lex_dump(const char *text)
             printf("IDENT %s\n", t.text);
             break;
         case T_NUMBER:
-            printf("NUMBER %u%s\n", t.value, t.is_address ? " ADDRESS" : "");
+            printf("NUMBER %u\n", t.value);
+            break;
+        case T_STRING:
+            if (strlen(t.text) <= 2)
+                printf("STRING '%s' = %u%s\n", t.text, t.value, t.is_address ? " ADDRESS" : "");
+            else
+                printf("STRING '%s'\n", t.text);
             break;
         default:
             if (t.type >= K_FIRST)

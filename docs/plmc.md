@@ -36,6 +36,7 @@ include path. Four hooks files come with plmc:
   PL/M-80's rules for mixing the two types, and the built-ins `LENGTH` and
   `LAST`.
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
+* `LITERALLY` macros, scoped like other declarations.
 * `IF`/`THEN`/`ELSE`, `DO` blocks with their own declarations, `DO WHILE`
   and iterative `DO I = ... TO ... BY ...` loops, `DO CASE`, `HALT`.
 * Procedures: typed and untyped, with parameters, nested inside each other, and
@@ -145,7 +146,9 @@ compiles means what PL/M-80 says it means.
 * **Strings:** a one-character string such as `'A'` is a BYTE constant (65).
   A two-character string such as `'AB'` is an ADDRESS constant
   (`'A'`$\times$ 256 + `'B'`). Write a quote character as `''`, as in `''''`.
-  Longer strings are not supported.
+  Strings of up to 255 characters are allowed as the body of a `LITERALLY`
+  declaration. Anywhere else, a string longer than two characters is an
+  error.
 * **Reserved words:** all PL/M-80 reserved words, including ones for features
   plmc doesn't implement, so they can't be used as names: `ADDRESS AND BASED
   BY BYTE CALL CASE DATA DECLARE DISABLE DO ELSE ENABLE END EOF EXTERNAL GO
@@ -182,6 +185,51 @@ DECLARE FLAG BYTE, LIMIT ADDRESS, (LO, HI) BYTE;
   one. Declaring a name twice in the same block is an error.
 * **Initial values:** variables have no initial value. They start with whatever
   is in memory, which is `$A5` in the simulator so that the mistake shows up.
+
+## LITERALLY
+
+```
+DECLARE TRUE LITERALLY '0FFH', FALSE LITERALLY '0';
+DECLARE BUFFER$SIZE LITERALLY '32';
+DECLARE DCL LITERALLY 'DECLARE', PROC LITERALLY 'PROCEDURE';
+
+DCL PRINT$BUFFER(BUFFER$SIZE) BYTE;
+```
+
+`DECLARE name LITERALLY 'text'` defines a parameterless macro. Every later
+occurrence of *name* is replaced by the tokens of *text*, before parsing, so a
+literal can stand for anything:
+
+* a constant (`TRUE`, `BUFFER$SIZE`), including where only a number is
+  allowed, such as an array dimension
+* a keyword (`DCL`, `PROC`)
+* part of an expression
+* a whole statement (`INCR LITERALLY 'N = N + 1'`, then `INCR;`)
+
+The rules:
+
+* **Text:** up to 255 characters. Write a quote inside it as `''`, so
+  `QUOTE LITERALLY '''A'''` stands for `'A'`.
+* **Nesting:** a literal's text may use other literals, which are expanded in
+  turn. A literal that expands to itself is reported as
+  `literal X expands recursively`.
+* **Scope:** literals follow block scope like any other declaration.
+  * A literal declared in a procedure or a `DO` block is visible only there,
+    from its declaration on.
+  * An inner block can declare its own literal, or a variable or procedure,
+    with the same name, which hides the outer literal until that block's
+    `END`.
+  * Declaring the same name twice in one block is an error.
+* **Names being defined are not expanded:** declared names, procedure names,
+  parameters, labels and the name after `END`.
+* **Textual substitution:** the text is substituted *as text*, so precedence
+  can surprise you. After `DECLARE TWO LITERALLY '1 + 1'`, the expression
+  `TWO * 3` means `1 + 1 * 3`, which is 4. Put parentheses in the literal
+  (`'(1 + 1)'`) when it is an expression.
+* **Form:** a LITERALLY can't be factored (`DECLARE (A, B) LITERALLY ...`) or
+  have a dimension, but it can be mixed with other items in one `DECLARE`.
+* **Seeing the result:** `--ast` shows the program *after* substitution,
+  which is the easiest way to check what a literal turned into.
 
 ## Arrays
 
@@ -435,7 +483,6 @@ These parts of PL/M-80 are recognized and rejected with an error:
 |---|---|
 | an implicit dimension, `DECLARE X(*) BYTE` (only meaningful with `INITIAL`/`DATA`) | `an implicit dimension '(*)' is not supported` |
 | `BASED` variables, `STRUCTURE`, `LABEL` declarations | `... is not supported` |
-| `LITERALLY` macros | `LITERALLY is not supported` |
 | `INITIAL` and `DATA` | `initialized data is not supported` |
 | the address-of operator `.X` | `the address-of operator '.' is not supported` |
 | `GOTO`, `GO TO` | `GOTO is not supported` |
@@ -480,6 +527,11 @@ next multiple of 8 plus 1.
 | `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
 | `parameter X cannot be an array` | a parameter declared with a dimension |
 | `LENGTH needs the name of a variable` (or `LAST`) | argument isn't a declared variable |
+| `literal X expands recursively (more than 32 levels)` | a literal whose text uses itself |
+| `a LITERALLY declaration cannot be factored`, `... cannot have a dimension` | `DECLARE (A, B) LITERALLY ...`, `DECLARE A(3) LITERALLY ...` |
+| `expected a string, found ...` | `LITERALLY` not followed by a string |
+| `strings are limited to 255 characters` | a string over 255 characters |
+| `strings longer than 2 characters are not supported` | a long string used as a value |
 | `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, or undeclared |
 | `typed procedure F must be used in an expression, not CALLed` | `CALL` of a BYTE or ADDRESS procedure |
 | `untyped procedure P cannot be used in an expression` | value taken from an untyped procedure |
@@ -716,6 +768,7 @@ They use these system calls:
   example `sum <data >/d0/out`.
 
 **Rules for your own OS-9 hooks:**
+
 * **Calls and jumps:** use only relative ones (`BSR`/`LBSR`/`BRA`/`LBRA`, or
   `JSR label,PCR`).
 * **Data:** put it in `RMB` storage and address it through U (`LEAX buf,U`).
@@ -874,7 +927,10 @@ listing and simulator traces easy to follow.
 # Inspecting the compiler's view
 
 `--tokens` prints each token with its line and column. Numbers are shown with
-their value, which is useful for checking how a constant was read:
+their value, which is useful for checking how a constant was read. Strings
+are printed as `STRING 'text'`, with the value of one- and two-character
+strings. `--tokens` shows the source as written; LITERALLY names are expanded
+later, by the parser.
 
 ```
 2:1 IDENT X
@@ -883,7 +939,8 @@ their value, which is useful for checking how a constant was read:
 2:10 PUNCT +
 ```
 
-`--ast` prints the syntax tree after parsing, with expressions written as
+`--ast` prints the syntax tree after parsing, and after LITERALLY substitution,
+with expressions written as
 prefix lists. It shows exactly how precedence was applied:
 
 ```

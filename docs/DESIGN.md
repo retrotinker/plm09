@@ -81,7 +81,12 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
 
 **Program structure**
 - A program is `NAME: DO; decls stmts END [NAME];`, optionally followed by `EOF`.
-- Declarations: `DECLARE X BYTE`, `DECLARE (A,B) ADDRESS`, `DECLARE A(10) BYTE`, `DECLARE (A,B)(5) ADDRESS`, or a comma-separated list. They must precede the statements of their block.
+- Declarations: `DECLARE X BYTE`, `DECLARE (A,B) ADDRESS`, `DECLARE A(10) BYTE`, `DECLARE (A,B)(5) ADDRESS`, `DECLARE X LITERALLY 'text'`, or a comma-separated list. They must precede the statements of their block.
+- LITERALLY (PL/M-80 manual 6.4) is a parameterless macro whose text, up to 255 characters, is substituted as tokens:
+  - Literals are block-scoped, and an inner declaration of any kind hides an outer literal.
+  - A name can't be declared twice in one block if either declaration is a literal.
+  - A LITERALLY can't be factored or dimensioned.
+  - A literal that expands more than 32 levels deep is reported as recursive.
 - Arrays:
   - The dimension is a numeric constant, 1–65535, and the array must fit in 64 KB.
   - `A(i)` is an element, usable in expressions and as an assignment target. Subscripts are any expression, zero-extended, and not range-checked.
@@ -141,8 +146,15 @@ Operators group left to right.
 - A typed procedure whose last statement isn't RETURN or HALT gets a warning.
 - `Symbol.dim` holds array sizes. `Symbol.storage` is reserved for REENTRANT (frame-relative variables).
 
+**LITERALLY in the parser.** Substitution happens in the parser's token buffer, so sema and codegen never see literals.
+- **Lexer:** strings are `T_STRING` tokens. The parser turns one- and two-character strings into constants, and `lex_tokens()` tokenizes a literal's text, located at the place it is used.
+- **Scopes:** the parser keeps its own scope stack (`LitScope`) of declared names, pushed for the program, procedures and simple DO blocks.
+- **Lazy expansion:** `peek_at(k)` expands positions 0..k, replacing a visible literal name by its tokens, which may expand in turn. Expansion depth is counted per token.
+- **Raw names:** names being defined (DECLARE items, procedure and parameter names, labels, the program name, END labels) are read raw, by `next_raw_ident()` / `raw_type()`, and never expanded. This is what lets `DCL TWO BYTE` in an inner block hide an outer literal `TWO`.
+- **Mixed lookahead:** `NAME: PROC` works with `PROC LITERALLY 'PROCEDURE'`, because the name and ':' are checked raw and only the third token is expanded.
+
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
-- `(*)` dimensions, BASED, STRUCTURE, LABEL declarations, LITERALLY
+- `(*)` dimensions, BASED, STRUCTURE, LABEL declarations
 - INITIAL/DATA, `.` (address-of)
 - GOTO
 - REENTRANT, INTERRUPT, PUBLIC
@@ -394,9 +406,10 @@ How the nitros9 suite works:
 - OS-9 support: `--os9`/`--stack`/`--name`, `plm_crt0_os9.asm`, `runtime/os9`, sim6809 `--os9` with memory protection, and the `os9` and `nitros9` suites
 - arrays, with `LENGTH`/`LAST`; the run tests `arrays` and `bigdata`, and arrays in the fuzz generator
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
+- LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
 
 ## Known gaps
-- **Language:** BASED, STRUCTURE, LITERALLY, INITIAL/DATA (and so `(*)` dimensions), address-of, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** BASED, STRUCTURE, INITIAL/DATA (and so `(*)` dimensions), address-of, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

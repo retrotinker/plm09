@@ -1,0 +1,3 @@
+T: DO;
+DECLARE (A, B) LITERALLY '1';
+END T;

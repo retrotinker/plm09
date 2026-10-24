@@ -1,0 +1,66 @@
+/* LITERALLY declarations (PL/M-80 manual 6.4).  Expected values in comments. */
+LITS: DO;
+DECLARE DCL LITERALLY 'DECLARE', PROC LITERALLY 'PROCEDURE';
+DCL TRUE LITERALLY '0FFH', FALSE LITERALLY '0';
+DCL BUFFER$SIZE LITERALLY '32';
+DCL FOREVER LITERALLY 'WHILE TRUE';         /* uses another literal */
+DCL TWO LITERALLY '1 + 1';
+DCL QUOTE LITERALLY '''A''';                /* the body is 'A' */
+DCL INCR LITERALLY 'N = N + 1';             /* a whole statement */
+DCL LIMIT LITERALLY '3';
+PUTDEC: PROC (N) EXTERNAL; DCL N ADDRESS; END PUTDEC;
+PUTCH: PROC (C) EXTERNAL; DCL C BYTE; END PUTCH;
+DCL PRINT$BUFFER (BUFFER$SIZE) BYTE, (N, ROUGH) BYTE, K BYTE;
+
+SHOW: PROC (X);                             /* a literal local to a procedure */
+    DCL X BYTE;
+    DCL OFFSET LITERALLY '100';
+    CALL PUTDEC(X + OFFSET);
+END SHOW;
+
+COUNT5: PROC BYTE;                          /* DO FOREVER, left by RETURN */
+    DCL M BYTE;
+    M = 0;
+    DO FOREVER;
+        M = M + 1;
+        IF M = 5 THEN RETURN M;
+    END;
+    RETURN 0;
+END COUNT5;
+
+CALL PUTDEC(LENGTH(PRINT$BUFFER));          /* 32 */
+PRINTBUFFER(BUFFERSIZE - 10) = 'G';         /* $ is ignored: element 22 */
+CALL PUTCH(PRINT$BUFFER(22));
+CALL PUTCH(10);                             /* G */
+ROUGH = TRUE;                               /* the manual's TRUE/FALSE idiom */
+N = 0;
+DO WHILE ROUGH;
+    INCR;
+    IF N = LIMIT THEN ROUGH = FALSE;
+END;
+CALL PUTDEC(N);                             /* 3 */
+CALL PUTDEC(TWO * 3);                       /* textual: 1 + 1 * 3 = 4 */
+CALL PUTDEC((TWO) * 3);                     /* 6 */
+CALL PUTCH(QUOTE);
+CALL PUTCH(10);                             /* A */
+CALL PUTDEC(COUNT5);                        /* 5 */
+
+DO;                                         /* an inner literal hides LIMIT */
+    DCL LIMIT LITERALLY '7';
+    CALL PUTDEC(LIMIT);                     /* 7 */
+END;
+CALL PUTDEC(LIMIT);                         /* the outer one again: 3 */
+
+DO;                                         /* an inner variable hides TWO */
+    DCL TWO BYTE;
+    TWO = 9;
+    CALL PUTDEC(TWO);                       /* 9 */
+END;
+CALL PUTDEC(TWO + 0);                       /* the literal again: 2 */
+
+CALL SHOW(5);                               /* 105 */
+DO K = 1 TO LIMIT;                          /* in loop bounds */
+    CALL PUTCH('0' + K);
+END;
+CALL PUTCH(10);                             /* 123 */
+END LITS;

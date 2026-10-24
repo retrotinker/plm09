@@ -1,0 +1,4 @@
+2:1 STRING 'X = X + 1'
+2:13 STRING 'IT'S'
+2:21 STRING ''A''
+3:1 EOF

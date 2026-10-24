@@ -19,15 +19,122 @@
 
 #include <string.h>
 
-#define LOOKAHEAD 3
+/* ---------------------------------------------------- LITERALLY scopes */
 
-static Token buf[LOOKAHEAD];
-static int nbuf;
+/* Names declared in each open block, so that a LITERALLY name is expanded
+   only where it is visible and not hidden by an inner declaration.
+   text is the literal's body, or NULL for any other kind of name. */
+typedef struct LitName {
+    char *name;
+    char *text;
+    int line;
+} LitName;
+
+typedef struct LitScope {
+    Vec names;                  /* LitName* */
+    struct LitScope *up;
+} LitScope;
+
+static LitScope *lit_scope;
+
+static void lit_push(void)
+{
+    LitScope *sc = xcalloc(1, sizeof *sc);
+    sc->up = lit_scope;
+    lit_scope = sc;
+}
+
+static void lit_pop(void)
+{
+    lit_scope = lit_scope->up;
+}
+
+static LitName *lit_find_local(const LitScope *sc, const char *name)
+{
+    for (int i = 0; i < sc->names.len; i++) {
+        LitName *n = sc->names.items[i];
+        if (!strcmp(n->name, name))
+            return n;
+    }
+    return NULL;
+}
+
+/* record a declared name; text is NULL unless it is a LITERALLY */
+static void declare_name(const char *name, const char *text, Loc loc)
+{
+    LitName *old = lit_find_local(lit_scope, name);
+
+    if (old) {
+        if (old->text || text)
+            error_at(loc, "%s is already declared at line %d", name, old->line);
+        return;                 /* ordinary duplicates are sema's business */
+    }
+    LitName *n = xcalloc(1, sizeof *n);
+    n->name = xstrdup(name);
+    n->text = text ? xstrdup(text) : NULL;
+    n->line = loc.line;
+    vec_push(&lit_scope->names, n);
+}
+
+/* body of the literal `name` visible here, or NULL */
+static const char *literal_text(const char *name)
+{
+    for (const LitScope *sc = lit_scope; sc; sc = sc->up) {
+        const LitName *n = lit_find_local(sc, name);
+        if (n)
+            return n->text;
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------ tokens */
+
+/* Token buffer with lookahead.  Tokens are expanded lazily: peek_at(k)
+   replaces any LITERALLY name at positions 0..k by the tokens of its body
+   (which may expand in turn).  Tokens marked raw -- names being defined --
+   are never expanded. */
+static Token *buf;
+static int nbuf, cap;
+
+#define MAX_LITERAL_DEPTH 32
+
+static void fill(int k)
+{
+    while (nbuf <= k) {
+        if (nbuf == cap)
+            buf = xrealloc(buf, (cap = cap ? 2 * cap : 16) * sizeof *buf);
+        buf[nbuf++] = lex_next();
+    }
+}
+
+static void expand_at(int i)
+{
+    for (;;) {
+        fill(i);
+        Token *t = &buf[i];
+        const char *text;
+        if (t->type != T_IDENT || t->raw || !(text = literal_text(t->text)))
+            return;
+        if (t->depth >= MAX_LITERAL_DEPTH)
+            error_at(t->loc, "literal %s expands recursively (more than %d levels)",
+                     t->text, MAX_LITERAL_DEPTH);
+        int depth = t->depth + 1;
+        Vec v = lex_tokens(text, t->loc);
+        while (nbuf + v.len >= cap)
+            buf = xrealloc(buf, (cap *= 2) * sizeof *buf);
+        memmove(buf + i + v.len, buf + i + 1, (nbuf - i - 1) * sizeof *buf);
+        for (int k = 0; k < v.len; k++) {
+            buf[i + k] = *(Token *)v.items[k];
+            buf[i + k].depth = depth;
+        }
+        nbuf += v.len - 1;
+    }
+}
 
 static Token *peek_at(int k)
 {
-    while (nbuf <= k)
-        buf[nbuf++] = lex_next();
+    for (int i = 0; i <= k; i++)
+        expand_at(i);
     return &buf[k];
 }
 
@@ -39,6 +146,13 @@ static Token *peek(void)
 static TokType peek_type(int k)
 {
     return peek_at(k)->type;
+}
+
+/* type of the token at k without expanding it (or anything before it) */
+static TokType raw_type(int k)
+{
+    fill(k);
+    return buf[k].type;
 }
 
 static Token next(void)
@@ -69,6 +183,17 @@ static Token expect(TokType t)
 {
     if (peek()->type != t)
         unexpected(tok_name(t));
+    return next();
+}
+
+/* a name being defined (declared variable, procedure, parameter, label,
+   END label): taken as written, never expanded as a literal */
+static Token next_raw_ident(void)
+{
+    fill(0);
+    if (buf[0].type != T_IDENT)
+        unexpected("identifier");
+    buf[0].raw = 1;
     return next();
 }
 
@@ -108,6 +233,16 @@ static Expr *parse_primary(void)
         Expr *e = new_expr(E_NUM, n.loc);
         e->value = n.value;
         e->is_address = n.is_address;
+        return e;
+    }
+    case T_STRING: {
+        /* one or two characters are a BYTE / ADDRESS constant */
+        if (strlen(t->text) > 2)
+            error_at(t->loc, "strings longer than 2 characters are not supported");
+        Token str = next();
+        Expr *e = new_expr(E_NUM, str.loc);
+        e->value = str.value;
+        e->is_address = str.is_address;
         return e;
     }
     case T_IDENT: {
@@ -259,7 +394,6 @@ static Type parse_type(void)
     if (accept(K_ADDRESS))
         return TY_ADDRESS;
     switch (t->type) {
-    case K_LITERALLY: unsupported(t->loc, "LITERALLY");
     case K_BASED: unsupported(t->loc, "BASED variables");
     case K_LABEL: unsupported(t->loc, "LABEL declarations");
     case K_STRUCTURE: unsupported(t->loc, "STRUCTURE");
@@ -276,20 +410,21 @@ static void parse_declare(Block *b)
     expect(K_DECLARE);
     do {
         Vec names = { 0 };
-        if (accept(T_LPAREN)) {
+        /* names are read raw: declaring a name hides an outer literal */
+        if (raw_type(0) == T_LPAREN) {
+            next();
             do {
-                Token id = expect(T_IDENT);
                 Token *copy = xmalloc(sizeof *copy);
-                *copy = id;
+                *copy = next_raw_ident();
                 vec_push(&names, copy);
             } while (accept(T_COMMA));
             expect(T_RPAREN);
         } else {
-            Token id = expect(T_IDENT);
             Token *copy = xmalloc(sizeof *copy);
-            *copy = id;
+            *copy = next_raw_ident();
             vec_push(&names, copy);
         }
+        Token *first = names.items[0];
         unsigned dim = 0;
         Loc dim_loc = peek()->loc;
         if (accept(T_LPAREN)) {
@@ -303,11 +438,23 @@ static void parse_declare(Block *b)
                 error_at(dim_loc, "array dimension must be from 1 to 65535");
             expect(T_RPAREN);
         }
+        if (peek_type(0) == K_LITERALLY) {
+            Loc lit_loc = next().loc;
+            if (names.len > 1)
+                error_at(lit_loc, "a LITERALLY declaration cannot be factored");
+            if (dim)
+                error_at(dim_loc, "a LITERALLY declaration cannot have a dimension");
+            if (peek_type(0) != T_STRING)
+                unexpected("a string");
+            declare_name(first->text, next().text, first->loc);
+            continue;
+        }
         Type type = parse_type();
         for (int i = 0; i < names.len; i++) {
             Token *id = names.items[i];
             VarDecl *v = xcalloc(1, sizeof *v);
             Decl *d = xcalloc(1, sizeof *d);
+            declare_name(id->text, NULL, id->loc);
             v->name = id->text;
             v->loc = id->loc;
             v->type = type;
@@ -325,8 +472,8 @@ static void parse_declare(Block *b)
 static void parse_end(const char *label, const char *what)
 {
     expect(K_END);
-    if (peek_type(0) == T_IDENT) {
-        Token id = next();
+    if (raw_type(0) == T_IDENT) {
+        Token id = next_raw_ident();
         if (!label)
             error_at(id.loc, "END %s does not match an unlabeled %s", id.text, what);
         if (strcmp(id.text, label))
@@ -338,17 +485,20 @@ static void parse_end(const char *label, const char *what)
 /* name: PROCEDURE [(params)] [type] [EXTERNAL] ; block END [name] ; */
 static Proc *parse_procedure(void)
 {
-    Token name = expect(T_IDENT);
+    Token name = next_raw_ident();
     Proc *p = xcalloc(1, sizeof *p);
 
+    declare_name(name.text, NULL, name.loc);
+    lit_push();                         /* parameters and the body's names */
     expect(T_COLON);
     expect(K_PROCEDURE);
     p->name = name.text;
     p->loc = name.loc;
     if (accept(T_LPAREN)) {
         do {
-            Token id = expect(T_IDENT);
+            Token id = next_raw_ident();
             VarDecl *v = xcalloc(1, sizeof *v);
+            declare_name(id.text, NULL, id.loc);
             v->name = id.text;
             v->loc = id.loc;
             vec_push(&p->params, v);
@@ -374,6 +524,7 @@ static Proc *parse_procedure(void)
     }
     expect(T_SEMI);
     p->body = parse_block(1);
+    lit_pop();
     parse_end(p->name, "PROCEDURE");
     return p;
 }
@@ -416,7 +567,9 @@ static Stmt *parse_do(Loc loc, char *label)
     } else {
         expect(T_SEMI);
         s = new_stmt(S_DO, loc);
+        lit_push();
         s->block = parse_block(1);
+        lit_pop();
     }
     s->label = label;
     parse_end(label, "DO block");
@@ -457,23 +610,25 @@ static Stmt *parse_assignment(void)
 
 static Stmt *parse_stmt(void)
 {
+    /* NAME: is a label, read raw; anything else may start with a literal */
+    if (raw_type(0) == T_IDENT && raw_type(1) == T_COLON) {
+        Token label = next_raw_ident();
+        next();
+        if (peek_type(0) == K_DO) {
+            next();
+            return parse_do(label.loc, label.text);
+        }
+        if (peek_type(0) == K_PROCEDURE)
+            error_at(label.loc, "declarations must come before statements");
+        unsupported(label.loc, "a label on this statement (only DO blocks may be labeled)");
+    }
+
     Token *t = peek();
     Loc loc = t->loc;
     Stmt *s;
 
     switch (t->type) {
     case T_IDENT:
-        if (peek_type(1) == T_COLON) {
-            Token label = next();
-            next();
-            if (peek_type(0) == K_DO) {
-                next();
-                return parse_do(loc, label.text);
-            }
-            if (peek_type(0) == K_PROCEDURE)
-                error_at(loc, "declarations must come before statements");
-            unsupported(loc, "a label on this statement (only DO blocks may be labeled)");
-        }
         return parse_assignment();
     case K_CALL: {
         next();
@@ -532,10 +687,13 @@ static Stmt *parse_stmt(void)
     }
 }
 
+/* NAME: PROCEDURE -- the name is raw, PROCEDURE may come from a literal */
 static int at_procedure(void)
 {
-    return peek_type(0) == T_IDENT && peek_type(1) == T_COLON
-        && peek_type(2) == K_PROCEDURE;
+    if (raw_type(0) != T_IDENT || raw_type(1) != T_COLON)
+        return 0;
+    buf[0].raw = 1;
+    return peek_type(2) == K_PROCEDURE;
 }
 
 static Block *parse_block(int allow_decls)
@@ -573,7 +731,12 @@ Program *parse_program(const char *text)
 
     lex_init(text);
     nbuf = 0;
-    if (peek_type(0) != T_IDENT || peek_type(1) != T_COLON || peek_type(2) != K_DO)
+    lit_scope = NULL;
+    lit_push();
+    if (raw_type(0) != T_IDENT || raw_type(1) != T_COLON)
+        unexpected("a program of the form 'name: DO; ... END name;'");
+    buf[0].raw = 1;
+    if (peek_type(2) != K_DO)
         unexpected("a program of the form 'name: DO; ... END name;'");
     Token name = next();
     next();
@@ -582,6 +745,7 @@ Program *parse_program(const char *text)
     prog->name = name.text;
     prog->loc = name.loc;
     prog->body = parse_block(1);
+    lit_pop();
     parse_end(prog->name, "program");
     accept(K_EOF);
     if (peek_type(0) != T_EOF)

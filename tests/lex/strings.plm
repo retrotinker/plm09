@@ -1,0 +1,2 @@
+/* strings: longer ones are LITERALLY bodies; '' is a quote */
+'X = X + 1' 'IT''S' '''A'''
