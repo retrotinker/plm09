@@ -1,0 +1,1 @@
+2:4: error: the index of an iterative DO must be a scalar variable (not declared)

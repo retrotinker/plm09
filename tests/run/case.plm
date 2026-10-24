@@ -1,0 +1,137 @@
+/* DO CASE (PL/M-80 manual 5.1.5).  Expected values in comments. */
+CASES: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (I, K, SCORE, CONV, SAFE, FG, TD) BYTE, W ADDRESS;
+
+CONV, SAFE, FG, TD = 0;             /* the manual's example: null cases */
+DO SCORE = 0 TO 6;
+    DO CASE SCORE;
+        ;
+        CONV = CONV + 1;
+        SAFE = SAFE + 1;
+        FG = FG + 1;
+        ;
+        ;
+        TD = TD + 1;
+    END;
+END;
+CALL PUTDEC(CONV + SAFE * 10 + FG * 100 + TD * 1000);   /* 1111 */
+
+DO W = 1000 TO 1002;                /* ADDRESS selector expression */
+    DO CASE W - 1000;
+        CALL PUTDEC(0);             /* case 0 */
+        DO;                         /* case 1: a DO block */
+            CALL PUTCH('X');
+            CALL PUTCH('Y');
+            CALL PUTCH(10);
+        END;
+        DO I = 1 TO 3;              /* case 2: an iterative DO */
+            CALL PUTDEC(I);
+        END;
+    END;
+END;                                /* 0, XY, 1 2 3 */
+
+K = 0;                              /* out of range: no case runs */
+DO CASE 3;
+    K = 1;
+    K = 2;
+    K = 3;
+END;
+CALL PUTDEC(K);                     /* 0 */
+W = 0FFFFH;
+DO CASE W;
+    K = 9;
+END;
+CALL PUTDEC(K);                     /* 0 */
+
+DO I = 0 TO 1;                      /* nested and labeled */
+    SEL: DO CASE I;
+        DO CASE 1 - I;
+            CALL PUTCH('A');
+            CALL PUTCH('B');
+        END;
+        DO CASE 1 - I;
+            CALL PUTCH('C');
+            CALL PUTCH('D');
+        END;
+    END SEL;
+END;
+CALL PUTCH(10);                     /* BC */
+
+W = 0;
+DO CASE 2;                          /* long cases: table offsets past 255 */
+    DO;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+        W = W + 1;
+    END;
+    DO;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+        W = W + 2;
+    END;
+    CALL PUTDEC(222);
+END;                                /* 222 */
+CALL PUTDEC(W);                     /* neither long case ran: 0 */
+
+K = 5;
+DO CASE K AND 1;                    /* BYTE selector expression */
+    CALL PUTDEC(100);
+    CALL PUTDEC(101);
+END;                                /* 101 */
+END CASES;

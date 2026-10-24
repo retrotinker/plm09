@@ -37,7 +37,7 @@ include path. Four hooks files come with plmc:
   `LAST`.
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
 * `IF`/`THEN`/`ELSE`, `DO` blocks with their own declarations, `DO WHILE`
-  loops, `HALT`.
+  and iterative `DO I = ... TO ... BY ...` loops, `DO CASE`, `HALT`.
 * Procedures: typed and untyped, with parameters, nested inside each other, and
   `EXTERNAL` procedures written in assembly.
 * Error messages that give the file, line and column. Every unsupported PL/M
@@ -283,6 +283,8 @@ convention is described under [Hooks].
 | Conditional | `IF condition THEN statement; [ELSE statement;]` |
 | Block | `[LABEL:] DO; declarations statements END [LABEL];` |
 | Loop | `[LABEL:] DO WHILE condition; statements END [LABEL];` |
+| Counted loop | `[LABEL:] DO I = start TO limit [BY step]; statements END [LABEL];` (see [Iterative DO]) |
+| Case | `[LABEL:] DO CASE expression; statement-0; statement-1; ... END [LABEL];` (see [DO CASE]) |
 | Return | `RETURN;` or `RETURN expression;` (inside procedures only) |
 | Halt | `HALT;` stops the program through the hooks' `PLM_HALT` |
 | Empty | `;` |
@@ -292,7 +294,73 @@ convention is described under [Hooks].
   `DO; ... END;`.
 * **Labels:** only `DO` blocks may be labeled, and the label exists only so
   that `END` can be checked against it.
-* **Loop blocks:** a `DO WHILE` block may not contain declarations.
+* **Loop and case blocks:** `DO WHILE`, iterative `DO` and `DO CASE` blocks
+  may not contain declarations at their top level. A simple `DO` block inside
+  them may.
+
+## Iterative DO
+
+```
+DO I = 1 TO 10;
+    TOTAL = TOTAL + I;
+END;
+
+DO I = 1 TO 2 * N - 1 BY 2;     /* odd numbers */
+    PROD = PROD * I;
+END;
+```
+
+The index `I` must be a scalar variable, BYTE or ADDRESS (not an array
+element). The loop works exactly as described in the PL/M-80 manual:
+
+1. **Start:** `start` is evaluated **once**, converted to the index's type,
+   and assigned to the index.
+2. **Test:** `limit` is evaluated and converted to the index's type. If the
+   index is **greater than** the limit, the loop ends.
+3. **Body:** the statements in the block run.
+4. **Step:** `step` (1 if there's no `BY`) is evaluated and converted to the
+   index's type, and added to the index. If the addition **wraps around**
+   past 255 (BYTE) or 65535 (ADDRESS), the loop ends. Otherwise it goes back
+   to step 2.
+
+Things that follow from these rules:
+
+* **Re-evaluation:** the limit and the step are evaluated on *every* pass, so
+  changing a variable they use inside the body changes the loop.
+* **Final value:** after a normal exit the index is the first value past the
+  limit. `DO I = 1 TO 10` leaves `I` = 11.
+* **Wrap-around:** a BYTE loop `DO I = 0 TO 255` runs 256 times and ends
+  because the increment wraps, leaving `I` = 0. Without the wrap rule it
+  would never end.
+* **Conversions:** these can surprise you. With a BYTE index, a limit of 300
+  becomes 44.
+* **No counting down:** arithmetic is unsigned, so `BY -1` on a BYTE index
+  means `BY 255`, and a start above the limit runs the body zero times.
+* **Step of zero:** this gives an endless loop unless the limit is passed
+  some other way.
+
+## DO CASE
+
+```
+DO CASE SCORE;
+    ;                               /* 0: nothing */
+    CONVERSIONS = CONVERSIONS + 1;  /* 1 */
+    SAFETIES = SAFETIES + 1;        /* 2 */
+    DO;                             /* 3: several statements */
+        FIELDGOALS = FIELDGOALS + 1;
+        POINTS = POINTS + 3;
+    END;
+END;
+```
+
+* **Choosing a case:** the selector expression is evaluated once, and
+  statement number *selector* runs, counting from **0**. Exactly one
+  statement runs, then control continues after `END`.
+* **Null and grouped cases:** a null statement `;` is a case that does
+  nothing. Use a `DO; ... END;` block to make one case of several statements.
+* **Out of range:** a selector of the number of cases or more is undefined in
+  PL/M. **plmc runs no case**: it range-checks the selector and skips the
+  block.
 
 ## Expressions
 
@@ -370,7 +438,6 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | `LITERALLY` macros | `LITERALLY is not supported` |
 | `INITIAL` and `DATA` | `initialized data is not supported` |
 | the address-of operator `.X` | `the address-of operator '.' is not supported` |
-| iterative `DO I = 1 TO 10` and `DO CASE` | `iterative DO is not supported`, `DO CASE is not supported` |
 | `GOTO`, `GO TO` | `GOTO is not supported` |
 | a label on anything but `DO` | `a label on this statement (only DO blocks may be labeled) is not supported` |
 | `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
@@ -413,6 +480,7 @@ next multiple of 8 plus 1.
 | `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
 | `parameter X cannot be an array` | a parameter declared with a dimension |
 | `LENGTH needs the name of a variable` (or `LAST`) | argument isn't a declared variable |
+| `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, or undeclared |
 | `typed procedure F must be used in an expression, not CALLed` | `CALL` of a BYTE or ADDRESS procedure |
 | `untyped procedure P cannot be used in an expression` | value taken from an untyped procedure |
 | `cannot assign to procedure P` | procedure name on the left of `=` |
@@ -759,6 +827,20 @@ listing and simulator traces easy to follow.
   * As a value, a comparison produces `$FF` or `$00` in B.
   * Statement-level control flow uses long branches, so there's no limit on
     the size of a block.
+* **Iterative DO:**
+  * The start value is stored in the index.
+  * At the top of the loop the index is compared with the limit, which is
+    re-evaluated there (`LBHI`/`LBLO` to the exit).
+  * After the body the step is added with `ADDB`/`ADDD`, and the result
+    stored. `LBCC` goes back to the top; a carry means the addition wrapped,
+    and the loop ends.
+* **DO CASE:**
+  * The selector is range-checked (`CMPD #n` / `LBHS` past the block), then
+    doubled.
+  * `LEAX table,PCR` / `LDD D,X` / `JMP D,X` jumps through a table of
+    `FDB case-table` *offsets*. Offsets rather than addresses keep the code
+    position-independent, so the same sequence works in `--os9` modules.
+  * Each case ends with `LBRA` past the block.
 * **Array elements:**
   * *Constant subscript:* the element is an ordinary operand, `V_A+6` (or
     `V_A+6,U` in an OS-9 module).
@@ -831,8 +913,8 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts) and element assignments, checked against an independent C model of the typing rules; `make fuzz-test N=2000` runs more |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, and DO CASE, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

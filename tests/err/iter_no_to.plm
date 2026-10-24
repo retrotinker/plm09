@@ -1,0 +1,5 @@
+T: DO;
+DECLARE I BYTE;
+DO I = 1 10;
+END;
+END T;

@@ -99,7 +99,14 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
 **Statements**
 - assignment, including multiple targets `A,B(i) = e` (evaluated once)
 - `IF/THEN/ELSE`; ELSE binds to the nearest IF
-- `[L:] DO; ... END [L];` (may declare variables) and `[L:] DO WHILE e; ... END [L];` (may not)
+- `[L:] DO; ... END [L];` (may declare variables), and `[L:] DO WHILE e;`, `[L:] DO I = a TO b [BY c];` and `[L:] DO CASE e;`, which may not
+- iterative DO follows PL/M-80 manual 5.1.4:
+  - the start value is evaluated once
+  - the limit is re-evaluated before each pass, and the loop exits when the index is greater than it
+  - the step is re-evaluated after each pass, and the loop exits when adding it wraps around
+  - all three are converted to the index's type
+  - the index must be a scalar variable
+- DO CASE: cases count from 0, and null statements are cases. The manual leaves an out-of-range selector undefined; plmc range-checks it and runs no case.
 - `CALL`, `RETURN [e]`, `HALT`, and the empty statement
 
 **Operator precedence**, highest first:
@@ -137,7 +144,7 @@ Operators group left to right.
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
 - `(*)` dimensions, BASED, STRUCTURE, LABEL declarations, LITERALLY
 - INITIAL/DATA, `.` (address-of)
-- iterative DO, DO CASE, GOTO
+- GOTO
 - REENTRANT, INTERRUPT, PUBLIC
 - PLUS/MINUS, `:=`, ENABLE/DISABLE
 
@@ -162,6 +169,18 @@ The full list of messages is in `plmc.md`.
 - If the condition's root is a relational, emit the compare followed by a long branch on the inverse condition.
 - Otherwise use `LSRB` + `LBCC`.
 - Statement control flow uses long branches (`LBxx`/`LBRA`).
+
+**Iterative DO** (`gen_iter`):
+1. store the start value in the index
+2. top: compare the index with the limit and exit when it is greater (`LBHI` when the limit is a simple operand; otherwise the limit is evaluated and compared with `CMPx index` / `LBLO`)
+3. the body
+4. load the index, add the step (or `#1`), store the result, and `LBCC` back to the top. The carry flag is the wrap test, and ST leaves C alone.
+
+**DO CASE** (`gen_case`):
+1. the selector goes into D, then `CMPD #n` / `LBHS end`
+2. `LSLB`/`ROLA`, then `LEAX tab,PCR` / `LDD D,X` / `JMP D,X`
+3. `tab FDB Lcase-tab ...`: offsets, so the code is position-independent in both modes
+4. every case but the last ends with `LBRA end`
 
 **Array elements**
 - The parser can't tell `A(i)` from a call, so it builds an `E_CALL`. Sema turns it into `E_INDEX` (with `lhs` = subscript) when `A` is an array.
@@ -325,7 +344,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | lex, parse | `--tokens` / `--ast` golden files |
 | err | programs that must fail; the `.err` file holds the expected message, with position |
 | run | complete programs in sim6809, covering every operator and conversion rule, control flow, input, procedures, HALT, `--org`/`--vectors`, and an assembly check with the example hooks |
-| fuzz | `exprgen` seeded random expression programs against an independent C model of the typing rules. They include elements of `BA(4)`/`WA(4)`, with constant or `(expr) AND 3` subscripts, and assignments to elements. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
+| fuzz | `exprgen` seeded random programs against an independent C model of the language rules. They include elements of `BA(4)`/`WA(4)` (constant or `(expr) AND 3` subscripts), assignments to elements, iterative DO loops over random bounds and steps (the model follows the manual's four steps and rejects loops of over 300 passes), and `DO CASE (expr) AND 3`. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
@@ -342,7 +361,7 @@ XRoar details the suite relies on:
 - `-load` doesn't place a `.BIN` in RAM, and `-run` bypasses BASIC's EXEC. That is why the suite uses a disk image and `LOADM`.
 
 How the nitros9 suite works:
-- Each module and its `.in` file go onto a copy of the boot disk.
+- Each module and its `.in` file go onto a copy of the boot disk. The copy is first padded to the size its LSN0 header gives (`DD.TOT`). Disk images are often stored truncated, and XRoar then sees fewer cylinders than the file system uses, so files allocated past the end are silently corrupted. This was found when the suite grew to 12 programs.
 - The `startup` script starts with `-x`, so that `exit.plm`'s status 42 doesn't abort it. It then runs `t<name> </dd/<name>.in >/dd/<name>.out` for each program, with an empty file as stdin for programs that have no `.in`.
 - The script ends with `tdone` (`tests/nitros9/done.asm`), which reads the unused I/O address `$FF6A`. XRoar traps on that read (`-trap read=0xFF6A`) and quits, so no time budget has to be guessed. XRoar's `-timeout` counts emulated seconds and only guards against hangs.
 - XRoar writes the disk back, and `os9 copy -l` extracts each output with its CRs turned into newlines.
@@ -374,9 +393,10 @@ How the nitros9 suite works:
 - the PDF manuals and `make docs`
 - OS-9 support: `--os9`/`--stack`/`--name`, `plm_crt0_os9.asm`, `runtime/os9`, sim6809 `--os9` with memory protection, and the `os9` and `nitros9` suites
 - arrays, with `LENGTH`/`LAST`; the run tests `arrays` and `bigdata`, and arrays in the fuzz generator
+- iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
 
 ## Known gaps
-- **Language:** BASED, STRUCTURE, LITERALLY, INITIAL/DATA (and so `(*)` dimensions), address-of, iterative DO, DO CASE, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** BASED, STRUCTURE, LITERALLY, INITIAL/DATA (and so `(*)` dimensions), address-of, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

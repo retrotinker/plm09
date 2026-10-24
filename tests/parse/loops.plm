@@ -1,0 +1,16 @@
+/* iterative DO and DO CASE, with labels and null cases */
+L: DO;
+DECLARE (I, J) BYTE;
+DO I = 1 TO 10;
+    J = J + I;
+END;
+OUTER: DO I = 0 TO J BY 2;
+    DO CASE I MOD 3;
+        J = 0;
+        ;
+        DO;
+            J = 1;
+        END;
+    END;
+END OUTER;
+END L;

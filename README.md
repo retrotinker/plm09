@@ -103,6 +103,8 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - `IF ... THEN ... [ELSE ...]`
   - `DO; ... END;` blocks, which may have their own declarations
   - `DO WHILE ...; ... END;`
+  - `DO I = start TO limit [BY step]; ... END;`, with PL/M-80's rules: the limit and step are re-evaluated on each pass, and the loop ends when the index wraps around, so `DO I = 0 TO 255` with a BYTE `I` ends
+  - `DO CASE expr; case-0; case-1; ... END;`; an out-of-range selector runs no case
   - `CALL`, `RETURN [expr]`, `HALT`, and the empty statement `;`
 - **Procedures:**
   - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL]; ... END P;`
@@ -130,7 +132,6 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - `BASED` variables, structures, `LITERALLY`
 - `INITIAL` and `DATA`
 - the address-of operator `.`
-- iterative `DO I = ... TO ...` and `DO CASE`
 - `GOTO` and labels on other statements
 - `REENTRANT`, `INTERRUPT`, `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)

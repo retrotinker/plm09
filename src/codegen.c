@@ -12,6 +12,7 @@
 #include "sema.h"
 
 #include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -465,6 +466,81 @@ static void gen_cond_false(const Expr *e, int false_label)
 }
 
 static void gen_block(const Block *b);
+static void gen_stmt(const Stmt *s);
+
+/* DO var = from TO to [BY by]; body END  (PL/M-80 manual 5.1.4):
+   from is evaluated once; to is evaluated and compared before every pass
+   (exit when var > to); by (default 1) is evaluated after every pass and
+   added to var, and the loop ends when that addition wraps around.  All
+   three are converted to var's type. */
+static void gen_iter(const Stmt *s)
+{
+    const char *name = s->var->sym->asm_name;
+    int w = width(s->var->type);
+    const char *ld = w == 8 ? "LDB" : "LDD", *st = w == 8 ? "STB" : "STD";
+    const char *cmp = w == 8 ? "CMPB" : "CMPD", *add = w == 8 ? "ADDB" : "ADDD";
+    int top = new_label(), end = new_label();
+    Opnd o;
+
+    gen_as(s->from, w);
+    emit("%s\t%s", st, var_ref(name, 0));
+    emit_label(top);
+    if (simple_operand(s->to, w, &o)) {
+        emit("%s\t%s", ld, var_ref(name, 0));
+        emit("%s\t%s", cmp, opnd_text(&o, w, WHOLE));
+        emit("LBHI\tL%d", end);
+    } else {
+        gen_as(s->to, w);
+        emit("%s\t%s", cmp, var_ref(name, 0));
+        emit("LBLO\tL%d", end);             /* limit < var */
+    }
+    gen_block(s->block);
+    if (!s->by || simple_operand(s->by, w, &o)) {
+        emit("%s\t%s", ld, var_ref(name, 0));
+        if (s->by)
+            emit("%s\t%s", add, opnd_text(&o, w, WHOLE));
+        else
+            emit("%s\t#1", add);
+    } else {
+        gen_as(s->by, w);
+        emit("%s\t%s", add, var_ref(name, 0));
+    }
+    emit("%s\t%s", st, var_ref(name, 0));    /* ST leaves C alone */
+    emit("LBCC\tL%d", top);                  /* carry out: wrapped, done */
+    emit_label(end);
+}
+
+/* DO CASE sel; s0; s1; ... END: a jump table of offsets relative to the
+   table itself, so the code stays position-independent.  A selector out of
+   range (undefined in PL/M) runs no case. */
+static void gen_case(const Stmt *s)
+{
+    const Vec *cases = &s->block->stmts;
+    int end = new_label(), tab = new_label();
+    int *lab = xmalloc((cases->len ? cases->len : 1) * sizeof *lab);
+
+    gen_as(s->expr, 16);
+    emit("CMPD\t#%d", cases->len);
+    emit("LBHS\tL%d", end);
+    emit("LSLB");
+    emit("ROLA");
+    emit("LEAX\tL%d,PCR", tab);
+    emit("LDD\tD,X");
+    emit("JMP\tD,X");
+    emit_label(tab);
+    for (int i = 0; i < cases->len; i++) {
+        lab[i] = new_label();
+        emit("FDB\tL%d-L%d", lab[i], tab);
+    }
+    for (int i = 0; i < cases->len; i++) {
+        emit_label(lab[i]);
+        gen_stmt(cases->items[i]);
+        if (i + 1 < cases->len)
+            emit("LBRA\tL%d", end);
+    }
+    emit_label(end);
+    free(lab);
+}
 
 static void gen_stmt(const Stmt *s)
 {
@@ -527,6 +603,12 @@ static void gen_stmt(const Stmt *s)
         emit_label(end);
         break;
     }
+    case S_ITER:
+        gen_iter(s);
+        break;
+    case S_CASE:
+        gen_case(s);
+        break;
     case S_RETURN:
         if (s->expr)
             gen_as(s->expr, width(s->proc->ret));

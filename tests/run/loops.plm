@@ -1,0 +1,103 @@
+/* iterative DO (PL/M-80 manual 5.1.4).  Expected values in comments. */
+LOOPS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (I, J, B, N) BYTE, (W, S, LIM, STP) ADDRESS;
+
+FINDFIRST: PROCEDURE (X) BYTE;      /* local index; RETURN from the loop */
+    DECLARE (X, K) BYTE;
+    DO K = 0 TO 20;
+        IF K * K >= X THEN RETURN K;
+    END;
+    RETURN 255;
+END FINDFIRST;
+
+S = 0;
+DO I = 1 TO 10;
+    S = S + I;
+END;
+CALL PUTDEC(S);                     /* 55 */
+CALL PUTDEC(I);                     /* index after the loop: 11 */
+
+S = 0;
+DO I = 1 TO 10 BY 2;
+    S = S + I;
+END;
+CALL PUTDEC(S);                     /* 1+3+5+7+9 = 25 */
+CALL PUTDEC(I);                     /* 11 */
+
+N = 0;
+DO I = 5 TO 4;                      /* start above the limit: no passes */
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* 0 */
+CALL PUTDEC(I);                     /* 5 */
+
+W = 0;
+DO B = 0 TO 255;                    /* ends by wrap-around */
+    W = W + 1;
+END;
+CALL PUTDEC(W);                     /* 256 passes */
+CALL PUTDEC(B);                     /* wrapped to 0 */
+
+N = 0;
+DO W = 65530 TO 65535 BY 2;         /* 65530, 65532, 65534, then wrap */
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* 3 */
+CALL PUTDEC(W);                     /* 0 */
+
+LIM = 10;                           /* the limit is evaluated every pass */
+N = 0;
+DO W = 1 TO LIM;
+    LIM = LIM - 1;
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* W=1..5 pass, W=6 > LIM=5: 5 */
+
+STP = 1;                            /* so is the step, after each pass */
+N = 0;
+DO W = 0 TO 100 BY STP;
+    STP = STP * 2;
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* W = 0,2,6,14,30,62: 6 */
+CALL PUTDEC(W);                     /* 126 */
+
+N = 0;
+DO B = 0 TO 300;                    /* limit converted to BYTE: 300 -> 44 */
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* 45 */
+CALL PUTDEC(B);                     /* 45 */
+
+LIM = 258;                          /* ADDRESS variable limit, BYTE index: 2 */
+N = 0;
+DO B = 0 TO LIM;
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* 3 */
+
+N = 0;
+DO B = 1 TO 255 BY -1;              /* -1 is 255 for a BYTE: 1+255 wraps */
+    N = N + 1;
+END;
+CALL PUTDEC(N);                     /* 1 */
+CALL PUTDEC(B);                     /* 0 */
+
+N = 0;
+OUTER: DO I = 1 TO 4;
+    INNER: DO J = I TO 4;
+        N = N + 1;
+    END INNER;
+END OUTER;
+CALL PUTDEC(N);                     /* pairs I <= J in 1..4: 10 */
+
+CALL PUTDEC(FINDFIRST(50));         /* 8*8 = 64 >= 50: 8 */
+CALL PUTDEC(FINDFIRST(0));          /* 0 */
+
+DO I = 'A' TO 'E';
+    CALL PUTCH(I);
+END;
+CALL PUTCH(10);                     /* ABCDE */
+END LOOPS;

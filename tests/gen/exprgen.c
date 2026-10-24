@@ -8,7 +8,10 @@
  * assigned to a BYTE, assigned to an array element (printed back with a
  * constant subscript), or as an IF condition (prints 1 or 0).  Array
  * operands use a constant subscript or "(expr) AND 3", so they stay in
- * range.  The expected output comes from an
+ * range.  Two more statement kinds exercise control flow: an iterative DO
+ * over random bounds and step (printing the sum of the index values and
+ * the final index, modelled step by step as in the PL/M-80 manual 5.1.4),
+ * and a DO CASE with a "(expr) AND 3" selector and four cases.  The expected output comes from an
  * independent C model of the PL/M-80 rules:
  *   constants <= 255 are BYTE
  *   + - MOD AND OR XOR: BYTE if both operands BYTE (wrapping), else ADDRESS
@@ -183,6 +186,78 @@ static Val expr(char *buf, int depth)
     return r;
 }
 
+/* an expression for a loop bound or step: small, no division by zero */
+static Val small_expr(char *buf)
+{
+    Val v;
+    do {
+        div_by_zero = 0;
+        v = rnd(2) ? expr(buf, 2) : leaf(buf);
+    } while (div_by_zero);
+    return v;
+}
+
+/* DO index = from TO to [BY by]; SUM = SUM + index; END;  Returns 0 (and
+   writes nothing) if the loop would make more than 300 passes. */
+static int gen_loop(FILE *plm, FILE *exp)
+{
+    char from[BUFSZ], to[BUFSZ], by[BUFSZ];
+    int word = rnd(2), has_by = rnd(2);
+    unsigned mask = word ? 0xffff : 0xff;
+    Val f = small_expr(from), t = small_expr(to), b = { 1, 8 };
+    unsigned i, sum = 0, passes = 0;
+
+    if (has_by)
+        b = small_expr(by);
+    /* the bounds and step don't involve the index or SUM, so re-evaluating
+       them each pass (as PL/M does) gives the same values */
+    i = f.v & mask;
+    for (;;) {
+        if (i > (t.v & mask))
+            break;
+        sum = (sum + i) & 0xffff;
+        if (++passes > 300)
+            return 0;
+        unsigned next = i + (b.v & mask);
+        i = next & mask;
+        if (next > mask)                  /* wrapped around */
+            break;
+    }
+    const char *ix = word ? "IW" : "IB";
+    fprintf(plm, "SUM = 0;\nDO %s = %s TO %s", ix, from, to);
+    if (has_by)
+        fprintf(plm, " BY %s", by);
+    fprintf(plm, ";\n    SUM = SUM + %s;\nEND;\nCALL PUTDEC(SUM);\nCALL PUTDEC(%s);\n", ix, ix);
+    fprintf(exp, "%u\n%u\n", sum, i);
+    return 1;
+}
+
+/* DO CASE (expr) AND 3; with four cases assigning RW, one maybe null */
+static void gen_case(FILE *plm, FILE *exp)
+{
+    char sel[BUFSZ], e[BUFSZ];
+    unsigned k, rw = 12345, chosen = rw;
+    int null_case = rnd(2) ? (int)rnd(4) : -1;
+
+    do {
+        div_by_zero = 0;
+        k = subscript(sel, 1);
+    } while (div_by_zero);
+    fprintf(plm, "RW = 12345;\nDO CASE %s;\n", sel);
+    for (int c = 0; c < 4; c++) {
+        if (c == null_case) {
+            fprintf(plm, "    ;\n");
+            continue;
+        }
+        Val v = small_expr(e);
+        fprintf(plm, "    RW = %s;\n", e);
+        if ((unsigned)c == k)
+            chosen = v.v;
+    }
+    fprintf(plm, "END;\nCALL PUTDEC(RW);\n");
+    fprintf(exp, "%u\n", chosen);
+}
+
 int main(int argc, char **argv)
 {
     FILE *plm, *exp;
@@ -201,7 +276,7 @@ int main(int argc, char **argv)
     fprintf(plm, "/* exprgen seed %s */\nFUZZ: DO;\n", argv[1]);
     fprintf(plm, "PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;\n");
     fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
-    fprintf(plm, "DECLARE BA(4) BYTE, WA(4) ADDRESS;\n");
+    fprintf(plm, "DECLARE BA(4) BYTE, WA(4) ADDRESS, IB BYTE, (IW, SUM) ADDRESS;\n");
     for (int i = 0; i < NVARS; i++) {
         bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
         wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
@@ -218,7 +293,7 @@ int main(int argc, char **argv)
             div_by_zero = 0;
             v = expr(buf, 0);
         } while (div_by_zero);
-        switch (rnd(4)) {
+        switch (rnd(6)) {
         case 0:
             fprintf(plm, "RW = %s;\nCALL PUTDEC(RW);\n", buf);
             fprintf(exp, "%u\n", v.v);
@@ -246,6 +321,13 @@ int main(int argc, char **argv)
             fprintf(exp, "%u\n", word ? v.v : v.v & 0xff);
             break;
         }
+        case 4:
+            if (!gen_loop(plm, exp))
+                s--;                        /* too many passes: try again */
+            break;
+        case 5:
+            gen_case(plm, exp);
+            break;
         default:
             fprintf(plm, "IF %s THEN CALL PUTDEC(1); ELSE CALL PUTDEC(0);\n", buf);
             fprintf(exp, "%u\n", v.v & 1);

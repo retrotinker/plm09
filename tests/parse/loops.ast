@@ -1,0 +1,14 @@
+PROGRAM L
+  DECLARE I BYTE
+  DECLARE J BYTE
+  DO I = 1 TO 10
+    ASSIGN J = (+ J I)
+  OUTER: DO I = 0 TO J BY 2
+    DO CASE (MOD I 3)
+      CASE 0
+        ASSIGN J = 0
+      CASE 1
+        NULL
+      CASE 2
+        DO
+          ASSIGN J = 1

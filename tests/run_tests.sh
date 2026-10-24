@@ -240,7 +240,8 @@ os9_build() {     # $1 = source, $2 = base path, [$3 = module name]; module in $
 }
 
 os9_check_pic() {   # $1 = name, $2 = generated .asm
-    if grep -nE '^[[:space:]]+(JSR|JMP)[[:space:]]' "$2" >"$2.pic"; then
+    # absolute = operand without an index register (JMP D,X is fine)
+    if grep -nE '^[[:space:]]+(JSR|JMP)[[:space:]]+[^,[:space:]]+([[:space:]]|$)' "$2" >"$2.pic"; then
         bad "$1" "absolute JSR/JMP in --os9 output"; cat "$2.pic"; return 1
     fi
     if grep -nE '^[[:space:]]+[A-Z]+[[:space:]]+#?V[0-9]*_[A-Z0-9]+(\+[0-9]+)?([[:space:]]|$)' "$2" >"$2.pic"; then
@@ -280,14 +281,16 @@ suite_os9() {
         base=$OUT/os9-fuzz
         "$gen" "$seed" "$base.plm" "$base.expected"
         echo "rc=0" >>"$base.expected"
-        if os9_build "$base.plm" "$base" && os9_check_pic "os9/fuzz/$seed" "$base.asm" &&
-           os9_run "os9/fuzz/$seed" "$base.mod" /dev/null "$base.expected"; then
+        if ! os9_build "$base.plm" "$base"; then
+            bad "os9/fuzz/$seed" "build failed"
+        elif os9_check_pic "os9/fuzz/$seed" "$base.asm" &&
+             os9_run "os9/fuzz/$seed" "$base.mod" /dev/null "$base.expected"; then
             ok
-        else
-            cp "$base.plm" "$OUT/os9-fuzz-fail-$seed.plm"
-            bad "os9/fuzz/$seed" "program kept as $OUT/os9-fuzz-fail-$seed.plm"
-            break
+            continue
         fi
+        cp "$base.plm" "$OUT/os9-fuzz-fail-$seed.plm"
+        echo "  program kept as $OUT/os9-fuzz-fail-$seed.plm"
+        break
     done
 }
 
@@ -309,6 +312,12 @@ suite_nitros9() {
     [ -r "$rom" ] || { echo "nitros9: no CoCo 3 ROM at $rom (set COCO3_ROM; skipped)"; exit 0; }
 
     cp "$disk" "$img"
+    # Images are often stored truncated after the last used sector, and XRoar
+    # then sees fewer cylinders than the file system has (sectors written
+    # beyond the end are lost).  Pad to DD.TOT (LSN0 bytes 0-2) sectors.
+    local want
+    want=$(od -An -tu1 -N3 "$img" | awk '{ print ($1 * 65536 + $2 * 256 + $3) * 256 }')
+    [ "$want" -gt "$(stat -c %s "$img")" ] && truncate -s "$want" "$img"
     : >"$OUT/nitros9-empty"
     os9 copy -r "$OUT/nitros9-empty" "$img,empty.in" >/dev/null
     # -x: keep going when a command fails (exit.plm exits with status 42)

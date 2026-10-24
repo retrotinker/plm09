@@ -393,10 +393,26 @@ static Stmt *parse_do(Loc loc, char *label)
         s->expr = parse_expr();
         expect(T_SEMI);
         s->block = parse_block(0);
-    } else if (t->type == K_CASE) {
-        unsupported(t->loc, "DO CASE");
+    } else if (accept(K_CASE)) {
+        /* DO CASE expr; one statement per case */
+        s = new_stmt(S_CASE, loc);
+        s->expr = parse_expr();
+        expect(T_SEMI);
+        s->block = parse_block(0);
     } else if (t->type == T_IDENT) {
-        unsupported(t->loc, "iterative DO");
+        /* DO var = from TO to [BY by]; */
+        Token id = next();
+        s = new_stmt(S_ITER, loc);
+        s->var = new_expr(E_NAME, id.loc);
+        s->var->name = id.text;
+        expect(T_EQ);
+        s->from = parse_expr();
+        expect(K_TO);
+        s->to = parse_expr();
+        if (accept(K_BY))
+            s->by = parse_expr();
+        expect(T_SEMI);
+        s->block = parse_block(0);
     } else {
         expect(T_SEMI);
         s = new_stmt(S_DO, loc);

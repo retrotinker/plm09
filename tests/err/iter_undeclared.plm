@@ -1,0 +1,4 @@
+T: DO;
+DO I = 1 TO 3;
+END;
+END T;

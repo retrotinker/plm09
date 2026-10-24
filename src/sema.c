@@ -304,6 +304,24 @@ static void check_stmt(Stmt *s, Scope *scope)
         check_expr(s->expr, scope);
         check_block(s->block, scope);
         break;
+    case S_ITER: {
+        Expr *v = s->var;
+        Symbol *sym = v->sym = scope_lookup(scope, v->name);
+        if (!sym || sym->kind != SYM_VAR || sym->dim)
+            error_at(v->loc, "the index of an iterative DO must be a scalar variable%s",
+                     sym ? "" : " (not declared)");
+        v->type = sym->type;
+        check_expr(s->from, scope);
+        check_expr(s->to, scope);
+        if (s->by)
+            check_expr(s->by, scope);
+        check_block(s->block, scope);
+        break;
+    }
+    case S_CASE:
+        check_expr(s->expr, scope);
+        check_block(s->block, scope);
+        break;
     case S_RETURN:
         if (!cur)
             error_at(s->loc, "RETURN outside a procedure");

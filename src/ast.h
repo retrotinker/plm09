@@ -38,7 +38,7 @@ typedef struct Expr {
 } Expr;
 
 typedef enum StmtKind {
-    S_ASSIGN, S_CALL, S_IF, S_DO, S_WHILE, S_RETURN, S_HALT, S_NULL,
+    S_ASSIGN, S_CALL, S_IF, S_DO, S_WHILE, S_ITER, S_CASE, S_RETURN, S_HALT, S_NULL,
 } StmtKind;
 
 struct Block;
@@ -47,9 +47,11 @@ typedef struct Stmt {
     StmtKind kind;
     Loc loc;
     Vec targets;            /* S_ASSIGN: Expr* (E_NAME or E_INDEX) */
-    Expr *expr;             /* value, called procedure, condition, result */
+    Expr *expr;             /* value, called procedure, condition, result,
+                               S_CASE selector */
+    Expr *var, *from, *to, *by;     /* S_ITER: DO var = from TO to [BY by] */
     struct Stmt *then_s, *else_s;   /* S_IF */
-    struct Block *block;    /* S_DO, S_WHILE */
+    struct Block *block;    /* S_DO, S_WHILE, S_ITER; S_CASE: stmts = cases */
     char *label;            /* S_DO: optional label */
     struct Proc *proc;      /* S_RETURN: enclosing procedure, set by sema */
 } Stmt;

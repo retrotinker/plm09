@@ -40,6 +40,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 - **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
   - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
   - The startup script needs `-x` to survive non-zero exit statuses.
+  - The image copy is padded to `DD.TOT` sectors, because truncated images make XRoar see too few cylinders and later files get corrupted.
   - `tests/nitros9/done.asm` reads `$FF6A`, which XRoar traps on to quit.
   - `-timeout` counts emulated seconds.
 - **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
@@ -109,7 +110,7 @@ How the simulator itself is tested:
 The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` nodes) → `sema.c` (with `symtab.c`) → `codegen.c`, and `main.c` is the driver. Each stage reports the first error through `error_at()` in `util.c` and exits. Error tests match these messages, so a reworded message means updating `tests/err/*.err`.
 
 - **Lexer and parser:** the parser pulls tokens from the lexer through a 3-token lookahead buffer.
-- **Unsupported features** (LITERALLY, iterative DO, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (LITERALLY, GOTO, and so on) are rejected in the parser with "X is not supported".
 - **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST` into constants. Assignment targets are parsed as `E_INDEX` directly.
 - **Declaration order:** sema processes declarations in source order (declare before use), which is also how recursion stays detectable. A procedure's name is visible inside its own body.
 - **Output of sema:** it gives every `Expr` a `type`, resolves `sym`, sets `Stmt.proc` for RETURN, and fills `sema_vars` (the data section) and `sema_procs` (the order procedures are emitted in).
@@ -173,7 +174,9 @@ The hooks are selected only through the include path: `-I runtime/sim` for the s
 - Computed subscripts go through `gen_elem_offset()`, which leaves the offset in D and the base in X.
 - A store pushes the value first.
 
-**Planned extensions** (BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.storage` is reserved for REENTRANT. Keep the future words reserved in the lexer.
+**Iterative DO / DO CASE:** these follow the PL/M-80 manual's rules exactly (limit and step re-evaluated, exit on wrap-around), and the fuzz model in `exprgen.c` mirrors them. Change both together. DO CASE tables hold offsets (`FDB Lk-Ltab`), so they stay position-independent.
+
+**Planned extensions** (BASED, LITERALLY, REENTRANT): `Symbol.storage` is reserved for REENTRANT. Keep the future words reserved in the lexer.
 
 ## lwasm pitfalls
 

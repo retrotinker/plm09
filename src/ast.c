@@ -133,6 +133,32 @@ static void dump_stmt(const Stmt *s, int depth)
         putchar('\n');
         dump_block(s->block, depth + 1);
         break;
+    case S_ITER:
+        if (s->label)
+            printf("%s: ", s->label);
+        printf("DO %s = ", s->var->name);
+        dump_expr(s->from);
+        printf(" TO ");
+        dump_expr(s->to);
+        if (s->by) {
+            printf(" BY ");
+            dump_expr(s->by);
+        }
+        putchar('\n');
+        dump_block(s->block, depth + 1);
+        break;
+    case S_CASE:
+        if (s->label)
+            printf("%s: ", s->label);
+        printf("DO CASE ");
+        dump_expr(s->expr);
+        putchar('\n');
+        for (int i = 0; i < s->block->stmts.len; i++) {
+            indent(depth + 1);
+            printf("CASE %d\n", i);
+            dump_stmt(s->block->stmts.items[i], depth + 2);
+        }
+        break;
     case S_RETURN:
         printf("RETURN");
         if (s->expr) {
