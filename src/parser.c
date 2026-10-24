@@ -10,6 +10,9 @@
  * mul      := unary { (*|/|MOD) unary }
  * unary    := (-|+) unary | primary
  * primary  := NUMBER | IDENT [ '(' expr {',' expr} ')' ] | '(' expr ')'
+ *
+ * NAME(args) in an expression is parsed as a call; sema turns it into an
+ * array element (E_INDEX) when NAME is an array.
  */
 #include "parser.h"
 #include "lexer.h"
@@ -256,7 +259,6 @@ static Type parse_type(void)
     if (accept(K_ADDRESS))
         return TY_ADDRESS;
     switch (t->type) {
-    case T_LPAREN: unsupported(t->loc, "arrays");
     case K_LITERALLY: unsupported(t->loc, "LITERALLY");
     case K_BASED: unsupported(t->loc, "BASED variables");
     case K_LABEL: unsupported(t->loc, "LABEL declarations");
@@ -267,7 +269,8 @@ static Type parse_type(void)
     }
 }
 
-/* DECLARE item {, item} ;   item := IDENT type | '(' IDENT {, IDENT} ')' type */
+/* DECLARE item {, item} ;
+   item := (IDENT | '(' IDENT {, IDENT} ')') ['(' NUMBER ')'] type */
 static void parse_declare(Block *b)
 {
     expect(K_DECLARE);
@@ -287,6 +290,19 @@ static void parse_declare(Block *b)
             *copy = id;
             vec_push(&names, copy);
         }
+        unsigned dim = 0;
+        Loc dim_loc = peek()->loc;
+        if (accept(T_LPAREN)) {
+            if (peek_type(0) == T_STAR)
+                unsupported(peek()->loc, "an implicit dimension '(*)'");
+            dim_loc = peek()->loc;
+            if (peek_type(0) != T_NUMBER)
+                unexpected("an array dimension (a number)");
+            dim = next().value;
+            if (dim == 0)
+                error_at(dim_loc, "array dimension must be from 1 to 65535");
+            expect(T_RPAREN);
+        }
         Type type = parse_type();
         for (int i = 0; i < names.len; i++) {
             Token *id = names.items[i];
@@ -295,6 +311,8 @@ static void parse_declare(Block *b)
             v->name = id->text;
             v->loc = id->loc;
             v->type = type;
+            v->dim = dim;
+            v->dim_loc = dim_loc;
             d->kind = D_VAR;
             d->var = v;
             vec_push(&b->decls, d);
@@ -389,16 +407,30 @@ static Stmt *parse_do(Loc loc, char *label)
     return s;
 }
 
+/* target := IDENT [ '(' expr ')' ] */
+static Expr *parse_target(void)
+{
+    Token id = expect(T_IDENT);
+    Expr *e = new_expr(E_NAME, id.loc);
+
+    e->name = id.text;
+    if (accept(T_LPAREN)) {
+        e->kind = E_INDEX;
+        e->lhs = parse_expr();
+        if (peek_type(0) == T_COMMA)
+            error_at(peek()->loc, "an array takes exactly one subscript");
+        expect(T_RPAREN);
+    }
+    return e;
+}
+
 static Stmt *parse_assignment(void)
 {
     Stmt *s = new_stmt(S_ASSIGN, peek()->loc);
 
-    do {
-        Token id = expect(T_IDENT);
-        Expr *e = new_expr(E_NAME, id.loc);
-        e->name = id.text;
-        vec_push(&s->targets, e);
-    } while (accept(T_COMMA));
+    do
+        vec_push(&s->targets, parse_target());
+    while (accept(T_COMMA));
     if (peek_type(0) == T_ASSIGN)
         unsupported(peek()->loc, "embedded assignment ':='");
     expect(T_EQ);
@@ -426,8 +458,6 @@ static Stmt *parse_stmt(void)
                 error_at(loc, "declarations must come before statements");
             unsupported(loc, "a label on this statement (only DO blocks may be labeled)");
         }
-        if (peek_type(1) == T_LPAREN)
-            unsupported(loc, "subscripted assignment (arrays)");
         return parse_assignment();
     case K_CALL: {
         next();

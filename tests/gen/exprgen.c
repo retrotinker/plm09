@@ -2,10 +2,13 @@
  *
  * usage: exprgen SEED out.plm out.expected
  *
- * Writes a program that sets some BYTE and ADDRESS variables, then
- * evaluates random fully parenthesized expressions and prints each result
- * with PUTDEC, either assigned to an ADDRESS, assigned to a BYTE, or as an
- * IF condition (prints 1 or 0).  The expected output comes from an
+ * Writes a program that sets some BYTE and ADDRESS variables and the arrays
+ * BA(4) BYTE and WA(4) ADDRESS, then evaluates random fully parenthesized
+ * expressions and prints each result with PUTDEC: assigned to an ADDRESS,
+ * assigned to a BYTE, assigned to an array element (printed back with a
+ * constant subscript), or as an IF condition (prints 1 or 0).  Array
+ * operands use a constant subscript or "(expr) AND 3", so they stay in
+ * range.  The expected output comes from an
  * independent C model of the PL/M-80 rules:
  *   constants <= 255 are BYTE
  *   + - MOD AND OR XOR: BYTE if both operands BYTE (wrapping), else ADDRESS
@@ -43,6 +46,7 @@ static unsigned rnd(unsigned n)
 }
 
 static unsigned bvals[NVARS], wvals[NVARS];
+static unsigned barr[4], warr[4];      /* BA(0..3), WA(0..3) */
 static int div_by_zero;
 
 static unsigned mask(int w)
@@ -81,6 +85,36 @@ static Val leaf(char *buf)
     return r;
 }
 
+static Val expr(char *buf, int depth);
+
+/* subscript 0..3: a constant, or (expr) AND 3 */
+static unsigned subscript(char *buf, int depth)
+{
+    char a[BUFSZ];
+
+    if (depth >= MAXDEPTH || rnd(2)) {
+        unsigned k = rnd(4);
+        sprintf(buf, "%u", k);
+        return k;
+    }
+    Val x = expr(a, depth + 1);
+    snprintf(buf, BUFSZ, "(%s) AND 3", a);
+    return x.v & 3;
+}
+
+static Val element(char *buf, int depth)
+{
+    char a[BUFSZ];
+    int word = rnd(2);
+    unsigned k = subscript(a, depth);
+    Val r;
+
+    snprintf(buf, BUFSZ, "%s(%s)", word ? "WA" : "BA", a);
+    r.v = word ? warr[k] : barr[k];
+    r.w = word ? 16 : 8;
+    return r;
+}
+
 static Val expr(char *buf, int depth)
 {
     static const char *const ops[] = {
@@ -92,7 +126,7 @@ static Val expr(char *buf, int depth)
     int k;
 
     if (depth >= MAXDEPTH || rnd(4) == 0)
-        return leaf(buf);
+        return rnd(5) ? leaf(buf) : element(buf, depth);
 
     k = rnd(17);
     if (k >= 14) {                          /* unary */
@@ -167,10 +201,16 @@ int main(int argc, char **argv)
     fprintf(plm, "/* exprgen seed %s */\nFUZZ: DO;\n", argv[1]);
     fprintf(plm, "PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;\n");
     fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
+    fprintf(plm, "DECLARE BA(4) BYTE, WA(4) ADDRESS;\n");
     for (int i = 0; i < NVARS; i++) {
         bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
         wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
         fprintf(plm, "B%d = %u; W%d = %u;\n", i, bvals[i], i, wvals[i]);
+    }
+    for (int i = 0; i < 4; i++) {
+        barr[i] = rnd(256);
+        warr[i] = rnd(65536);
+        fprintf(plm, "BA(%d) = %u; WA(%d) = %u;\n", i, barr[i], i, warr[i]);
     }
     for (int s = 0; s < NSTMTS; s++) {
         Val v;
@@ -178,7 +218,7 @@ int main(int argc, char **argv)
             div_by_zero = 0;
             v = expr(buf, 0);
         } while (div_by_zero);
-        switch (rnd(3)) {
+        switch (rnd(4)) {
         case 0:
             fprintf(plm, "RW = %s;\nCALL PUTDEC(RW);\n", buf);
             fprintf(exp, "%u\n", v.v);
@@ -187,6 +227,25 @@ int main(int argc, char **argv)
             fprintf(plm, "RB = %s;\nCALL PUTDEC(RB);\n", buf);
             fprintf(exp, "%u\n", v.v & 0xff);
             break;
+        case 2: {
+            /* store into an element; the subscript has no side effects, so
+               evaluating it before or after the value gives the same k */
+            char sub[BUFSZ];
+            unsigned k;
+            int word = rnd(2);
+            do {
+                div_by_zero = 0;
+                k = subscript(sub, 1);
+            } while (div_by_zero);
+            fprintf(plm, "%s(%s) = %s;\nCALL PUTDEC(%s(%u));\n",
+                    word ? "WA" : "BA", sub, buf, word ? "WA" : "BA", k);
+            if (word)
+                warr[k] = v.v;
+            else
+                barr[k] = v.v & 0xff;
+            fprintf(exp, "%u\n", word ? v.v : v.v & 0xff);
+            break;
+        }
         default:
             fprintf(plm, "IF %s THEN CALL PUTDEC(1); ELSE CALL PUTDEC(0);\n", buf);
             fprintf(exp, "%u\n", v.v & 1);

@@ -55,15 +55,18 @@ static void emit_source(Loc loc)
     fprintf(out, "; %d: %s\n", loc.line, text);
 }
 
-/* operand naming a variable (or byte offset `plus` into it): absolute,
+/* operand naming a variable, or the byte `offset` bytes into it: absolute,
    or relative to U (the data area) in position-independent mode */
-static const char *var_ref(const char *name, int plus)
+static const char *var_ref(const char *name, unsigned offset)
 {
     static char bufs[4][80];
     static int k;
     char *b = bufs[k++ & 3];
+    char off[16] = "";
 
-    snprintf(b, sizeof bufs[0], "%s%s%s", name, plus ? "+1" : "", pic ? ",U" : "");
+    if (offset)
+        snprintf(off, sizeof off, "+%u", offset & 0xffff);
+    snprintf(b, sizeof bufs[0], "%s%s%s", name, off, pic ? ",U" : "");
     return b;
 }
 
@@ -91,8 +94,8 @@ typedef enum { OPND_STACK, OPND_MEM, OPND_IMM } OpndKind;
 
 typedef struct Opnd {
     OpndKind kind;
-    const char *name;   /* OPND_MEM */
-    unsigned value;     /* OPND_IMM */
+    const char *name;   /* OPND_MEM: variable */
+    unsigned value;     /* OPND_MEM: byte offset into it; OPND_IMM: value */
 } Opnd;
 
 enum { WHOLE, HIGH, LOW };
@@ -106,7 +109,7 @@ static const char *opnd_text(const Opnd *o, int w, int part)
     case OPND_STACK:
         return w == 16 && part == WHOLE ? ",S++" : ",S+";
     case OPND_MEM:
-        return var_ref(o->name, part == LOW);
+        return var_ref(o->name, o->value + (part == LOW));
     default:
         if (w == 16 && part == WHOLE)
             snprintf(buf, sizeof buf, "#$%04X", o->value & 0xffff);
@@ -122,6 +125,26 @@ static int is_var(const Expr *e)
     return e->kind == E_NAME && e->sym->kind == SYM_VAR;
 }
 
+static unsigned elem_size(const Expr *e)
+{
+    return e->type == TY_BYTE ? 1 : 2;
+}
+
+/* a variable, or an array element with a constant subscript: a fixed
+   location, described by the variable and a byte offset */
+static int fixed_location(const Expr *e, unsigned *offset)
+{
+    if (is_var(e)) {
+        *offset = 0;
+        return 1;
+    }
+    if (e->kind == E_INDEX && e->lhs->kind == E_NUM) {
+        *offset = (e->lhs->value * elem_size(e)) & 0xffff;
+        return 1;
+    }
+    return 0;
+}
+
 /* can e be used directly as a w-bit instruction operand? */
 static int simple_operand(const Expr *e, int w, Opnd *o)
 {
@@ -130,7 +153,7 @@ static int simple_operand(const Expr *e, int w, Opnd *o)
         o->value = e->value;
         return 1;
     }
-    if (is_var(e) && width(e->type) == w) {
+    if (fixed_location(e, &o->value) && width(e->type) == w) {
         o->kind = OPND_MEM;
         o->name = e->sym->asm_name;
         return 1;
@@ -151,6 +174,8 @@ static int contains_call(const Expr *e)
         return contains_call(e->lhs);
     case E_BINARY:
         return contains_call(e->lhs) || contains_call(e->rhs);
+    case E_INDEX:
+        return contains_call(e->lhs);
     }
     return 1;
 }
@@ -241,6 +266,21 @@ static void gen_compare(const Expr *e)
 
     gen_operands(e->lhs, e->rhs, w, &o);
     emit("%s\t%s", w == 8 ? "CMPB" : "CMPD", opnd_text(&o, w, WHOLE));
+}
+
+/* array element with a computed subscript: leave the byte offset of the
+   element in D and the array's address in X */
+static void gen_elem_offset(const Expr *e)
+{
+    gen_as(e->lhs, 16);
+    if (elem_size(e) == 2) {
+        emit("LSLB");
+        emit("ROLA");
+    }
+    if (pic)
+        emit("LEAX\t%s", var_ref(e->sym->asm_name, 0));
+    else
+        emit("LDX\t#%s", e->sym->asm_name);
 }
 
 static void gen_call(const Expr *e);
@@ -349,6 +389,17 @@ static void gen_expr(const Expr *e)
     case E_BINARY:
         gen_binary(e);
         break;
+    case E_INDEX: {
+        unsigned off;
+        const char *ld = e->type == TY_BYTE ? "LDB" : "LDD";
+        if (fixed_location(e, &off)) {
+            emit("%s\t%s", ld, var_ref(e->sym->asm_name, off));
+        } else {
+            gen_elem_offset(e);
+            emit("%s\tD,X", ld);
+        }
+        break;
+    }
     }
 }
 
@@ -422,15 +473,27 @@ static void gen_stmt(const Stmt *s)
 
     switch (s->kind) {
     case S_ASSIGN: {
-        int widen = 0;
+        int widen = 0, w;
         gen_expr(s->expr);
         for (int i = 0; i < s->targets.len; i++)
             widen |= ((Expr *)s->targets.items[i])->type == TY_ADDRESS;
         if (widen && s->expr->type == TY_BYTE)
             emit("CLRA");
+        w = widen || s->expr->type == TY_ADDRESS ? 16 : 8;  /* width held in B/D */
         for (int i = 0; i < s->targets.len; i++) {
             const Expr *t = s->targets.items[i];
-            emit("%s\t%s", t->type == TY_BYTE ? "STB" : "STD", var_ref(t->sym->asm_name, 0));
+            const char *st = t->type == TY_BYTE ? "STB" : "STD";
+            unsigned off;
+            if (fixed_location(t, &off)) {
+                emit("%s\t%s", st, var_ref(t->sym->asm_name, off));
+            } else {
+                /* computing the element's address needs D: save the value */
+                push(w);
+                gen_elem_offset(t);
+                emit("LEAX\tD,X");
+                pull(w);
+                emit("%s\t,X", st);
+            }
         }
         break;
     }
@@ -488,7 +551,8 @@ static void emit_variables(void)
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
-        fprintf(out, "%s\tRMB\t%d\n", v->asm_name, v->type == TY_BYTE ? 1 : 2);
+        unsigned n = (v->dim ? (unsigned)v->dim : 1) * (v->type == TY_BYTE ? 1 : 2);
+        fprintf(out, "%s\tRMB\t%u\n", v->asm_name, n);
     }
 }
 

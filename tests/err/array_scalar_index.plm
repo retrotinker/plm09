@@ -1,0 +1,4 @@
+T: DO;
+DECLARE (X, Y) BYTE;
+Y = X(1);
+END T;

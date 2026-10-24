@@ -14,7 +14,7 @@ typedef struct Symbol {
     char *name;
     SymKind kind;
     Type type;              /* variable type, or procedure result type */
-    int dim;                /* 0 = scalar; reserved for arrays */
+    int dim;                /* number of array elements; 0 = scalar */
     Storage storage;
     int scope_id;
     char *asm_name;         /* label in the generated assembly */

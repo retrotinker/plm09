@@ -76,7 +76,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 (`1$000`), and comments are written `/* */`.
 
 **Supported**
-- **Types:** `BYTE` (8-bit unsigned) and `ADDRESS` (16-bit unsigned) scalars.
+- **Types:** `BYTE` (8-bit unsigned) and `ADDRESS` (16-bit unsigned) scalars and arrays.
   - `DECLARE X BYTE;`
   - `DECLARE (A, B) ADDRESS;`
   - `DECLARE X BYTE, Y ADDRESS;`
@@ -91,6 +91,13 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   5. `NOT`
   6. `AND`
   7. `OR XOR`
+- **Arrays:**
+  - `DECLARE BUF(80) BYTE;` declares `BUF(0)` to `BUF(79)`.
+  - Elements can be used anywhere a variable can, including as assignment targets.
+  - Subscripts are any expression and aren't range-checked, as in PL/M-80.
+  - A plain `BUF` means `BUF(0)`.
+  - `LENGTH(BUF)` and `LAST(BUF)` give the size and the highest subscript.
+  - Arrays can't be parameters.
 - **Statements:**
   - assignment, including several targets (`A, B = 0;`)
   - `IF ... THEN ... [ELSE ...]`
@@ -120,7 +127,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- arrays, `BASED` variables, structures, `LITERALLY`
+- `BASED` variables, structures, `LITERALLY`
 - `INITIAL` and `DATA`
 - the address-of operator `.`
 - iterative `DO I = ... TO ...` and `DO CASE`
@@ -128,7 +135,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - `REENTRANT`, `INTERRUPT`, `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)
 - embedded assignment `:=`
-- built-in procedures such as `HIGH`, `LOW` and `SHL`
+- built-in procedures other than `LENGTH` and `LAST`, such as `HIGH`, `LOW` and `SHL`
 
 The compiler reports these with an error ("... is not supported") rather than
 misreading them.

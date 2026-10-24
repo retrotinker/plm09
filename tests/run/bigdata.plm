@@ -1,0 +1,12 @@
+/* scalars declared after a large array live beyond the first 256 bytes of
+   data: in OS-9 modules their offsets from U no longer fit in a byte */
+BIGDATA: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE PAD(300) BYTE;
+DECLARE X BYTE, Y ADDRESS;
+X = 5;
+Y = 60000;
+PAD(299) = 7;
+CALL PUTDEC(X + PAD(299));      /* 12 */
+CALL PUTDEC(Y + X);             /* 60005 */
+END BIGDATA;

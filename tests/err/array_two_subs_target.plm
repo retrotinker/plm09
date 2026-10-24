@@ -1,0 +1,4 @@
+T: DO;
+DECLARE A(5) BYTE;
+A(1, 2) = 0;
+END T;

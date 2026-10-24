@@ -79,6 +79,11 @@ static void dump_expr(const Expr *e)
         dump_expr(e->rhs);
         putchar(')');
         break;
+    case E_INDEX:
+        printf("(INDEX %s ", e->name);
+        dump_expr(e->lhs);
+        putchar(')');
+        break;
     }
 }
 
@@ -90,8 +95,10 @@ static void dump_stmt(const Stmt *s, int depth)
     switch (s->kind) {
     case S_ASSIGN:
         printf("ASSIGN");
-        for (int i = 0; i < s->targets.len; i++)
-            printf("%s %s", i ? "," : "", ((Expr *)s->targets.items[i])->name);
+        for (int i = 0; i < s->targets.len; i++) {
+            printf("%s ", i ? "," : "");
+            dump_expr(s->targets.items[i]);
+        }
         printf(" = ");
         dump_expr(s->expr);
         putchar('\n');
@@ -149,7 +156,10 @@ static void dump_block(const Block *b, int depth)
         const Decl *d = b->decls.items[i];
         indent(depth);
         if (d->kind == D_VAR) {
-            printf("DECLARE %s %s\n", d->var->name, type_name(d->var->type));
+            if (d->var->dim)
+                printf("DECLARE %s(%u) %s\n", d->var->name, d->var->dim, type_name(d->var->type));
+            else
+                printf("DECLARE %s %s\n", d->var->name, type_name(d->var->type));
             continue;
         }
         const Proc *p = d->proc;

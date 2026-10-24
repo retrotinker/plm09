@@ -243,7 +243,7 @@ os9_check_pic() {   # $1 = name, $2 = generated .asm
     if grep -nE '^[[:space:]]+(JSR|JMP)[[:space:]]' "$2" >"$2.pic"; then
         bad "$1" "absolute JSR/JMP in --os9 output"; cat "$2.pic"; return 1
     fi
-    if grep -nE '^[[:space:]]+[A-Z]+[[:space:]]+V[0-9]*_[A-Z0-9]+(\+1)?([[:space:]]|$)' "$2" >"$2.pic"; then
+    if grep -nE '^[[:space:]]+[A-Z]+[[:space:]]+#?V[0-9]*_[A-Z0-9]+(\+[0-9]+)?([[:space:]]|$)' "$2" >"$2.pic"; then
         bad "$1" "variable reference that is not U-relative"; cat "$2.pic"; return 1
     fi
     if command -v os9 >/dev/null && ! os9 ident "${2%.asm}.mod" 2>&1 | grep -q 'CRC.*(Good)'; then

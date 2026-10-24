@@ -1,0 +1,4 @@
+T: DO;
+DECLARE W ADDRESS;
+W = LENGTH(5);
+END T;

@@ -1,0 +1,4 @@
+T: DO;
+DECLARE A(5) BYTE, Y BYTE;
+Y = A(1, 2);
+END T;

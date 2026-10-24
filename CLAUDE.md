@@ -109,7 +109,8 @@ How the simulator itself is tested:
 The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` nodes) → `sema.c` (with `symtab.c`) → `codegen.c`, and `main.c` is the driver. Each stage reports the first error through `error_at()` in `util.c` and exits. Error tests match these messages, so a reworded message means updating `tests/err/*.err`.
 
 - **Lexer and parser:** the parser pulls tokens from the lexer through a 3-token lookahead buffer.
-- **Unsupported features** (arrays, LITERALLY, iterative DO, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (LITERALLY, iterative DO, and so on) are rejected in the parser with "X is not supported".
+- **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST` into constants. Assignment targets are parsed as `E_INDEX` directly.
 - **Declaration order:** sema processes declarations in source order (declare before use), which is also how recursion stays detectable. A procedure's name is visible inside its own body.
 - **Output of sema:** it gives every `Expr` a `type`, resolves `sym`, sets `Stmt.proc` for RETURN, and fills `sema_vars` (the data section) and `sema_procs` (the order procedures are emitted in).
 
@@ -167,7 +168,12 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 
 The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
 
-**Planned extensions** (arrays, BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.dim` and `Symbol.storage` exist from the start for these. Keep them in place, and keep their future words reserved in the lexer.
+**Arrays in codegen:**
+- Use `fixed_location()` for variables and constant-subscript elements; it gives a byte offset for `var_ref()`.
+- Computed subscripts go through `gen_elem_offset()`, which leaves the offset in D and the base in X.
+- A store pushes the value first.
+
+**Planned extensions** (BASED, LITERALLY, REENTRANT, iterative DO, DO CASE): `Symbol.storage` is reserved for REENTRANT. Keep the future words reserved in the lexer.
 
 ## lwasm pitfalls
 

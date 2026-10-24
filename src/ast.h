@@ -18,6 +18,7 @@ typedef enum ExprKind {
     E_CALL,     /* name(args) */
     E_UNARY,
     E_BINARY,
+    E_INDEX,    /* array element: name(lhs) */
 } ExprKind;
 
 struct Symbol;
@@ -29,11 +30,11 @@ typedef struct Expr {
     Type type;              /* set by sema */
     unsigned value;         /* E_NUM */
     int is_address;         /* E_NUM: two-character string */
-    char *name;             /* E_NAME, E_CALL */
-    struct Symbol *sym;     /* E_NAME, E_CALL: set by sema */
+    char *name;             /* E_NAME, E_CALL, E_INDEX */
+    struct Symbol *sym;     /* E_NAME, E_CALL, E_INDEX: set by sema */
     Vec args;               /* E_CALL: Expr* */
     Op op;                  /* E_UNARY, E_BINARY */
-    struct Expr *lhs, *rhs; /* E_UNARY uses lhs */
+    struct Expr *lhs, *rhs; /* E_UNARY uses lhs; E_INDEX: lhs = subscript */
 } Expr;
 
 typedef enum StmtKind {
@@ -45,7 +46,7 @@ struct Block;
 typedef struct Stmt {
     StmtKind kind;
     Loc loc;
-    Vec targets;            /* S_ASSIGN: Expr* (E_NAME) */
+    Vec targets;            /* S_ASSIGN: Expr* (E_NAME or E_INDEX) */
     Expr *expr;             /* value, called procedure, condition, result */
     struct Stmt *then_s, *else_s;   /* S_IF */
     struct Block *block;    /* S_DO, S_WHILE */
@@ -57,6 +58,8 @@ typedef struct VarDecl {
     char *name;
     Loc loc;
     Type type;
+    unsigned dim;           /* number of elements; 0 for a scalar */
+    Loc dim_loc;
     struct Symbol *sym;
 } VarDecl;
 

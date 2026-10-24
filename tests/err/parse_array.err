@@ -1,1 +1,1 @@
-2:10: error: arrays is not supported
+2:11: error: an implicit dimension '(*)' is not supported

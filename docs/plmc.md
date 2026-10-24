@@ -32,8 +32,9 @@ include path. Four hooks files come with plmc:
 
 **Main features**
 
-* BYTE (8-bit) and ADDRESS (16-bit) unsigned variables, with PL/M-80's rules
-  for mixing the two types.
+* BYTE (8-bit) and ADDRESS (16-bit) unsigned variables and arrays, with
+  PL/M-80's rules for mixing the two types, and the built-ins `LENGTH` and
+  `LAST`.
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
 * `IF`/`THEN`/`ELSE`, `DO` blocks with their own declarations, `DO WHILE`
   loops, `HALT`.
@@ -182,6 +183,45 @@ DECLARE FLAG BYTE, LIMIT ADDRESS, (LO, HI) BYTE;
 * **Initial values:** variables have no initial value. They start with whatever
   is in memory, which is `$A5` in the simulator so that the mistake shows up.
 
+## Arrays
+
+```
+DECLARE BUF(80) BYTE;
+DECLARE (XS, YS)(10) ADDRESS;
+DECLARE COUNT BYTE, TABLE(16) ADDRESS;
+```
+
+* **Declaring:** a dimension in parentheses makes an array. `BUF(80)` has the
+  80 elements `BUF(0)` to `BUF(79)`. The dimension must be a number from 1
+  to 65535, and the array must fit in 64 KB.
+* **Element type:** the elements are BYTE or ADDRESS, and an element behaves
+  exactly like a variable of that type in expressions and conversions.
+* **Using an element:** `BUF(I)` is an element wherever a variable can
+  appear: in expressions and as an assignment target, including multiple
+  assignment (`BUF(I), BUF(J), N = 0;`).
+* **Subscripts:** any expression, BYTE or ADDRESS. A BYTE subscript is
+  zero-extended. **Subscripts are not checked:** as in PL/M-80, `BUF(80)`
+  silently reads or writes the memory after the array.
+* **Unsubscripted name:** a plain `BUF` means `BUF(0)`.
+* **Not allowed:** arrays can't be parameters, and procedures can't return
+  them. Pass an element (its value), or keep the array global, or in an
+  outer procedure that the procedure can see.
+* **Built-ins:** two PL/M-80 functions give the size of an array as an
+  ADDRESS constant:
+  * `LENGTH(A)`: the number of elements
+  * `LAST(A)`: the highest subscript, `LENGTH(A) - 1`
+
+  For a scalar they give 1 and 0. They are only used when you haven't
+  declared a procedure or variable with the same name yourself.
+
+```
+I = 0;
+DO WHILE I < LENGTH(BUF);
+    BUF(I) = ' ';
+    I = I + 1;
+END;
+```
+
 ## Procedures
 
 ```
@@ -237,8 +277,8 @@ convention is described under [Hooks].
 
 | Statement | Form |
 |---|---|
-| Assignment | `X = expression;` |
-| Multiple assignment | `X, Y, Z = expression;` (evaluated once, converted for each target) |
+| Assignment | `X = expression;` or `A(i) = expression;` |
+| Multiple assignment | `X, A(i), Z = expression;` (evaluated once, converted for each target) |
 | Call | `CALL NAME;` or `CALL NAME(arg, ...);` (untyped procedures only) |
 | Conditional | `IF condition THEN statement; [ELSE statement;]` |
 | Block | `[LABEL:] DO; declarations statements END [LABEL];` |
@@ -286,7 +326,8 @@ The type of every expression is worked out at compile time:
 |---|---|
 | constant 0--255 | BYTE |
 | constant 256--65535, or a two-character string | ADDRESS |
-| variable | its declared type |
+| variable, or array element | its declared type |
+| `LENGTH(A)`, `LAST(A)` | ADDRESS |
 | typed procedure call | the procedure's type |
 | `a + b`, `a - b`, `a MOD b`, `a AND b`, `a OR b`, `a XOR b` | BYTE if *both* operands are BYTE, otherwise ADDRESS |
 | `a * b`, `a / b` | always ADDRESS |
@@ -324,7 +365,7 @@ These parts of PL/M-80 are recognized and rejected with an error:
 
 | Feature | Error message |
 |---|---|
-| arrays, `DECLARE X(10) BYTE`, `X(I) = ...` | `arrays is not supported` / `subscripted assignment (arrays) is not supported` |
+| an implicit dimension, `DECLARE X(*) BYTE` (only meaningful with `INITIAL`/`DATA`) | `an implicit dimension '(*)' is not supported` |
 | `BASED` variables, `STRUCTURE`, `LABEL` declarations | `... is not supported` |
 | `LITERALLY` macros | `LITERALLY is not supported` |
 | `INITIAL` and `DATA` | `initialized data is not supported` |
@@ -338,10 +379,10 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | `ENABLE`, `DISABLE` | `ENABLE/DISABLE is not supported` |
 | strings of three or more characters | `strings longer than 2 characters are not supported` |
 
-Built-in procedures such as `HIGH`, `LOW`, `SHL`, `SHR`, `ROL`, `ROR`,
-`LENGTH` and `LAST` are not predefined. Using one gives
-`... is not declared`, unless you write it yourself as a procedure or an
-`EXTERNAL`.
+Of the PL/M-80 built-in procedures, only `LENGTH` and `LAST` are provided.
+Others such as `HIGH`, `LOW`, `SHL`, `SHR`, `ROL` and `ROR` are not
+predefined. Using one gives `... is not declared`, unless you write it
+yourself as a procedure or an `EXTERNAL`.
 
 # Diagnostics
 
@@ -364,7 +405,14 @@ next multiple of 8 plus 1.
 | `X is already declared at line N` | second declaration in the same scope |
 | `parameter X of P is not declared` | parameter without a `DECLARE` in the procedure |
 | `procedure P expects N arguments, got M` | wrong number of arguments |
-| `X is not a procedure` | `CALL X` or `X(...)` where X is a variable |
+| `X is not a procedure` | `CALL X` where X is a variable |
+| `X is not a procedure or an array` | `X(...)` in an expression where X is a scalar variable |
+| `X is not an array` | `X(i) = ...` where X is a scalar |
+| `array A takes exactly one subscript` / `an array takes exactly one subscript` | `A(i, j)` in an expression / as a target |
+| `array dimension must be from 1 to 65535`, `expected an array dimension (a number), found ...` | dimension 0, or not a number |
+| `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
+| `parameter X cannot be an array` | a parameter declared with a dimension |
+| `LENGTH needs the name of a variable` (or `LAST`) | argument isn't a declared variable |
 | `typed procedure F must be used in an expression, not CALLed` | `CALL` of a BYTE or ADDRESS procedure |
 | `untyped procedure P cannot be used in an expression` | value taken from an untyped procedure |
 | `cannot assign to procedure P` | procedure name on the left of `=` |
@@ -711,6 +759,15 @@ listing and simulator traces easy to follow.
   * As a value, a comparison produces `$FF` or `$00` in B.
   * Statement-level control flow uses long branches, so there's no limit on
     the size of a block.
+* **Array elements:**
+  * *Constant subscript:* the element is an ordinary operand, `V_A+6` (or
+    `V_A+6,U` in an OS-9 module).
+  * *Computed subscript:* the subscript is computed into D and doubled for
+    ADDRESS arrays. The array's address goes into X (`LDX #V_A`, or
+    `LEAX V_A,U`), and the element is loaded with `LDB D,X` / `LDD D,X`.
+  * *Storing to a computed element:* the value is pushed first, then the
+    address is formed with `LEAX D,X`, and the value is pulled and stored
+    through X.
 * **Multiplication and division:** BYTE × BYTE uses the 6809's `MUL`. All
   other multiplications and all divisions call `RT_MUL16` or `RT_DIV16`
   (left operand in X, right in D).
@@ -774,8 +831,8 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow, input, procedures (including nested calls), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs with thousands of random expressions, checked against an independent C model of the typing rules; `make fuzz-test N=2000` runs more |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts) and element assignments, checked against an independent C model of the typing rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

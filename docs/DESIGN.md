@@ -81,7 +81,13 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
 
 **Program structure**
 - A program is `NAME: DO; decls stmts END [NAME];`, optionally followed by `EOF`.
-- Declarations: `DECLARE X BYTE`, `DECLARE (A,B) ADDRESS`, or a comma-separated list. They must precede the statements of their block.
+- Declarations: `DECLARE X BYTE`, `DECLARE (A,B) ADDRESS`, `DECLARE A(10) BYTE`, `DECLARE (A,B)(5) ADDRESS`, or a comma-separated list. They must precede the statements of their block.
+- Arrays:
+  - The dimension is a numeric constant, 1–65535, and the array must fit in 64 KB.
+  - `A(i)` is an element, usable in expressions and as an assignment target. Subscripts are any expression, zero-extended, and not range-checked.
+  - An unsubscripted `A` means `A(0)`.
+  - Arrays can't be parameters.
+  - `LENGTH(A)`/`LAST(A)` are folded to ADDRESS constants, unless the name is declared by the user.
 - Names must be declared before use. Inner declarations hide outer ones.
 - Procedures:
   - `P: PROCEDURE (a,b) [BYTE|ADDRESS] [EXTERNAL]; ... END [P];`
@@ -91,7 +97,7 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
   - The body of an EXTERNAL procedure may only declare its parameters.
 
 **Statements**
-- assignment, including multiple targets `A,B = e` (evaluated once)
+- assignment, including multiple targets `A,B(i) = e` (evaluated once)
 - `IF/THEN/ELSE`; ELSE binds to the nearest IF
 - `[L:] DO; ... END [L];` (may declare variables) and `[L:] DO WHILE e; ... END [L];` (may not)
 - `CALL`, `RETURN [e]`, `HALT`, and the empty statement
@@ -126,10 +132,10 @@ Operators group left to right.
 - Nested procedures can reach outer variables directly.
 - Sema rejects recursion (it finds cycles in the call graph and reports the cycle).
 - A typed procedure whose last statement isn't RETURN or HALT gets a warning.
-- `Symbol.storage` and `Symbol.dim` are part of the symbol structure, so REENTRANT, arrays, BASED, LITERALLY, iterative DO and DO CASE can be added later.
+- `Symbol.dim` holds array sizes. `Symbol.storage` is reserved for REENTRANT (frame-relative variables).
 
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
-- arrays, BASED, STRUCTURE, LABEL declarations, LITERALLY
+- `(*)` dimensions, BASED, STRUCTURE, LABEL declarations, LITERALLY
 - INITIAL/DATA, `.` (address-of)
 - iterative DO, DO CASE, GOTO
 - REENTRANT, INTERRUPT, PUBLIC
@@ -156,6 +162,16 @@ The full list of messages is in `plmc.md`.
 - If the condition's root is a relational, emit the compare followed by a long branch on the inverse condition.
 - Otherwise use `LSRB` + `LBCC`.
 - Statement control flow uses long branches (`LBxx`/`LBRA`).
+
+**Array elements**
+- The parser can't tell `A(i)` from a call, so it builds an `E_CALL`. Sema turns it into `E_INDEX` (with `lhs` = subscript) when `A` is an array.
+- Assignment targets are parsed as `E_INDEX` directly.
+- **Constant subscript:** `fixed_location()` gives a variable plus a byte offset, which is used as an ordinary operand (`V_A+k` / `V_A+k,U`). This includes the shortcut that uses a simple right operand directly.
+- **Computed subscript (`gen_elem_offset`):**
+  - the subscript goes into D, doubled with `LSLB`/`ROLA` for ADDRESS arrays
+  - the base goes into X (`LDX #V_A`, or `LEAX V_A,U` when position-independent)
+  - loads use `LDB D,X` / `LDD D,X`
+  - stores push the value, then `LEAX D,X`, pull the value, and `STB`/`STD ,X`
 
 **Multiply and divide**
 - BYTE*BYTE uses the `MUL` instruction inline.
@@ -309,7 +325,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | lex, parse | `--tokens` / `--ast` golden files |
 | err | programs that must fail; the `.err` file holds the expected message, with position |
 | run | complete programs in sim6809, covering every operator and conversion rule, control flow, input, procedures, HALT, `--org`/`--vectors`, and an assembly check with the example hooks |
-| fuzz | `exprgen` seeded random expression programs against an independent C model of the typing rules; a failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
+| fuzz | `exprgen` seeded random expression programs against an independent C model of the typing rules. They include elements of `BA(4)`/`WA(4)`, with constant or `(expr) AND 3` subscripts, and assignments to elements. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
@@ -357,9 +373,10 @@ How the nitros9 suite works:
 - the `coco` and `xroar` suites, and `tools/coco_screen.py`
 - the PDF manuals and `make docs`
 - OS-9 support: `--os9`/`--stack`/`--name`, `plm_crt0_os9.asm`, `runtime/os9`, sim6809 `--os9` with memory protection, and the `os9` and `nitros9` suites
+- arrays, with `LENGTH`/`LAST`; the run tests `arrays` and `bigdata`, and arrays in the fuzz generator
 
 ## Known gaps
-- **Language:** arrays, BASED, STRUCTURE, LITERALLY, INITIAL/DATA, address-of, iterative DO, DO CASE, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins such as HIGH, LOW and SHL are not supported.
+- **Language:** BASED, STRUCTURE, LITERALLY, INITIAL/DATA (and so `(*)` dimensions), address-of, iterative DO, DO CASE, GOTO, REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

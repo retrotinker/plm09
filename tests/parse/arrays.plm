@@ -1,0 +1,6 @@
+/* array declarations, element references and subscripted targets */
+ARR: DO;
+DECLARE B(10) BYTE, (P, Q)(3) ADDRESS, I BYTE;
+B(I + 1) = B(I) + LENGTH(B);
+P(0), Q(I), I = LAST(P);
+END ARR;
