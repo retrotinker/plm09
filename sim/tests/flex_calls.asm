@@ -1,0 +1,100 @@
+; sim6809 --flex: the emulated FLEX DOS entry points.  Run as a .CMD file
+; (srec2flex); output goes through FLEX's routines, which print CR as a
+; newline and drop LF.  Ends through WARMS with exit status B = 0.
+	PRAGMA	6809
+WARMS	EQU	$CD03
+GETCHR	EQU	$CD15
+PUTCHR	EQU	$CD18
+PSTRNG	EQU	$CD1E
+CLASS	EQU	$CD21
+PCRLF	EQU	$CD24
+RSTRIO	EQU	$CD2A
+ADDBX	EQU	$CD36
+OUTDEC	EQU	$CD39
+OUTHEX	EQU	$CD3C
+OUTADR	EQU	$CD45
+MEMEND	EQU	$CC2B
+LASTTRM	EQU	$CC11
+
+	ORG	$0100
+START	STS	ENTRYS		; FLEX starts commands with S = $C07F
+	LDY	#$1234		; FLEX's routines keep Y and U
+	LDU	#$5678
+	LDA	#'A		; PUTCHR, CR as a newline, LF dropped
+	JSR	PUTCHR
+	LDA	#'B
+	JSR	PUTCHR
+	LDA	#13
+	JSR	PUTCHR
+	LDA	#10
+	JSR	PUTCHR
+	LDX	#MSG		; PSTRNG: a new line, then up to EOT
+	JSR	PSTRNG
+	JSR	PCRLF
+	LDX	#NUM		; OUTDEC: 1234, then "   42" (B <> 0)
+	CLRB
+	JSR	OUTDEC
+	JSR	PCRLF
+	LDX	#NUM+2
+	LDB	#1
+	JSR	OUTDEC
+	JSR	PCRLF
+	LDX	#NUM		; OUTHEX D2 (the low byte), OUTADR 04D2
+	LEAX	1,X
+	JSR	OUTHEX
+	LDA	#' 
+	JSR	PUTCHR
+	LDX	#NUM
+	JSR	OUTADR
+	JSR	PCRLF
+	LDX	#ENTRYS		; S at entry: C07F
+	JSR	OUTADR
+	JSR	PCRLF
+	LDX	#MEMEND		; end of user memory: BFFF
+	JSR	OUTADR
+	JSR	PCRLF
+	LDX	#$1000		; ADDBX: 10FF
+	LDB	#$FF
+	JSR	ADDBX
+	STX	TMP
+	LDX	#TMP
+	JSR	OUTADR
+	JSR	PCRLF
+	LDA	#'7		; CLASS: carry clear for alphanumerics
+	JSR	CLASS
+	BCS	FAIL
+	LDA	#',		; and set (and Last Terminator stored) otherwise
+	JSR	CLASS
+	BCC	FAIL
+	LDA	LASTTRM
+	CMPA	#',
+	BNE	FAIL
+	JSR	RSTRIO
+	JSR	GETCHR		; stdin is empty: 0
+	TSTA
+	BNE	FAIL
+	CMPY	#$1234
+	BNE	FAIL
+	CMPU	#$5678
+	BNE	FAIL
+	LDX	#OKMSG
+	JSR	PSTRNG
+	JSR	PCRLF
+	CLRB
+	JMP	WARMS
+FAIL	LDX	#BADMSG
+	JSR	PSTRNG
+	JSR	PCRLF
+	LDB	#1
+	JMP	WARMS
+
+ENTRYS	FDB	0
+TMP	FDB	0
+NUM	FDB	1234,42
+MSG	FCC	"PSTRNG"
+	FCB	4
+OKMSG	FCC	"OK"
+	FCB	4
+BADMSG	FCC	"FAIL"
+	FCB	4
+	END	START

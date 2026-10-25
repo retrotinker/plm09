@@ -246,6 +246,19 @@ lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
   installed as. If it matches a command already in memory (for example
   `echo`), OS-9 runs that command instead.
 
+## FLEX
+
+```
+build/plmc -o sum.asm sum.plm
+lwasm -9 -f srec -I runtime -I runtime/flex -o sum.s19 sum.asm
+build/srec2flex sum.s19 SUM.CMD
+```
+
+* **Running it:** copy `SUM.CMD` to a FLEX disk and type `SUM`. `build/sim6809 --flex SUM.CMD` runs it in the simulator, which emulates FLEX's DOS entry points.
+* **Any FLEX 9 system:** the hooks only use FLEX's jump table at `$CD00` (PUTCHR, PCRLF, GETCHR, OUTDEC, WARMS). The program returns to FLEX when it ends.
+* **Machine-dependent values:** the stack top (`RT_STACKTOP`, default `$C000`), the I/O ports (`RT_PORTS`, `$E000`) and the clock for `TIME` (`RT_CYCLES100`, 1 MHz) can be set with lwasm's `-D`.
+* **`srec2flex`** converts lwasm's S-records to a FLEX binary (`.CMD`), using the S9 entry address as the transfer address.
+
 ## Generated code
 
 - **Memory layout:** the code starts at `--org`. It begins with `RT_START`, which sets up the stack and DP=0, then calls the main program (`PLM_MAIN`). The procedures, the runtime and the hooks follow, and the variables come last (`RMB`, so they add nothing to the load file).
@@ -271,6 +284,7 @@ lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
 ```
 build/sim6809 [-t] [-n N] [--io BASE] [--entry ADDR] [--zero] prog.s19
 build/sim6809 --os9 [--load ADDR] [--data ADDR] [--param STR] module
+build/sim6809 --flex PROG.CMD
 ```
 
 | Option | Meaning |

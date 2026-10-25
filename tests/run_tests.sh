@@ -2,6 +2,7 @@
 # plm09 test runner.
 #   run_tests.sh sim|lex|parse|err|run|coco|xroar   run one suite
 #   run_tests.sh os9 [N]                   run tests + N fuzz seeds as OS-9 modules
+#   run_tests.sh flex [N]                  run tests + N fuzz seeds as FLEX commands
 #   run_tests.sh fuzz [N]                  random expression tests
 #   run_tests.sh one FILE.plm              compile, assemble, simulate one program
 set -u
@@ -58,6 +59,12 @@ sim_one() {    # $1 = asm, $2 = expected .out
             bad "$name" "lwasm failed"; cat "$s19.err"; return
         fi
         args="--os9 $args" ;;
+    flex_*)     # FLEX tests: S-records converted to a .CMD file, run with --flex
+        if ! assemble "$1" "$s19" || ! "$BUILD/srec2flex" "$s19" "${s19%.s19}.cmd" 2>>"$s19.err"; then
+            bad "$name" "lwasm or srec2flex failed"; cat "$s19.err"; return
+        fi
+        s19=${s19%.s19}.cmd
+        args="--flex $args" ;;
     *)
         if ! assemble "$1" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; return; fi ;;
     esac
@@ -300,6 +307,52 @@ suite_os9() {
     done
 }
 
+# The run tests (and fuzz seeds) as FLEX commands: assembled with the FLEX
+# hooks, converted to a .CMD file by srec2flex, and run by sim6809 --flex,
+# which emulates the FLEX DOS entry points and protects FLEX's memory.
+# Tests with PLMCARGS (fixed addresses, vectors, interrupts) are skipped.
+flex_build() {     # $1 = source, $2 = base path; command in $2.cmd
+    "$PLMC" -o "$2.asm" "$1" 2>"$2.plmc.err" || { cat "$2.plmc.err"; return 1; }
+    lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/flex" \
+        --list="$2.lst" -o "$2.s19" "$2.asm" 2>"$2.err" || { cat "$2.err"; return 1; }
+    "$BUILD/srec2flex" "$2.s19" "$2.cmd" 2>>"$2.err" || { cat "$2.err"; return 1; }
+}
+
+flex_run() {    # $1 = name, $2 = command, $3 = input, $4 = expected
+    local out=${2%.cmd}.stdout
+    "$SIM" --flex "$2" <"$3" >"$out" 2>"$out.err"
+    echo "rc=$?" >>"$out"
+    check_diff "$1" "$out" "$4"
+}
+
+suite_flex() {
+    local f name base exp n=${1:-25} seed gen=$BUILD/exprgen
+    for f in "$ROOT"/tests/run/*.plm; do
+        [ -e "$f" ] || continue
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        name=flex/$(basename "$f" .plm)
+        base=$OUT/flex-$(basename "$f" .plm)
+        flex_build "$f" "$base" || { bad "$name" "build failed"; continue; }
+        exp=$base.expected
+        cat "${f%.plm}.out" >"$exp"
+        echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
+        flex_run "$name" "$base.cmd" "$( [ -e "${f%.plm}.in" ] && echo "${f%.plm}.in" || echo /dev/null)" "$exp" && ok
+    done
+    cc -std=c11 -O2 -Wall -Wextra -Werror -o "$gen" "$ROOT/tests/gen/exprgen.c" || { bad flex/fuzz "generator build"; return; }
+    for seed in $(seq 2001 $((2000 + n))); do
+        base=$OUT/flex-fuzz
+        "$gen" "$seed" "$base.plm" "$base.expected"
+        echo "rc=0" >>"$base.expected"
+        if flex_build "$base.plm" "$base" && flex_run "flex/fuzz/$seed" "$base.cmd" /dev/null "$base.expected"; then
+            ok
+            continue
+        fi
+        cp "$base.plm" "$OUT/flex-fuzz-fail-$seed.plm"
+        echo "  program kept as $OUT/flex-fuzz-fail-$seed.plm"
+        break
+    done
+}
+
 # The run tests as OS-9 modules on real NitrOS-9: all of them are put in
 # CMDS on a copy of a bootable NitrOS-9 Level 2 disk ($NITROS9_DISK), whose
 # startup script runs each one with output redirected to a file; XRoar boots
@@ -405,6 +458,7 @@ case ${1:-} in
     coco)  suite_coco ;;
     os9)   suite_os9 "${2:-25}" ;;
     nitros9) suite_nitros9 ;;
+    flex)  suite_flex "${2:-25}" ;;
     xroar) suite_xroar ;;
     one)
         act=$OUT/one.stdout

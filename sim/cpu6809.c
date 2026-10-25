@@ -64,6 +64,10 @@ void cpu_write8(Cpu *c, uint16_t addr, uint8_t v)
         cpu_stop(c, STOP_ILLEGAL, "write outside the data area");
         return;
     }
+    if (c->ro_hi && in(addr, c->ro_lo, c->ro_hi)) {
+        cpu_stop(c, STOP_ILLEGAL, "write to the operating system's memory");
+        return;
+    }
     if (!is_io(c, addr)) {
         c->mem[addr] = v;
         return;
@@ -770,6 +774,12 @@ int cpu_step(Cpu *c)
     }
     if (c->waiting)
         return 0;
+    if (c->pc_hook) {
+        c->stop_pc = c->pc;
+        int r = c->pc_hook(c);
+        if (r >= 0)
+            return r;
+    }
     c->stop_pc = c->pc;
     if (c->protect && !in(c->pc, c->mod_lo, c->mod_hi))
         return cpu_stop(c, STOP_ILLEGAL, "PC outside the module");

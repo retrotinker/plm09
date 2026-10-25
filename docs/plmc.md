@@ -21,13 +21,14 @@ needs: S-records, Disk BASIC `.BIN` files, raw images and so on.
 
 The compiler is not tied to any particular machine. Everything that depends on
 the hardware lives in a small **hooks file** that lwasm includes, chosen with an
-include path. Four hooks files come with plmc:
+include path. Five hooks files come with plmc:
 
 | Hooks | Target |
 |---|---|
 | `runtime/sim/` | `sim6809`, the headless simulator used by the test suite |
 | `runtime/coco/` | the Tandy Color Computer 1, 2 and 3 under Color BASIC |
 | `runtime/os9/` | OS-9 and NitrOS-9 (Level 1 and 2), for modules built with `--os9` |
+| `runtime/flex/` | the FLEX 9 disk operating system, for `.CMD` commands made by `srec2flex` |
 | `runtime/example/` | a template for a board with an MC6850 ACIA serial port |
 
 **Main features**
@@ -58,7 +59,7 @@ include path. Four hooks files come with plmc:
 `plmc` is plain C11. From the top of the plm09 tree:
 
 ```
-make            # builds build/plmc and build/sim6809
+make            # builds build/plmc, build/sim6809 and build/srec2flex
 make test       # runs every test suite
 ```
 
@@ -1225,8 +1226,9 @@ POKE    LDX     4,S         ; first argument: ADDR
 
 ## Hooks provided
 
-All four hooks files implement the same procedures, so a program that uses
-only these runs unchanged on any of the targets:
+All five hooks files implement the same procedures, so a program that uses
+only these runs unchanged on any of the targets (the table below covers
+four of them; for FLEX see [FLEX]):
 
 ```
 PUTCH:  PROCEDURE (C) EXTERNAL;    DECLARE C BYTE;    END PUTCH;
@@ -1443,6 +1445,50 @@ The test suite checks these hooks in two ways. They run in the simulator
 against a stand-in for the BASIC ROM. They also run on an emulated CoCo 2
 under XRoar: each program is loaded from a disk image with `LOADM` and
 `EXEC`, and the text screen is compared with what's expected.
+
+# FLEX
+
+```
+build/plmc -o hello.asm hello.plm
+lwasm -9 -f srec -I runtime -I runtime/flex -o hello.s19 hello.asm
+build/srec2flex hello.s19 HELLO.CMD
+```
+
+Copy `HELLO.CMD` to a FLEX disk and type `HELLO` at the `+++` prompt.
+`build/sim6809 --flex HELLO.CMD` runs it in the simulator instead.
+
+* **Any FLEX 9 system:** the hooks use only the DOS entry points of FLEX's
+  jump table at `$CD00`, which are the same on every 6809 FLEX (SWTPC,
+  Gimix, CoCo, Dragon and others):
+
+  | Hook | FLEX routine |
+  |---|---|
+  | `PUTCH` | `PUTCHR` (`$CD18`); LF (10) as `PCRLF` (`$CD24`), which also honors TTYSET's nulls and paging |
+  | `GETCH` | `GETCHR` (`$CD15`): waits for a key, RETURN gives 13; most terminals echo it |
+  | `PUTDEC` | `OUTDEC` (`$CD39`) and `PCRLF` |
+  | `EXIT`, end of program, `HALT` | `WARMS` (`$CD03`), back to the `+++` prompt; FLEX has no exit status |
+  | `RT_PORTS` (`INPUT`/`OUTPUT`) | `$E000`, the I/O area of SWTPC and Gimix machines |
+  | `RT_CYCLES100` (`TIME`) | 100, a 1 MHz CPU |
+  | stack | `RT_STACKTOP` = `$C000`, the top of user RAM, just below FLEX's own stack |
+
+  `RT_PORTS`, `RT_CYCLES100` and `RT_STACKTOP` depend on the machine; give
+  yours to lwasm with `-D`, for example `-DRT_CYCLES100=200` for 2 MHz.
+* **`srec2flex`** turns lwasm's S-records into a FLEX binary file: `$02`
+  records (address, count, up to 252 bytes) for the loaded bytes, and a
+  `$16` transfer address record from the S9 entry address, which makes it
+  a command. lwasm has no FLEX output format of its own.
+* **Load address:** FLEX's user RAM is `$0000`--`$BFFF`, so the default
+  `--org` (`$0100`) is fine. With `--org C100H` a small program runs in the
+  utility command area instead, as FLEX's own commands do (it must end
+  below `$C700`). The program's variables and `MEMORY` follow the code, and
+  must stay below the stack.
+* **Not provided:** `PLM_SETINT`, since where a FLEX machine's interrupt
+  vectors are, and what its drivers use them for, depends on the machine.
+  A program with INTERRUPT procedures fails to assemble until you add one.
+
+The `flex` test suite runs every `run` program and 25 fuzz programs as
+commands in `sim6809 --flex`, which emulates FLEX's entry points and stops
+a program that writes into FLEX's memory.
 
 # Generated code
 
@@ -1705,6 +1751,7 @@ group of instructions.
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
+| `flex` | every `run` program (except those needing compiler options) plus 25 fuzz programs as FLEX commands (`srec2flex`), run by `sim6809 --flex`, which emulates the FLEX DOS entry points and protects FLEX's memory |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |
 

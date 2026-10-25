@@ -68,6 +68,12 @@ typedef struct Cpu {
        [lo, hi), with hi up to 0x10000. */
     int protect;
     uint32_t mod_lo, mod_hi, data_lo, data_hi;
+
+    /* sim6809 --flex: called before each instruction; returns -1 to run
+       the instruction normally, or c->stop after emulating a routine at
+       c->pc.  Writes to [ro_lo, ro_hi) stop the CPU (if ro_hi is set). */
+    int (*pc_hook)(struct Cpu *c);
+    uint32_t ro_lo, ro_hi;
 } Cpu;
 
 void cpu_init(Cpu *c, uint16_t io_base, uint8_t fill);

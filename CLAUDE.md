@@ -13,8 +13,9 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 ## Commands
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
-- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, fuzz.
-- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, or `make fuzz-test N=500`.
+- `make` also builds `build/srec2flex` (from `tools/srec2flex.c`), which turns S-records into a FLEX `.CMD` binary.
+- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, fuzz.
+- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
 - `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
@@ -37,6 +38,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
   - `-load` doesn't put a `.BIN` in RAM, and `-run` starts it without going through BASIC's `EXEC`. That's why the suite builds a disk image with `decb` and types `LOADM`.
   - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
 - **os9:** reuses `tests/run/*.plm` (except those with a `/* NOT-OS9: ... */` line, such as `interrupt`) plus fuzz seeds, built with `--os9 --memory 128` and run by `sim6809 --os9` at two placements (`PLMCARGS` tests are only built and checked, not run). It also fails on `JSR`/`JMP`, a variable operand without `,U`, or an `M_X` (AT a number) operand with an index in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
+- **flex:** `tests/run/*.plm` (without PLMCARGS) plus fuzz seeds, built with `runtime/flex`, converted by `srec2flex` and run by `sim6809 --flex` (which emulates FLEX's `$CD00` entry points, takes WARMS's B as exit status, and stops on writes to `$C080`–`$DFFF`). Sim tests named `flex_*.asm` are converted the same way and run with `--flex`.
 - **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
   - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
   - The startup script needs `-x` to survive non-zero exit statuses.
@@ -54,6 +56,8 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 | `--io BASE` | move the MMIO base |
 | `--entry ADDR` | start address when there is no S9 record |
 | `--zero` | clear memory instead of filling it with $A5 |
+| `--os9` | run an OS-9 program module (with `--load`, `--data`, `--param`) |
+| `--flex` | run a FLEX `.CMD` binary, emulating FLEX's DOS entry points |
 
 **sim6809 exit status:**
 
@@ -80,6 +84,7 @@ Then run `make docs` and commit the regenerated PDFs. The manuals quote real out
 
 | File | Contents |
 |---|---|
+| `os9.c`, `flex.c` | the `--os9` (system calls through `swi2_hook`) and `--flex` (DOS entry points through `pc_hook`, FLEX memory write-protected) environments |
 | `cpu6809.c` | the CPU core: full MC6809 instruction set, IRQ/FIRQ/NMI (`cpu_interrupt()`, called by `main.c` before each step), CWAI/SYNC; no cycle counts |
 | `disasm.c` | table-driven disassembler, used only by `-t` |
 | `srec.c` | S1/S9 loader |
@@ -181,7 +186,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 5. the `RMB` data section
 6. `END RT_START`
 
-The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
+The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, `runtime/flex/` for FLEX 9 (only the DOS jump table; `srec2flex` makes the `.CMD`), and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
 
 **GOTO in codegen:** within a procedure (or main) a GOTO is just `LBRA`, because statements leave the stack balanced. A GOTO out of a procedure (`Stmt.goto_out`) must `LDS RT_MAINS`, which `PLM_MAIN` saves at entry when `sema_goto_out` is set. Keep that invariant if you add anything that leaves data on the stack across statements.
 

@@ -5,6 +5,7 @@
  * unsupported trap, 2 on usage or load errors.
  */
 #include "cpu6809.h"
+#include "flex.h"
 #include "os9.h"
 #include "srec.h"
 
@@ -29,7 +30,9 @@ static void usage(FILE *f)
             "                I$Write and I$WritLn\n"
             "  --load ADDR   with --os9: module load address (default $2000)\n"
             "  --data ADDR   with --os9: data area address, page aligned (default $8000)\n"
-            "  --param STR   with --os9: parameter string (default empty)\n");
+            "  --param STR   with --os9: parameter string (default empty)\n"
+            "  --flex        prog is a FLEX binary (.CMD) file; emulate the FLEX DOS\n"
+            "                entry points (WARMS ends the run with exit status B)\n");
 }
 
 /* parse a number: decimal, 0x hex, or $ hex */
@@ -77,7 +80,7 @@ int main(int argc, char **argv)
     static Cpu cpu;
     unsigned long limit = 100000000UL, io = 0xff00, entry_opt = 0, v;
     unsigned long load = 0x2000, data = 0x8000;
-    int tracing = 0, have_entry_opt = 0, has_entry, os9 = 0;
+    int tracing = 0, have_entry_opt = 0, has_entry, os9 = 0, flex = 0;
     const char *params = "";
     uint8_t fill = 0xa5;
     const char *path = NULL;
@@ -94,6 +97,8 @@ int main(int argc, char **argv)
             fill = 0;
         } else if (!strcmp(a, "--os9")) {
             os9 = 1;
+        } else if (!strcmp(a, "--flex")) {
+            flex = 1;
         } else if (i + 1 < argc && !strcmp(a, "--load")) {
             if (!parse_num(argv[++i], 0xffff, &load))
                 goto bad;
@@ -122,8 +127,17 @@ int main(int argc, char **argv)
         goto bad;
 
     cpu_init(&cpu, (uint16_t)io, fill);
+    if (os9 && flex) {
+        fprintf(stderr, "sim6809: --os9 and --flex cannot be combined\n");
+        return RC_USAGE;
+    }
     if (os9) {
         if (os9_load(&cpu, path, (uint16_t)load, (uint16_t)data, params) < 0)
+            return RC_USAGE;
+        if (have_entry_opt)
+            cpu.pc = (uint16_t)entry_opt;
+    } else if (flex) {
+        if (flex_load(&cpu, path) < 0)
             return RC_USAGE;
         if (have_entry_opt)
             cpu.pc = (uint16_t)entry_opt;

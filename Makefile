@@ -9,19 +9,24 @@ SIM_OBJS  := $(SIM_SRCS:sim/%.c=$(BUILD)/sim/%.o)
 
 PLMC := $(BUILD)/plmc
 SIM  := $(BUILD)/sim6809
+S2F  := $(BUILD)/srec2flex
 
 N ?= 200
 OS9N ?= 25
+FLEXN ?= 25
 
-.PHONY: all docs test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test fuzz-test run clean
+.PHONY: all docs test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test fuzz-test run clean
 
-all: $(PLMC) $(SIM)
+all: $(PLMC) $(SIM) $(S2F)
 
 $(PLMC): $(PLMC_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 $(SIM): $(SIM_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
+
+$(S2F): tools/srec2flex.c | $(BUILD)/src
+	$(CC) $(CFLAGS) -o $@ $<
 
 $(BUILD)/src/%.o: src/%.c | $(BUILD)/src
 	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
@@ -34,7 +39,7 @@ $(BUILD)/src $(BUILD)/sim:
 
 -include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
 
-test: sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test fuzz-test
+test: sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test fuzz-test
 
 sim-test lex-test parse-test err-test run-test coco-test xroar-test: all
 	tests/run_tests.sh $(@:-test=)
@@ -47,6 +52,9 @@ os9-test: all
 
 nitros9-test: all
 	tests/run_tests.sh nitros9
+
+flex-test: all
+	tests/run_tests.sh flex $(FLEXN)
 
 run: all
 	@test -n "$(F)" || { echo "usage: make run F=file.plm" >&2; exit 2; }

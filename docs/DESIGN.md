@@ -6,7 +6,7 @@ plan; sections now describe what was implemented, and
 the plan. The user manuals are `plmc.md` and `sim6809.md` (PDFs alongside).
 
 ## Context
-`plmc` is a Linux compiler, written in C11, for a "tiny core" subset of PL/M-80. It produces 6809 assembly that lwasm (lwtools 4.24) accepts. Everything machine-specific lives in a hooks file chosen through lwasm's include path. Hooks are provided for the simulator, the Tandy Color Computer under Color BASIC, OS-9/NitrOS-9, and an MC6850 ACIA board (template). With `--os9` the compiler emits position-independent, reentrant OS-9 program modules.
+`plmc` is a Linux compiler, written in C11, for a "tiny core" subset of PL/M-80. It produces 6809 assembly that lwasm (lwtools 4.24) accepts. Everything machine-specific lives in a hooks file chosen through lwasm's include path. Hooks are provided for the simulator, the Tandy Color Computer under Color BASIC, OS-9/NitrOS-9, FLEX 9, and an MC6850 ACIA board (template). With `--os9` the compiler emits position-independent, reentrant OS-9 program modules.
 
 Testing is automated with `sim6809`, a headless 6809 simulator kept in the same repo. The CoCo hooks are also tested automatically on an emulated CoCo 2 under XRoar (the `xroar` suite).
 
@@ -14,6 +14,7 @@ Testing is automated with `sim6809`, a headless 6809 simulator kept in the same 
 - the Color Computer hooks, with their two test suites
 - the PDF manuals
 - OS-9 support (`--os9`, the OS-9 hooks, `sim6809 --os9`, and the `os9` and `nitros9` suites)
+- FLEX support (the FLEX hooks, `srec2flex`, `sim6809 --flex`, and the `flex` suite)
 
 Probes of lwasm 4.24 settled several design choices:
 - **lwasm defaults to 6309 mode.** Generated files contain `PRAGMA 6809` and every build passes `-9`.
@@ -30,8 +31,8 @@ The repository is `/home/linville/claude/plm09/`, a git repo with one commit per
 Makefile  README.md  CLAUDE.md  .gitignore
 src/      main.c util.[ch] lexer.[ch] ast.[ch] parser.[ch] symtab.[ch] sema.[ch] codegen.[ch]
 runtime/  plm_crt0.asm  plm_crt0_os9.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
-          sim/ coco/ os9/ example/  plm_hooks.asm   (chosen with -I)
-sim/      cpu6809.[ch] disasm.c srec.[ch] os9.[ch] main.c
+          sim/ coco/ os9/ flex/ example/  plm_hooks.asm   (chosen with -I)
+sim/      cpu6809.[ch] disasm.c srec.[ch] os9.[ch] flex.[ch] main.c
           tests/*.asm + *.out, harness.inc (check macros), gen_len_ops.py (length test)
 tests/    run_tests.sh
           lex/*.plm+.tok  parse/*.plm+.ast  err/*.plm+.err
@@ -40,6 +41,7 @@ tests/    run_tests.sh
           nitros9/done.asm (completion signal for the nitros9 suite)
           gen/exprgen.c (random expressions + C reference evaluator)
 tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
+          srec2flex.c (S-records to a FLEX .CMD file; built as build/srec2flex)
 docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 ```
 
@@ -47,10 +49,11 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 
 | Target | Effect |
 |---|---|
-| `all` | builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror` |
-| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, fuzz |
+| `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra -Werror` |
+| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, fuzz |
 | `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |
+| `flex-test FLEXN=25` | the flex suite, with FLEXN fuzz seeds |
 | `fuzz-test N=200` | the fuzz suite, with N seeds |
 | `run F=x.plm` | compile, assemble and run one program |
 | `docs` | build `docs/*.pdf` from the Markdown (pandoc + xelatex) |
@@ -375,7 +378,7 @@ The file becomes an OS-9 module:
 **What the protection doesn't catch.** With under 256 bytes of data, a variable reference that lost its `,U` would still work, because lwasm assembles it as direct-page addressing and OS-9's DP is the data page. The os9 suite therefore also checks the generated text for `JSR`/`JMP` and for variable operands without `,U`.
 
 ## Targets (runtime/*/plm_hooks.asm)
-All four provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
+All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 
 - **sim:**
   - MMIO at $FF00, stack at $FF00
@@ -394,6 +397,13 @@ All four provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
   - EXIT, end of program and HALT use `F$Exit`
   - any other I/O error exits with the error code
   - buffers are `RMB` in the data area
+- **flex** (FLEX 9, any machine; only the DOS jump table at $CD00 is used):
+  - PUTCH uses PUTCHR ($CD18), sending LF as PCRLF ($CD24); PUTDEC uses OUTDEC ($CD39) on the number pushed on the stack, then PCRLF
+  - GETCH uses GETCHR ($CD15)
+  - EXIT, end of program and HALT jump to WARMS ($CD03); FLEX has no exit status, B is passed on (sim6809 --flex uses it)
+  - stack at `RT_STACKTOP` = $C000, below FLEX's stack; `RT_PORTS` ($E000) and `RT_CYCLES100` (100) are machine-dependent, all three overridable with `-D`
+  - no PLM_SETINT (interrupt vectors depend on the machine)
+  - a FLEX binary is made from lwasm's S-records by `srec2flex` ($02 records of up to 252 bytes, $16 transfer address from S9), since lwasm has no FLEX format
 - **example:**
   - MC6850 ACIA template (`ACIA_BASE`, default $A000; `RT_STACKTOP`, default $8000)
   - both can be overridden with lwasm `-D`
@@ -414,6 +424,7 @@ All four provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 - `-t` prints a trace with disassembly to stderr.
 - `--io BASE` moves the MMIO block, and `--entry ADDR` overrides the S9 entry address.
 - S-records: S1/S9 are loaded, S0/S5 ignored, checksums verified. If several S9 records are present, the last one wins, which lets two files be combined.
+- `--flex` loads a FLEX binary and emulates the DOS entry points through `Cpu.pc_hook` (`flex_call()`, called before each instruction): the terminal routines, OUTDEC/OUTHEX/OUTADR, CLASS, ADDBX, and WARMS, which stops with B as the exit status. Writes to $C080–$DFFF (`Cpu.ro_lo`/`ro_hi`) and code run there other than at an entry point stop the program.
 
 **MMIO** (base $FF00, configurable)
 | Address | Access | Meaning |
@@ -445,6 +456,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
+| flex | every run program without PLMCARGS and 25 fuzz programs, built with the FLEX hooks, converted by `srec2flex` and run by `sim6809 --flex`; FLEX's memory is protected |
 | nitros9 | the same run programs on real NitrOS-9 Level 2, booted from `$NITROS9_DISK` on XRoar's `coco3` with `$COCO3_ROM`; outputs compared, exit statuses not checked; skipped if any prerequisite is missing |
 
 How the xroar suite works:
@@ -508,6 +520,7 @@ How the nitros9 suite works:
 - **Language:** PUBLIC (other than on labels), `:=`, are not supported. TIME's timing is only checked on an emulated CoCo; sim6809 has no cycle counts. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
+- **FLEX:** the FLEX hooks are only tested in sim6809's emulation of FLEX's entry points, not on a real FLEX system.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).
 - **OS-9:**
   - Modules are tested on NitrOS-9 Level 2 only (emulated CoCo 3), not on Level 1 or Microware OS-9.
