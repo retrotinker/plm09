@@ -1,0 +1,6 @@
+T: DO;
+DECLARE (A, B, C) ADDRESS;
+A = B PLUS C * 2 MINUS 1;
+A = B + C PLUS A - 1;
+IF A PLUS 1 < B MINUS C THEN A = 0;
+END T;

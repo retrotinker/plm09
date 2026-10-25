@@ -10,7 +10,7 @@ DECLARE INTCLR BYTE AT (0FF07H);    /* write: release lines */
 DECLARE (TIMHI, TIMLO) BYTE AT (0FF08H);    /* IRQ every N instructions */
 DECLARE TIMLINE BYTE AT (0FF0AH);   /* which line the timer asserts */
 DECLARE (TICKS, FAST, NMIS, CHECKS, BAD) ADDRESS, I BYTE;
-DECLARE (R, M) ADDRESS;
+DECLARE (R, M, K, RR, MM) ADDRESS;
 
 /* the manual's case for REENTRANT: used by the main program and by an
    interrupt procedure that may interrupt it */
@@ -103,6 +103,31 @@ CALL TIMER(0);
 TIMLINE = 1;
 CALL PUTDEC(BAD);                               /* 0 */
 CALL PUTDEC(FAST > 50);                         /* 255 */
+
+/* 32-bit counting with PLUS while the IRQ procedure (which adds too)
+   interrupts it: the entry code keeps the interrupted carry.  Adding
+   0FFFFH carries almost every time, so an interrupt between the + and the
+   PLUS that lost the carry would show.  M:R is then counted again with
+   interrupts off. */
+TICKS = 0;
+R, M, K = 0;
+CALL TIMER(400);
+DO WHILE TICKS < 30;
+    R = R + 0FFFFH;
+    M = M PLUS 0;
+    K = K + 1;
+END;
+CALL TIMER(0);
+DISABLE;
+RR, MM = 0;
+DO WHILE K > 0;
+    RR = RR + 0FFFFH;
+    MM = MM PLUS 0;
+    K = K - 1;
+END;
+ENABLE;
+CALL PUTDEC(M > 100);                           /* 255: carries happened */
+CALL PUTDEC(M = MM AND R = RR);                 /* 255 */
 
 /* NMI can't be disabled; its procedure GOes TO RECOVER, so interrupts
    stay disabled */

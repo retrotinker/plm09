@@ -334,9 +334,6 @@ static Expr *parse_primary(void)
         e->lhs = member_suffix(v);
         return e;
     }
-    case K_PLUS:
-    case K_MINUS:
-        unsupported(t->loc, "PLUS/MINUS (add/subtract with carry)");
     default:
         unexpected("an expression");
     }
@@ -381,9 +378,8 @@ static Expr *parse_add(void)
         switch (peek()->type) {
         case T_PLUS: op = OP_ADD; break;
         case T_MINUS: op = OP_SUB; break;
-        case K_PLUS:
-        case K_MINUS:
-            unsupported(loc, "PLUS/MINUS (add/subtract with carry)");
+        case K_PLUS: op = OP_PLUS; break;
+        case K_MINUS: op = OP_MINUS; break;
         default: return e;
         }
         next();

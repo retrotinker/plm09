@@ -9,7 +9,8 @@ extern Vec sema_vars;   /* Symbol*: every variable, for the data section */
 extern Vec sema_procs;  /* Proc*: every procedure, in declaration order */
 extern int sema_goto_out;   /* some GOTO leaves a procedure (needs RT_MAINS) */
 extern Vec sema_public_labels; /* Symbol*: LABEL PUBLIC, exported by name */
-extern int sema_reentrant;  /* some procedure is REENTRANT (Y is a frame pointer) */
+extern int sema_reentrant;
+extern int sema_carry;      /* PLUS or MINUS is used: + - PLUS MINUS keep RT_CARRY */  /* some procedure is REENTRANT (Y is a frame pointer) */
 
 /* INTERRUPT n procedures: 0 = IRQ, 1 = FIRQ, 2 = NMI; NULL if none */
 enum { INTERRUPTS = 3 };

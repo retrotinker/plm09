@@ -22,6 +22,7 @@ typedef struct StructType {
 
 typedef enum Op {
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_AND, OP_OR, OP_XOR,
+    OP_PLUS, OP_MINUS,                              /* with carry / borrow */
     OP_EQ, OP_NE, OP_LT, OP_GT, OP_LE, OP_GE,       /* relationals */
     OP_NEG, OP_NOT,                                 /* unary */
 } Op;

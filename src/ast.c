@@ -29,6 +29,7 @@ const char *op_name(Op op)
     static const char *const names[] = {
         [OP_ADD] = "+", [OP_SUB] = "-", [OP_MUL] = "*", [OP_DIV] = "/",
         [OP_MOD] = "MOD", [OP_AND] = "AND", [OP_OR] = "OR", [OP_XOR] = "XOR",
+        [OP_PLUS] = "PLUS", [OP_MINUS] = "MINUS",
         [OP_EQ] = "=", [OP_NE] = "<>", [OP_LT] = "<", [OP_GT] = ">",
         [OP_LE] = "<=", [OP_GE] = ">=", [OP_NEG] = "NEG", [OP_NOT] = "NOT",
     };

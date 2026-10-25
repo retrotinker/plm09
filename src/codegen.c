@@ -486,6 +486,15 @@ static void gen_addr(const Expr *e)
 
 static void gen_call(const Expr *e);
 
+/* PLUS and MINUS use the carry (or borrow) out of the last + - PLUS MINUS
+   executed, which is kept in bit 0 of RT_CARRY: ROL puts C there, and LSR
+   gets it back, without touching A, B or the operands */
+static void save_carry(void)
+{
+    if (sema_carry)
+        emit("ROL\t%s\t\t; keep the carry for PLUS/MINUS", var_ref("RT_CARRY", 0));
+}
+
 static void gen_binary(const Expr *e)
 {
     int w = width(e->type);
@@ -538,10 +547,28 @@ static void gen_binary(const Expr *e)
     switch (e->op) {
     case OP_ADD:
         emit("%s\t%s", w == 8 ? "ADDB" : "ADDD", opnd_text(&o, w, WHOLE));
+        save_carry();
         break;
     case OP_SUB:
         emit("%s\t%s", w == 8 ? "SUBB" : "SUBD", opnd_text(&o, w, WHOLE));
+        save_carry();
         break;
+    case OP_PLUS:
+    case OP_MINUS: {
+        const char *mn = e->op == OP_PLUS ? "ADC" : "SBC";
+        emit("LSR\t%s\t\t; C = the last carry", var_ref("RT_CARRY", 0));
+        if (w == 8)
+            emit("%sB\t%s", mn, opnd_text(&o, 8, WHOLE));
+        else if (o.kind == OPND_STACK) {    /* low byte first: 1,S then ,S */
+            emit("%sB\t1,S", mn);
+            emit("%sA\t,S++", mn);
+        } else {
+            emit("%sB\t%s", mn, opnd_text(&o, 16, LOW));
+            emit("%sA\t%s", mn, opnd_text(&o, 16, HIGH));
+        }
+        save_carry();
+        break;
+    }
     default: {
         const char *mn = e->op == OP_AND ? "AND" : e->op == OP_OR ? "OR" : "EOR";
         if (w == 16)
@@ -1050,6 +1077,8 @@ static void emit_variables(void)
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
     if (sema_goto_out)
         fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
+    if (sema_carry)
+        fprintf(out, "RT_CARRY\tRMB\t1\t\t; bit 0: the carry for PLUS/MINUS\n");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
         if (v->init == INIT_DATA || in_frame(v))
@@ -1115,6 +1144,8 @@ static void emit_code(const Program *prog)
     fprintf(out, "\n; program %s\nPLM_MAIN\n", prog->name);
     if (sema_goto_out)
         emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
+    if (sema_carry)
+        emit("CLR\t%s\t\t; no carry yet", var_ref("RT_CARRY", 0));
     if (pic)
         emit_initial_prologue();
     for (int n = 0; n < INTERRUPTS; n++) {
@@ -1165,7 +1196,15 @@ static void emit_code(const Program *prog)
             emit("PSHS\tU,Y,X,DP,D");
         emit("CLRA");
         emit("TFR\tA,DP");
+        if (sema_carry) {               /* the interrupted code's carry, too */
+            emit("LDA\tRT_CARRY");
+            emit("PSHS\tA");
+        }
         emit_call(p->sym->asm_name);
+        if (sema_carry) {
+            emit("PULS\tA");
+            emit("STA\tRT_CARRY");
+        }
         if (n == 1)
             emit("PULS\tD,DP,X,Y,U");
         emit("RTI\t\t\t; restores CC: interrupts enabled again");

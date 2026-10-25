@@ -140,6 +140,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Result types:**
   - `+ - MOD AND OR XOR` give BYTE when both operands are BYTE, and ADDRESS otherwise. BYTE results wrap at 8 bits: with BYTE `B = 200`, `B + 100` is 44, even when it is assigned to an ADDRESS.
   - `*` and `/` always give an ADDRESS.
+  - `PLUS` and `MINUS` add and subtract with the carry (borrow) of the last `+`, `-`, `PLUS` or `MINUS` executed, for numbers wider than 16 bits: `SL = AL + BL; SH = AH PLUS BH;`. Unlike the 8080 compiler's flag, this carry is well defined (nothing else changes it).
   - Relational operators give a BYTE: `0FFH` for true and `0` for false.
   - Unary `-` and `NOT` keep the type of their operand.
   - A constant is a BYTE if it is 255 or less.
@@ -152,7 +153,6 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 
 **Not supported yet:**
 - `PUBLIC`
-- `PLUS` and `MINUS` (add and subtract with carry)
 - embedded assignment `:=`
 - built-in procedures other than `LENGTH`, `LAST` and `SIZE`, such as `HIGH`, `LOW` and `SHL`
 

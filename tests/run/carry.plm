@@ -1,0 +1,68 @@
+/* PLUS and MINUS: add and subtract with the carry (or borrow) out of the
+   last + - PLUS MINUS executed (PL/M-80 manual 12.2).  Expected values in
+   comments. */
+CARRY: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE (AL, AH, BL, BH, SL, SH) ADDRESS;
+DECLARE (X0, X1, X2, Y0, Y1, Y2, Z0, Z1, Z2) BYTE;
+DECLARE (I, B) BYTE, W ADDRESS;
+
+/* 32-bit add and subtract, high word second */
+ADD32: PROCEDURE;
+    SL = AL + BL;
+    SH = AH PLUS BH;
+END ADD32;
+
+SUB32: PROCEDURE;
+    SL = AL - BL;
+    SH = AH MINUS BH;
+END SUB32;
+
+AL = 0FFFFH; AH = 1; BL = 1; BH = 0;
+CALL ADD32;
+CALL PUTDEC(SH); CALL PUTDEC(SL);           /* 2 0 */
+AL = 0; AH = 2; BL = 1; BH = 0;
+CALL SUB32;
+CALL PUTDEC(SH); CALL PUTDEC(SL);           /* 1 65535 */
+AL = 1234H; AH = 0; BL = 0FFFFH; BH = 0FFFFH;   /* - 1 */
+CALL ADD32;
+CALL PUTDEC(SH); CALL PUTDEC(SL);           /* 0 4659 (1233H): carry out */
+AL = 0; AH = 0; BL = 1; BH = 0;
+CALL SUB32;
+CALL PUTDEC(SH); CALL PUTDEC(SL);           /* 65535 65535: -1 */
+
+/* 24-bit numbers in three BYTEs: 01FFFFH + 000001H = 020000H */
+X0 = 0FFH; X1 = 0FFH; X2 = 1;
+Y0 = 1; Y1 = 0; Y2 = 0;
+Z0 = X0 + Y0; Z1 = X1 PLUS Y1; Z2 = X2 PLUS Y2;
+CALL PUTDEC(Z2); CALL PUTDEC(Z1); CALL PUTDEC(Z0);   /* 2 0 0 */
+
+/* a 32-bit counter: 65530 + 10 = 65540 = 1:4 */
+SL = 65530; SH = 0;
+DO I = 1 TO 10;
+    SL = SL + 1;
+    SH = SH PLUS 0;
+END;
+CALL PUTDEC(SH); CALL PUTDEC(SL);           /* 1 4 */
+
+/* the carry is the last + - PLUS MINUS's; comparisons, multiplication,
+   assignments and calls leave it alone */
+B = 200 + 100;                              /* 44, carry 1 */
+W = 3 * 4;
+IF B > 10 THEN CALL PUTDEC(0 PLUS 0);       /* 1 */
+B = 5 - 6;                                  /* borrow 1 */
+CALL PUTDEC(10 MINUS 0);                    /* 9 */
+B = 5 - 5;                                  /* no borrow */
+CALL PUTDEC(10 MINUS 0);                    /* 10 */
+
+/* in one expression: right operands are evaluated first, so here
+   200 + 100 sets the carry used by 1 PLUS 1, whose own carry (none)
+   is used by the outer PLUS */
+W = (1 PLUS 1) PLUS (200 + 100);            /* 3 + 44 + 0 = 47 */
+CALL PUTDEC(W);                             /* 47 */
+B = 255 + 1;                                /* carry 1 */
+W = 255 PLUS 0;                             /* BYTE: 0, carry 1 */
+CALL PUTDEC(W);                             /* 0 */
+W = 1000 PLUS 0;                            /* ADDRESS: 1001 */
+CALL PUTDEC(W);                             /* 1001 */
+END CARRY;

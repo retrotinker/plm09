@@ -822,7 +822,7 @@ Operators, from highest to lowest precedence:
 | 1 (highest) | `( )` | grouping |
 | 2 | unary `-`, unary `+` | negation (two's complement) |
 | 3 | `*` `/` `MOD` | multiply, divide, remainder |
-| 4 | `+` `-` | add, subtract |
+| 4 | `+` `-` `PLUS` `MINUS` | add, subtract; add with carry, subtract with borrow |
 | 5 | `=` `<>` `<` `>` `<=` `>=` | comparisons |
 | 6 | `NOT` | bitwise complement |
 | 7 | `AND` | bitwise and |
@@ -835,7 +835,39 @@ Operators, from highest to lowest precedence:
   so `NOT A < B` means `NOT (A < B)`.
 * **Evaluation order:** the order in which operands are evaluated is not
   defined, as in PL/M. Avoid expressions where a procedure call changes a
-  variable used elsewhere in the same expression.
+  variable used elsewhere in the same expression. (plmc evaluates the right
+  operand of a binary operator before the left one; only PLUS and MINUS
+  can tell the difference without calls, see below.)
+
+### PLUS and MINUS
+
+```
+DECLARE (AL, AH, BL, BH, SL, SH) ADDRESS;     /* 32-bit numbers AH:AL ... */
+SL = AL + BL;
+SH = AH PLUS BH;                              /* SH:SL = AH:AL + BH:BL */
+```
+
+`A PLUS B` is `A + B + carry`, and `A MINUS B` is `A - B - borrow` (PL/M-80
+manual 12.2). They have the precedence and the result types of `+` and `-`,
+and are meant for arithmetic on numbers wider than 16 bits, low part first.
+
+On the 8080 the carry is the CPU's flag, so the manual warns that the
+result can't be predicted. plmc defines it instead:
+
+* **The carry is the one out of the last `+`, `-`, `PLUS` or `MINUS`
+  executed**: the carry out of an addition, or the borrow out of a
+  subtraction, at the operation's width (8 bits for BYTE operations, 16 for
+  ADDRESS ones). Before any of them it is 0.
+* **Nothing else changes it:** not comparisons, `*`, `/`, `MOD`, logical
+  operators, assignments, calls, loops, or interrupt procedures (their entry
+  code saves and restores it). The `+` that steps an iterative `DO` doesn't
+  count either. It is kept across statements and procedure calls.
+* **Within an expression,** remember that the right operand is evaluated
+  first: in `(1 PLUS 1) PLUS (200 + 100)`, `200 + 100` sets the carry
+  used by `1 PLUS 1`.
+* **Cost:** a program that uses PLUS or MINUS keeps the carry in a byte
+  (`RT_CARRY`) after every `+` and `-` (one `ROL` instruction each).
+  Programs that don't use them are unaffected.
 
 ## Types and conversions {#conversions}
 
@@ -850,7 +882,7 @@ The type of every expression is worked out at compile time:
 | `LENGTH(A)`, `LAST(A)` | BYTE if 255 or less, otherwise ADDRESS |
 | `SIZE(X)` | ADDRESS |
 | typed procedure call | the procedure's type |
-| `a + b`, `a - b`, `a MOD b`, `a AND b`, `a OR b`, `a XOR b` | BYTE if *both* operands are BYTE, otherwise ADDRESS |
+| `a + b`, `a - b`, `a PLUS b`, `a MINUS b`, `a MOD b`, `a AND b`, `a OR b`, `a XOR b` | BYTE if *both* operands are BYTE, otherwise ADDRESS |
 | `a * b`, `a / b` | always ADDRESS |
 | `a = b`, `a < b`, ... | BYTE: `0FFH` for true, `0` for false |
 | `-a`, `NOT a` | the type of `a` |
@@ -887,7 +919,6 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | Feature | Error message |
 |---|---|
 | `PUBLIC` | `... is not supported` |
-| `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
 
@@ -1406,6 +1437,11 @@ listing and simulator traces easy to follow.
   * *Storing to a computed element:* the value is pushed first, then the
     address is formed with `LEAX D,X`, and the value is pulled and stored
     through X.
+* **PLUS and MINUS:** when a program uses them, every `+`, `-`, `PLUS` and
+  `MINUS` is followed by `ROL RT_CARRY`, which shifts the carry into bit 0
+  of that byte without touching A or B. PLUS is `LSR RT_CARRY` (the carry
+  back into C) and `ADCB`, plus `ADCA` on the high bytes for ADDRESS (the
+  6809 has no 16-bit add with carry); MINUS uses `SBCB`/`SBCA`.
 * **Multiplication and division:** BYTE × BYTE uses the 6809's `MUL`. All
   other multiplications and all divisions call `RT_MUL16` or `RT_DIV16`
   (left operand in X, right in D).
@@ -1500,9 +1536,9 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 175 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `err` | 177 programs that must fail, each with the expected message and position |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; carry statements with random chains of `+ - PLUS MINUS`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

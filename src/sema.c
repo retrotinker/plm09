@@ -27,6 +27,7 @@ Vec sema_procs;     /* Proc*: every procedure, in declaration order */
 int sema_goto_out;  /* some GOTO leaves a procedure */
 int sema_reentrant; /* some procedure is REENTRANT (Y is a frame pointer) */
 Vec sema_public_labels;
+int sema_carry;
 Proc *sema_interrupt[INTERRUPTS];
 int sema_pic;       /* compiling an --os9 module */
 
@@ -240,6 +241,7 @@ static void check_expr(Expr *e, Scope *scope)
         check_expr(e->lhs, scope);
         check_expr(e->rhs, scope);
         e->type = binary_type(e->op, e->lhs->type, e->rhs->type);
+        sema_carry |= e->op == OP_PLUS || e->op == OP_MINUS;
         break;
     case E_ADDR: {
         e->type = TY_ADDRESS;

@@ -118,7 +118,7 @@ The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` node
   - A name being *defined* must be read with `next_raw_ident()`, and tested with `raw_type()`, never with an expanding peek. Otherwise an outer literal would be substituted for it.
   - The parser has its own scope stack (`lit_push`/`lit_pop`/`declare_name`) for literals and the names that hide them.
   - Strings are `T_STRING` tokens: one or two characters make a constant, and longer ones are only valid as LITERALLY text.
-- **Unsupported features** (PUBLIC on variables and procedures, PLUS/MINUS, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (PUBLIC on variables and procedures, `:=`, and so on) are rejected in the parser with "X is not supported".
 - **Labels:** any statement can carry labels (`Stmt.labels`). `DECLARE L LABEL [PUBLIC|EXTERNAL]` is a `D_LABEL` decl; sema enters it before `collect_labels()`, which then binds the block-level definition to it (`Symbol.label_declared`/`defined`/`used`). EXTERNAL labels use their exact name in the assembly; PUBLIC ones get `NAME EQU G_NAME`. Every DO body is its own scope, and `collect_labels()` must run before a block's declarations and statements are checked, because labels may be used before they are defined, even from procedures.
 - **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST`/`SIZE` into constants (`LENGTH`/`LAST` are BYTE if 255 or less). Assignment targets are parsed as `E_INDEX` directly.
 - **Structures:** `NAME[(i)].M[(j)]` becomes `E_MEMBER` (`member_suffix()`). A whole structure is only allowed under `.` and the built-ins, which sema tracks with `whole_ok`/`shorthand_ok`; always check subscripts with `check_sub()`, which clears them.
@@ -140,6 +140,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 - Relationals give 0FFH or 00H.
 - IF and WHILE test only bit 0 of the condition.
 - AND and OR do not short-circuit.
+- PLUS/MINUS use the carry of the last `+ - PLUS MINUS` executed (`sema_carry` → `ROL`/`LSR RT_CARRY` in codegen; interrupt entry code saves it). Right operands are evaluated before left ones, and `exprgen.c`'s carry statements model exactly that, so keep the order if you change `gen_operands`.
 - Constants of 255 or less are typed BYTE.
 
 **Code generation conventions:**

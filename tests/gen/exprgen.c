@@ -24,6 +24,13 @@
  *   * /: ADDRESS;  relationals: BYTE 0FFH/0;  NOT, unary -: operand type
  *   IF tests bit 0; ADDRESS -> BYTE assignment keeps the low byte.
  * Expressions that would divide by zero are regenerated.
+ *
+ * Carry statements test PLUS and MINUS: "RB = x + y;" sets a known carry,
+ * then an expression of + - PLUS MINUS over leaves is assigned and
+ * printed.  The carry is the one out of the last + - PLUS MINUS executed
+ * (8 or 16 bits, as the operation), and plmc evaluates a right operand
+ * before the left one, so the model generates (and evaluates) right
+ * operands first.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +103,41 @@ static Val leaf(char *buf)
 }
 
 static Val expr(char *buf, int depth);
+
+/* PLUS/MINUS: the carry left by the last + - PLUS MINUS, and one of them */
+static unsigned carry;
+
+static Val carry_op(int op, Val x, Val y)
+{
+    Val r;
+    r.w = x.w == 8 && y.w == 8 ? 8 : 16;
+    unsigned m = mask(r.w), c = op >= 2 ? carry : 0;
+    if (op == 0 || op == 2) {               /* + PLUS */
+        unsigned s = x.v + y.v + c;
+        carry = s > m;
+        r.v = s & m;
+    } else {                                /* - MINUS */
+        carry = x.v < y.v + c;
+        r.v = (x.v - y.v - c) & m;
+    }
+    return r;
+}
+
+/* an expression of + - PLUS MINUS over leaves; the right operand is made
+   (and so evaluated) first */
+static Val carry_expr(char *buf, int depth)
+{
+    static const char *const ops[] = { "+", "-", "PLUS", "MINUS" };
+    char a[BUFSZ], b[BUFSZ];
+
+    if (depth >= MAXDEPTH || rnd(3) == 0)
+        return leaf(buf);
+    int op = rnd(4);
+    Val y = carry_expr(b, depth + 1);
+    Val x = carry_expr(a, depth + 1);
+    snprintf(buf, BUFSZ, "(%s) %s (%s)", a, ops[op], b);
+    return carry_op(op, x, y);
+}
 
 /* subscript 0..3: a constant, or (expr) AND 3 */
 static unsigned subscript(char *buf, int depth)
@@ -390,7 +432,20 @@ int main(int argc, char **argv)
             div_by_zero = 0;
             v = expr(buf, 0);
         } while (div_by_zero);
-        switch (rnd(8)) {
+        switch (rnd(9)) {
+        case 8: {
+            /* PLUS and MINUS, after a + that sets a known carry */
+            char a[BUFSZ], b[BUFSZ], c[BUFSZ];
+            Val x = leaf(a), y = leaf(b);
+            Val r = carry_op(0, x, y);
+            Val e = carry_expr(c, 1);
+            int word = rnd(2);
+            fprintf(plm, "RB = (%s) + (%s);\n%s = %s;\nCALL PUTDEC(%s);\n",
+                    a, b, word ? "RW" : "RB", c, word ? "RW" : "RB");
+            fprintf(exp, "%u\n", word ? e.v : e.v & 0xff);
+            (void)r;
+            break;
+        }
         case 0:
             fprintf(plm, "RW = %s;\nCALL PUTDEC(RW);\n", buf);
             fprintf(exp, "%u\n", v.v);
