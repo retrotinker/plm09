@@ -31,6 +31,13 @@ static void usage(FILE *f)
             "  --load ADDR   with --os9: module load address (default $2000)\n"
             "  --data ADDR   with --os9: data area address, page aligned (default $8000)\n"
             "  --param STR   with --os9: parameter string (default empty)\n"
+            "  --acia ADDR   an MC6850 ACIA at ADDR (status) and ADDR+1 (data) on\n"
+            "                stdin/stdout; at the end of input it reads 0\n"
+            "  --swi         execute SWI, SWI2 and SWI3 through their vectors\n"
+            "                instead of stopping\n"
+            "  --ft245 ADDR  an FT245RL USB FIFO at ADDR (stdin/stdout; FIRQ while\n"
+            "                input is waiting), as on the Simon6809 board; waiting\n"
+            "                for input after the end of stdin ends the run (status 0)\n"
             "  --flex        prog is a FLEX binary (.CMD) file; emulate the FLEX DOS\n"
             "                entry points (WARMS ends the run with exit status B)\n");
 }
@@ -80,7 +87,9 @@ int main(int argc, char **argv)
     static Cpu cpu;
     unsigned long limit = 100000000UL, io = 0xff00, entry_opt = 0, v;
     unsigned long load = 0x2000, data = 0x8000;
-    int tracing = 0, have_entry_opt = 0, has_entry, os9 = 0, flex = 0;
+    int tracing = 0, have_entry_opt = 0, has_entry, os9 = 0, flex = 0, ft245 = 0, swi = 0;
+    int acia = 0;
+    unsigned long ft245_addr = 0, acia_addr = 0;
     const char *params = "";
     uint8_t fill = 0xa5;
     const char *path = NULL;
@@ -99,6 +108,16 @@ int main(int argc, char **argv)
             os9 = 1;
         } else if (!strcmp(a, "--flex")) {
             flex = 1;
+        } else if (!strcmp(a, "--swi")) {
+            swi = 1;
+        } else if (i + 1 < argc && !strcmp(a, "--acia")) {
+            if (!parse_num(argv[++i], 0xfffe, &acia_addr))
+                goto bad;
+            acia = 1;
+        } else if (i + 1 < argc && !strcmp(a, "--ft245")) {
+            if (!parse_num(argv[++i], 0xffff, &ft245_addr))
+                goto bad;
+            ft245 = 1;
         } else if (i + 1 < argc && !strcmp(a, "--load")) {
             if (!parse_num(argv[++i], 0xffff, &load))
                 goto bad;
@@ -127,6 +146,11 @@ int main(int argc, char **argv)
         goto bad;
 
     cpu_init(&cpu, (uint16_t)io, fill);
+    cpu.ft245 = ft245;
+    cpu.swi = swi;
+    cpu.acia = acia;
+    cpu.acia_addr = (uint16_t)acia_addr;
+    cpu.ft245_addr = (uint16_t)ft245_addr;
     if (os9 && flex) {
         fprintf(stderr, "sim6809: --os9 and --flex cannot be combined\n");
         return RC_USAGE;

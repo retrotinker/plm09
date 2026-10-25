@@ -1,0 +1,22 @@
+/* INTERRUPT procedures through the kit's RAM vectors ($7FF0 IRQ, $7FF6
+   FIRQ), raised here with sim6809's interrupt port; the stand-in monitor
+   checks that the program put the monitor's vectors back. */
+KI: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE INTSET BYTE AT (0FF06H), INTCLR BYTE AT (0FF07H);
+DECLARE TICKS BYTE;
+TICK: PROCEDURE INTERRUPT 0;
+    INTCLR = 1;
+    TICKS = TICKS + 1;
+END TICK;
+QUICK: PROCEDURE INTERRUPT 1;
+    INTCLR = 2;
+    TICKS = TICKS + 10;
+END QUICK;
+TICKS = 0;
+ENABLE;
+INTSET = 1;
+CALL PUTDEC(TICKS);         /* 1 */
+INTSET = 2;
+CALL PUTDEC(TICKS);         /* 11 */
+END KI;

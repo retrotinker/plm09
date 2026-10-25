@@ -40,11 +40,32 @@ static int in(uint32_t a, uint32_t lo, uint32_t hi)
     return a >= lo && a < hi;
 }
 
+/* --ft245: does stdin have a byte for the FIFO?  (-1 at its end) */
+static int ft245_ready(void)
+{
+    int ch = getchar();
+
+    if (ch == EOF)
+        return -1;
+    ungetc(ch, stdin);
+    return 1;
+}
+
 uint8_t cpu_read8(Cpu *c, uint16_t addr)
 {
     if (c->protect && !in(addr, c->data_lo, c->data_hi) && !in(addr, c->mod_lo, c->mod_hi)) {
         cpu_stop(c, STOP_ILLEGAL, "read outside the module and data area");
         return 0;
+    }
+    if (c->ft245 && addr == c->ft245_addr) {
+        int ch = getchar();
+        return ch == EOF ? 0 : (uint8_t)ch;
+    }
+    if (c->acia && (uint16_t)(addr - c->acia_addr) < 2) {
+        if (addr == c->acia_addr)
+            return 0x03;                /* RDRF (data, or the end), TDRE */
+        int ch = getchar();
+        return ch == EOF ? 0 : (uint8_t)ch;
     }
     if (is_io(c, addr)) {
         if (addr - c->io_base == IO_GETCH) {
@@ -66,6 +87,15 @@ void cpu_write8(Cpu *c, uint16_t addr, uint8_t v)
     }
     if (c->ro_hi && in(addr, c->ro_lo, c->ro_hi)) {
         cpu_stop(c, STOP_ILLEGAL, "write to the operating system's memory");
+        return;
+    }
+    if (c->ft245 && addr == c->ft245_addr) {
+        putchar(v);
+        return;
+    }
+    if (c->acia && (uint16_t)(addr - c->acia_addr) < 2) {
+        if (addr != c->acia_addr)       /* control writes are ignored */
+            putchar(v);
         return;
     }
     if (!is_io(c, addr)) {
@@ -622,6 +652,16 @@ static int alu(Cpu *c, int op)
 
 /* ------------------------------------------------ prefixed pages $10/$11 */
 
+/* SWI, SWI2, SWI3 with --swi: stack everything (E set), mask, vector */
+static int software_interrupt(Cpu *c, uint8_t mask, uint16_t vector)
+{
+    c->cc |= CC_E;
+    op_psh(c, &c->s, c->u, 0xff);
+    c->cc |= mask;
+    c->pc = read16(c, vector);
+    return c->stop;
+}
+
 static int page2(Cpu *c)
 {
     int op = fetch8(c);
@@ -637,6 +677,8 @@ static int page2(Cpu *c)
     if (op == 0x3f) {
         if (c->swi2_hook)
             return c->swi2_hook(c);
+        if (c->swi)
+            return software_interrupt(c, 0, 0xfff4);
         return cpu_stop(c, STOP_TRAP, "SWI2");
     }
     if (op < 0x80)
@@ -688,7 +730,7 @@ static int page3(Cpu *c)
     uint16_t m16;
 
     if (op == 0x3f)
-        return cpu_stop(c, STOP_TRAP, "SWI3");
+        return c->swi ? software_interrupt(c, 0, 0xfff2) : cpu_stop(c, STOP_TRAP, "SWI3");
     if (op < 0x80 || op >= 0xc0 || ((op & 0x0f) != 0x3 && (op & 0x0f) != 0xc))
         return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
     if (mode == 0) {
@@ -741,6 +783,20 @@ int cpu_interrupt(Cpu *c)
 {
     if (c->stop)
         return TOOK_NONE;
+    if (c->ft245) {                     /* RXF#: FIRQ while data is waiting */
+        int ready = ft245_ready();
+        if (ready > 0)
+            c->lines |= INT_FIRQ;
+        else
+            c->lines &= (uint8_t)~INT_FIRQ;
+        if (ready < 0 && c->waiting && !c->timer_period && !c->nmi_pending
+            && !(c->lines & INT_IRQ)) {
+            fflush(stdout);
+            c->exit_code = 0;           /* waiting for input that won't come */
+            cpu_stop(c, STOP_EXIT, "end of input");
+            return TOOK_NONE;
+        }
+    }
     if (c->nmi_pending) {
         c->nmi_pending = 0;
         take(c, 1, CC_I | CC_F, 0xfffc);
@@ -869,7 +925,9 @@ int cpu_step(Cpu *c)
         setf(c, CC_Z, DREG(c) == 0);
         setf(c, CC_C, c->b & 0x80);
         return 0;
-    case 0x3f: return cpu_stop(c, STOP_TRAP, "SWI");
+    case 0x3f:                                                  /* SWI */
+        return c->swi ? software_interrupt(c, CC_I | CC_F, 0xfffa)
+                      : cpu_stop(c, STOP_TRAP, "SWI");
     default:
         return cpu_stop(c, STOP_ILLEGAL, "illegal opcode");
     }

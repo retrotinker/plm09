@@ -1,0 +1,18 @@
+/* An INTERRUPT procedure through the Simon6809 monitor's RAM vector for
+   IRQ ($0009), raised with sim6809's interrupt port (at $D806: the suite
+   moves the I/O block to $D800). */
+SI: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE INTSET BYTE AT (0D806H), INTCLR BYTE AT (0D807H);
+DECLARE TICKS BYTE;
+TICK: PROCEDURE INTERRUPT 0;
+    INTCLR = 1;
+    TICKS = TICKS + 1;
+END TICK;
+TICKS = 0;
+ENABLE;
+INTSET = 1;
+CALL PUTDEC(TICKS);         /* 1 */
+INTSET = 1;
+CALL PUTDEC(TICKS);         /* 2 */
+END SI;

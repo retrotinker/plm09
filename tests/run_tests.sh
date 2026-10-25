@@ -354,6 +354,84 @@ suite_flex() {
     done
 }
 
+# The run tests with the hooks for Wichit Sirichote's 6809 Microprocessor
+# Kit, in sim6809 with an MC6850 ACIA at $A000 (--acia) and SWI executed
+# (--swi), and tests/kswichit/fakemon.asm standing in for the kit's
+# monitor (loaded last, so its reset entry wins).  CR LF output is
+# compared as LF.
+suite_kswichit() {
+    local mon=$OUT/kswichit-fakemon.s19 f name base exp
+    if ! lwasm -9 -f srec -o "$mon" "$ROOT/tests/kswichit/fakemon.asm" 2>"$mon.err"; then
+        bad kswichit/fakemon "lwasm failed"; cat "$mon.err"; return
+    fi
+    for f in "$ROOT"/tests/run/*.plm "$ROOT"/tests/kswichit/*.plm; do
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        name=kswichit/$(basename "$f" .plm)
+        base=$OUT/kswichit-$(basename "$(dirname "$f")")-$(basename "$f" .plm)
+        if ! "$PLMC" --org 0200H -o "$base.asm" "$f" 2>"$base.plmc.err" ||
+           ! lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/kswichit" \
+                -o "$base.s19" "$base.asm" 2>"$base.err"; then
+            bad "$name" "build failed"; cat "$base.plmc.err" "$base.err" 2>/dev/null; continue
+        fi
+        cat "$base.s19" "$mon" >"$base.both.s19"
+        "$SIM" --swi --acia 0xA000 "$base.both.s19" \
+            <"$( [ -e "${f%.plm}.in" ] && echo "${f%.plm}.in" || echo /dev/null)" \
+            2>"$base.sim.err" | tr -d '\r' >"$base.stdout"
+        echo "rc=${PIPESTATUS[0]}" >>"$base.stdout"
+        exp=$base.expected
+        cat "${f%.plm}.out" >"$exp"
+        echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
+        check_diff "$name" "$base.stdout" "$exp" && ok
+    done
+}
+
+# The run tests on a Simon6809 board, simulated: sim6809 runs the board's
+# own monitor ROM ($SIMON_ROM, simon09.rom.s19 from the board's repository)
+# with an FT245RL console at $D000 (--ft245) and SWI executed (--swi).
+# Each program is typed into the monitor as S1/S9 records, started with
+# G400, and given its .in file; its output is what the console shows
+# between the G400 line and the monitor's register display, whose B (the
+# exit status) is compared with .rc.  A program still waiting for input at
+# the end of its .in file has no register display.
+suite_simon6809() {
+    local rom=${SIMON_ROM:-$HOME/coco/simon6809/simon09.rom.s19} f name base exp
+    [ -r "$rom" ] || { echo "simon6809: no monitor ROM at $rom (set SIMON_ROM; skipped)"; exit 0; }
+    for f in "$ROOT"/tests/run/*.plm "$ROOT"/tests/simon6809/*.plm; do
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        name=simon6809/$(basename "$f" .plm)
+        base=$OUT/simon6809-$(basename "$(dirname "$f")")-$(basename "$f" .plm)
+        if ! "$PLMC" --org 0400H -o "$base.asm" "$f" 2>"$base.plmc.err" ||
+           ! lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/simon6809" \
+                -o "$base.s19" "$base.asm" 2>"$base.err"; then
+            bad "$name" "build failed"; cat "$base.plmc.err" "$base.err" 2>/dev/null; continue
+        fi
+        { grep '^S[19]' "$base.s19" | tr -d '\r' | tr '\n' '\r'
+          printf 'G400\r'
+          [ -e "${f%.plm}.in" ] && cat "${f%.plm}.in"; } >"$base.feed"
+        "$SIM" --swi --io 0xD800 --ft245 0xD000 --entry 0xE000 "$rom" <"$base.feed" >"$base.console" 2>"$base.sim.err"
+        echo "sim rc=$?" >>"$base.sim.err"
+        python3 -I - "$base.console" "$base.stdout" <<'PY'
+import re, sys
+text = open(sys.argv[1], 'rb').read().decode('latin-1').replace('\r', '')
+out = text.split('.G400\n', 1)[1] if '.G400\n' in text else ''
+m = re.search(r'EFHINZVC A=.. B=(..)', out)
+rc = ''
+if m:
+    rc = 'rc=%d\n' % int(m.group(1), 16)
+    out = out[:m.start()]
+open(sys.argv[2], 'w').write(out + rc)
+PY
+        exp=$base.expected
+        cat "${f%.plm}.out" >"$exp"
+        if [ -e "${f%.plm}.in" ] && ! grep -q '^rc=' "$base.stdout"; then
+            :       # still waiting for input: no exit status to compare
+        else
+            echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
+        fi
+        check_diff "$name" "$base.stdout" "$exp" && ok
+    done
+}
+
 # The run tests as commands on real FLEX: Compusense FLEX for the Dragon 64
 # ($FLEX_DISK), booted from DragonDOS under XRoar.  The programs are put on
 # a copy of the disk with tools/flexdisk.py, and the STARTUP file EXECs a
@@ -528,6 +606,8 @@ case ${1:-} in
     nitros9) suite_nitros9 ;;
     flex)  suite_flex "${2:-25}" ;;
     dragonflex) suite_dragonflex ;;
+    simon6809) suite_simon6809 ;;
+    kswichit) suite_kswichit ;;
     xroar) suite_xroar ;;
     one)
         act=$OUT/one.stdout

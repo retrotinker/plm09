@@ -14,8 +14,8 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
 - `make` also builds `build/srec2flex` (from `tools/srec2flex.c`), which turns S-records into a FLEX `.CMD` binary.
-- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, fuzz.
-- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, or `make fuzz-test N=500`.
+- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, fuzz.
+- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, `make simon6809-test`, `make kswichit-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
 - `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
@@ -39,6 +39,8 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
   - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
 - **os9:** reuses `tests/run/*.plm` (except those with a `/* NOT-OS9: ... */` line, such as `interrupt`) plus fuzz seeds, built with `--os9 --memory 128` and run by `sim6809 --os9` at two placements (`PLMCARGS` tests are only built and checked, not run). It also fails on `JSR`/`JMP`, a variable operand without `,U`, or an `M_X` (AT a number) operand with an index in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
 - **flex:** `tests/run/*.plm` (without PLMCARGS) plus fuzz seeds, built with `runtime/flex`, converted by `srec2flex` and run by `sim6809 --flex` (which emulates FLEX's `$CD00` entry points, takes WARMS's B as exit status, and stops on writes to `$C700`–`$DFFF`).
+- **simon6809:** the run programs plus `tests/simon6809/*.plm` on the Simon6809 board's own monitor ROM (`$SIMON_ROM`, default `~/coco/simon6809/simon09.rom.s19`; skipped if missing) in `sim6809 --swi --io 0xD800 --ft245 0xD000 --entry 0xE000`. Each program's S1/S9 lines (the monitor rejects S0/S5) are typed at the prompt, then `G400` and the `.in` file; the output is cut between the echoed `.G400` line and the monitor's `EFHINZVC A=.. B=..` register display, whose B is the exit status (absent if the program was left waiting for input).
+- **kswichit:** the run programs plus `tests/kswichit/*.plm` with `runtime/kswichit` in `sim6809 --swi --acia 0xA000`, loaded together with `tests/kswichit/fakemon.asm` (last, so its reset entry wins), which stands in for the kit's keypad monitor; CR is stripped from the output.
 - **dragonflex:** the run programs (without PLMCARGS or `.in`) on real FLEX: Compusense FLEX for the Dragon 64 (`$FLEX_DISK`, default `~/coco/flex/FLEX_1.3.2.VDK`; skipped if missing) under XRoar `dragon64`. `tools/flexdisk.py` puts `Tnn.CMD` and command files on a copy; STARTUP `EXEC`s `P,MARK` / `P,Tnn` lines (printer output, XRoar `-lp-file`) and `DONE` (`tests/flex/done.asm` at $C600, `-trap pc=0xC600`). Pitfalls, all in DESIGN.md: `-type` doesn't reach FLEX's keyboard driver, so the boot chain (track 1 sector 1) is patched to skip the date prompt; `O` can't run from EXEC and `I` cancels `P`; EXEC parks itself at the top of user RAM (hence the FLEX hooks' stack at $C700); snapshot RAM offsets vary. Sim tests named `flex_*.asm` are converted the same way and run with `--flex`.
 - **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
   - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
@@ -59,6 +61,9 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 | `--zero` | clear memory instead of filling it with $A5 |
 | `--os9` | run an OS-9 program module (with `--load`, `--data`, `--param`) |
 | `--flex` | run a FLEX `.CMD` binary, emulating FLEX's DOS entry points |
+| `--swi` | execute SWI/SWI2/SWI3 through their vectors (otherwise they stop the simulator) |
+| `--acia ADDR` | MC6850 ACIA at ADDR/ADDR+1 on stdin/stdout; reads 0 at end of input |
+| `--ft245 ADDR` | FT245RL FIFO at ADDR; FIRQ while stdin has data; SYNC/CWAI after end of stdin ends the run (status 0) |
 
 **sim6809 exit status:**
 
@@ -66,7 +71,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 |---|---|
 | byte written to the exit port | normal exit |
 | 124 | instruction limit reached |
-| 125 | illegal opcode, or SWI/SWI2/SWI3 (registers are dumped to stderr) |
+| 125 | illegal opcode, or SWI/SWI2/SWI3 without `--swi` (registers are dumped to stderr) |
 | 2 | usage or load error |
 
 ## Documentation rule
@@ -187,7 +192,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 5. the `RMB` data section
 6. `END RT_START`
 
-The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, `runtime/flex/` for FLEX 9 (only the DOS jump table; `srec2flex` makes the `.CMD`), and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
+The hooks are selected only through the include path: `-I runtime/sim` for the simulator, `runtime/coco/` for a Color Computer under Color BASIC, `runtime/os9/` for `--os9` modules, `runtime/flex/` for FLEX 9 (only the DOS jump table; `srec2flex` makes the `.CMD`), `runtime/simon6809/` (Simon6809 board, BUGGY monitor vectors), `runtime/kswichit/` (Wichit Sirichote's 6809 kit, ACIA at $A000), and `runtime/example/` (MC6850 ACIA) as the template for other hardware. `RT_STACKTOP` = 0 makes `crt0` keep the caller's stack, which the CoCo hooks use to return to BASIC through `RT_ENTRYS`. Compiler output never depends on the target. The runtime and hooks are included *after* the code, so hooks can call `RT_DIV16`/`RT_MUL16`.
 
 **GOTO in codegen:** within a procedure (or main) a GOTO is just `LBRA`, because statements leave the stack balanced. A GOTO out of a procedure (`Stmt.goto_out`) must `LDS RT_MAINS`, which `PLM_MAIN` saves at entry when `sema_goto_out` is set. Keep that invariant if you add anything that leaves data on the stack across statements.
 

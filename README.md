@@ -197,6 +197,9 @@ PUTCH   STB   $FF00     ; PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE;
 - **`runtime/sim/`**, for `sim6809`, which has its I/O at `$FF00`. It provides `PUTCH`, `PUTDEC` (prints a number and a newline), `GETCH` (returns 0 at end of input) and `EXIT`.
 - **`runtime/coco/`**, for the Tandy Color Computer 1/2/3 under Color BASIC. It provides `PUTCH`, `PUTDEC`, `GETCH`, `EXIT` and `CLS`. See [Color Computer](#color-computer).
 - **`runtime/os9/`**, for OS-9 and NitrOS-9 program modules built with `--os9`. See [OS-9](#os-9).
+- **`runtime/flex/`**, for FLEX 9 commands. See [FLEX](#flex).
+- **`runtime/simon6809/`**, for the Simon6809 board under its BUGGY monitor. See [Simon6809](#simon6809).
+- **`runtime/kswichit/`**, for Wichit Sirichote's 6809 Microprocessor Kit under its monitor. See [6809 Microprocessor Kit](#6809-microprocessor-kit).
 - **`runtime/example/`**, a template for an MC6850 ACIA board. It has the same four procedures, with `PUTDEC` written on top of `RT_DIV16`. Copy it and adjust the addresses for your machine. The test suite only checks that it assembles.
 
 ## Color Computer
@@ -260,6 +263,28 @@ build/srec2flex sum.s19 SUM.CMD
 * **`srec2flex`** converts lwasm's S-records to a FLEX binary (`.CMD`), using the S9 entry address as the transfer address.
 * **Tested on real FLEX:** the `dragonflex` suite runs the test programs on Compusense FLEX for the Dragon 64 under XRoar (`$FLEX_DISK`, default `~/coco/flex/FLEX_1.3.2.VDK`).
 
+## Simon6809
+
+```
+build/plmc --org 0400H -o sum.asm sum.plm
+lwasm -9 -f srec -I runtime -I runtime/simon6809 -o sum.s19 sum.asm
+```
+
+* **Running it:** send the S1/S9 lines of `sum.s19` at the BUGGY monitor's prompt and type `G400`. The program returns to the monitor (with `SWI`), which shows the registers, B being the exit status.
+* **The board** ([drpeker/simon6809-ROM-Monitor](https://github.com/drpeker/simon6809-ROM-Monitor)): a 1 MHz 6809, 32 KB RAM (programs from `$0400`), an FT245RL USB FIFO console that the hooks use through the monitor's `getchar`/`putchar` vectors, and RAM interrupt vectors that `PLM_SETINT` patches.
+* **Tested** on the board's real monitor ROM in `sim6809` (`--ft245`, `--swi`): the `simon6809` suite (`$SIMON_ROM`, default `~/coco/simon6809/simon09.rom.s19`).
+
+## 6809 Microprocessor Kit
+
+```
+build/plmc --org 0200H -o sum.asm sum.plm
+lwasm -9 -f srec -I runtime -I runtime/kswichit -o sum.s19 sum.asm
+```
+
+* **Running it:** press LOAD, send `sum.s19` over the serial port (19200 8N1, 1 ms character delay), then GO (from `$0200`). The program returns to the monitor with `SWI`.
+* **The kit** (Wichit Sirichote, [kswichit.net/6809/6809.htm](https://kswichit.net/6809/6809.htm)): a 68B09 at 1.2288 MHz, 32 KB RAM, an MC6850 ACIA at `$A000` that the hooks use directly (the monitor's routine addresses vary between versions), I/O ports at `$8000` (`OUTPUT(0)` drives the GPIO1 LEDs), and RAM interrupt vectors at `$7FF0`--`$7FF8` that `PLM_SETINT` patches. The stack is at `$7000`, below the monitor's variables.
+* **Tested** in `sim6809` with an ACIA (`--acia`) and a stand-in monitor: the `kswichit` suite.
+
 ## Generated code
 
 - **Memory layout:** the code starts at `--org`. It begins with `RT_START`, which sets up the stack and DP=0, then calls the main program (`PLM_MAIN`). The procedures, the runtime and the hooks follow, and the variables come last (`RMB`, so they add nothing to the load file).
@@ -295,6 +320,9 @@ build/sim6809 --flex PROG.CMD
 | `--io BASE` | move the I/O block from `$FF00` |
 | `--entry ADDR` | start address, if the file has no S9 record |
 | `--zero` | clear memory instead of filling it with `$A5` |
+| `--swi` | execute `SWI`, `SWI2` and `SWI3` through their vectors instead of stopping |
+| `--acia ADDR` | an MC6850 ACIA at `ADDR`/`ADDR+1` on stdin/stdout (reads 0 at end of input) |
+| `--ft245 ADDR` | an FT245RL USB FIFO at `ADDR` on stdin/stdout, asserting FIRQ while input waits |
 
 **I/O block**
 

@@ -21,7 +21,7 @@ needs: S-records, Disk BASIC `.BIN` files, raw images and so on.
 
 The compiler is not tied to any particular machine. Everything that depends on
 the hardware lives in a small **hooks file** that lwasm includes, chosen with an
-include path. Five hooks files come with plmc:
+include path. Seven hooks files come with plmc:
 
 | Hooks | Target |
 |---|---|
@@ -29,6 +29,8 @@ include path. Five hooks files come with plmc:
 | `runtime/coco/` | the Tandy Color Computer 1, 2 and 3 under Color BASIC |
 | `runtime/os9/` | OS-9 and NitrOS-9 (Level 1 and 2), for modules built with `--os9` |
 | `runtime/flex/` | the FLEX 9 disk operating system, for `.CMD` commands made by `srec2flex` |
+| `runtime/simon6809/` | the Simon6809 board, under its BUGGY monitor |
+| `runtime/kswichit/` | Wichit Sirichote's 6809 Microprocessor Kit, under its monitor |
 | `runtime/example/` | a template for a board with an MC6850 ACIA serial port |
 
 **Main features**
@@ -1511,6 +1513,91 @@ Two test suites check these hooks:
     printer output that `P` set up. FLEX has no exit status, so statuses
     aren't compared.
 
+# Simon6809
+
+```
+build/plmc --org 0400H -o hello.asm hello.plm
+lwasm -9 -f srec -I runtime -I runtime/simon6809 -o hello.s19 hello.asm
+```
+
+The Simon6809 is Erturk Kocalar's 6809 board of 2007
+([github.com/drpeker/simon6809-ROM-Monitor](https://github.com/drpeker/simon6809-ROM-Monitor)):
+a 6809 at 1 MHz, 32 KB of RAM, an FT245RL USB FIFO as the console, and the
+BUGGY monitor (Lennart Benschop's sbc09 monitor, ported) in ROM at
+`$E000`.
+
+* **Loading and running:** at the monitor's `.` prompt, send the S1 and
+  S9 lines of `hello.s19` (the monitor rejects the S0 and S5 records that
+  lwasm also writes, harmlessly), then type `G400`. When the program ends
+  it returns to the monitor, which shows the registers (B is the exit
+  status) and prompts again.
+* **Load address:** always `--org 0400H`. The monitor uses
+  `$0000`--`$03FF`; RAM ends at `$7FFF`, where the stack starts.
+* **Console:** `PUTCH`, `GETCH` and `PUTDEC` use the monitor's I/O vectors
+  in RAM (`getchar` at `$001B`, `putchar` at `$001E`, `putcr` at `$0027`).
+  LF is sent as the monitor's CR LF; RETURN gives 13; `GETCH` waits for a
+  character.
+* **Return to the monitor:** `SWI`, which the monitor takes as a
+  breakpoint, so this works whether the program was started with `G` or
+  `J`.
+* **Interrupts:** `PLM_SETINT` points the monitor's RAM vectors (JMPs at
+  `$0009` IRQ, `$0006` FIRQ, `$000F` NMI) at the INTERRUPT procedures and
+  puts them back at the end. FIRQ is the console's "data available"
+  interrupt: a program that takes it over shouldn't use `GETCH`.
+* **Other values:** `RT_PORTS` = `$D000` (the I/O selects, port 0 being
+  the FT245), `RT_CYCLES100` = 100 (a 4 MHz crystal, 1 MHz E clock).
+
+The `simon6809` test suite runs every `run` program on the board's real
+monitor ROM, in `sim6809` with an FT245 at `$D000` (`--ft245`) and
+working `SWI` (`--swi`): each program is typed into the monitor as S1/S9
+records, started with `G400`, and given its input file; its output is
+what the console shows before the monitor's register display, whose B is
+compared with the expected exit status. The ROM comes from `$SIMON_ROM`
+(default `~/coco/simon6809/simon09.rom.s19`, from the board's repository);
+the suite is skipped without it. A test of its own checks an IRQ
+procedure through the monitor's vector.
+
+# Wichit Sirichote's 6809 Microprocessor Kit
+
+```
+build/plmc --org 0200H -o hello.asm hello.plm
+lwasm -9 -f srec -I runtime -I runtime/kswichit -o hello.s19 hello.asm
+```
+
+Wichit Sirichote's 6809 Microprocessor Kit (2017,
+[kswichit.net/6809/6809.htm](https://kswichit.net/6809/6809.htm)) is a
+trainer with a 68B09 (4.9152 MHz crystal, 1.2288 MHz E clock), 32 KB of
+RAM, a keypad and 7-segment display, an MC6850 ACIA serial port at 19200
+bit/s, and a monitor in ROM from `$C000`.
+
+* **Loading and running:** press LOAD and send `hello.s19` over the serial
+  port (19200 bit/s, 8N1, with a 1 ms delay after each character, as the
+  kit's manual says), then GO, which runs from `$0200`. When the program
+  ends it returns to the monitor with `SWI`, which saves its registers as
+  the user registers (B is the exit status).
+* **Load address:** always `--org 0200H`, where user programs start. The
+  stack starts at `$7000`, below the monitor's variables and stack
+  (`$7000`--`$7FFF`).
+* **Console:** the serial port. The hooks use the ACIA (`$A000` status,
+  `$A001` data) directly rather than the monitor's routines, whose
+  addresses change from one monitor version to the next. LF is sent as CR
+  LF; `GETCH` waits for a character.
+* **Interrupts:** the ROM's vectors point into RAM (`$7FF0` IRQ, `$7FF3`
+  NMI, `$7FF6` FIRQ), where the monitor puts a JMP to its 10 ms tick
+  counter and RTIs. `PLM_SETINT` puts a JMP to the INTERRUPT procedure
+  there, and the monitor's instructions back at the end. The IRQ switch
+  selects the 89C2051's 10 ms tick or the IRQ button.
+* **Other values:** `RT_PORTS` = `$8000` (port 0 the GPIO1 LEDs, 1 the
+  keypad, 2 and 3 the display), `RT_CYCLES100` = 123.
+
+The `kswichit` test suite runs every `run` program with these hooks in
+`sim6809` with an ACIA at `$A000` (`--acia`) and working `SWI` (`--swi`).
+The kit's monitor is driven from its keypad, so `tests/kswichit/fakemon.asm`
+stands in for it: it sets up the stack and the RAM vectors as the real
+ROM's reset does, runs the program at `$0200`, and on `SWI` checks that
+the vectors were put back and ends with B as the exit status. A test of
+its own checks IRQ and FIRQ procedures through the RAM vectors.
+
 # Generated code
 
 ## Layout
@@ -1772,6 +1859,8 @@ group of instructions.
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
+| `simon6809` | the `run` programs (except those needing compiler options) on the Simon6809 board's real monitor ROM in `sim6809`, typed in as S-records and started with `G400`; outputs and exit statuses compared. Uses `$SIMON_ROM`; skipped without it. See [Simon6809] |
+| `kswichit` | the `run` programs (except those needing compiler options) with the 6809 Microprocessor Kit's hooks, in `sim6809` with an ACIA and a stand-in monitor. See [Wichit Sirichote's 6809 Microprocessor Kit] |
 | `dragonflex` | the `run` programs (except those needing compiler options or input) as commands on real FLEX: Compusense FLEX for the Dragon 64, booted under XRoar, with each program's printer output compared. Uses `$FLEX_DISK`; skipped if it or XRoar is missing. See [FLEX] |
 | `flex` | every `run` program (except those needing compiler options) plus 25 fuzz programs as FLEX commands (`srec2flex`), run by `sim6809 --flex`, which emulates the FLEX DOS entry points and protects FLEX's memory |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

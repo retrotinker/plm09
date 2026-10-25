@@ -74,6 +74,26 @@ typedef struct Cpu {
        c->pc.  Writes to [ro_lo, ro_hi) stop the CPU (if ro_hi is set). */
     int (*pc_hook)(struct Cpu *c);
     uint32_t ro_lo, ro_hi;
+
+    /* sim6809 --ft245 ADDR: an FT245RL USB FIFO at ft245_addr, as on the
+       Simon6809 board.  A read returns the next byte of stdin (0 if there
+       is none), a write goes to stdout, and FIRQ is asserted while stdin
+       has data (the chip's RXF# line).  Waiting in SYNC or CWAI after the
+       end of stdin ends the run with exit status 0. */
+    int ft245;
+    uint16_t ft245_addr;
+
+    /* sim6809 --acia ADDR: an MC6850 ACIA, status/control at acia_addr and
+       data at acia_addr + 1, on stdin/stdout.  Status: RDRF (bit 0) while
+       stdin has data, TDRE (bit 1) always.  At the end of stdin RDRF stays
+       set and the data register reads 0, as the I/O block's GETCH port
+       does, so programs see the end instead of waiting forever. */
+    int acia;
+    uint16_t acia_addr;
+
+    /* sim6809 --swi: SWI, SWI2 and SWI3 interrupt through their vectors
+       instead of stopping the CPU (SWI2 still goes to swi2_hook if set) */
+    int swi;
 } Cpu;
 
 void cpu_init(Cpu *c, uint16_t io_base, uint8_t fill);
