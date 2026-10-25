@@ -20,7 +20,7 @@ static int line, col;
 static Vec lines;           /* char * per source line */
 
 static const char *const keywords[] = {
-    "ADDRESS", "AND", "BASED", "BY", "BYTE", "CALL", "CASE", "DATA",
+    "ADDRESS", "AND", "AT", "BASED", "BY", "BYTE", "CALL", "CASE", "DATA",
     "DECLARE", "DISABLE", "DO", "ELSE", "ENABLE", "END", "EOF", "EXTERNAL",
     "GO", "GOTO", "HALT", "IF", "INITIAL", "INTERRUPT", "LABEL", "LITERALLY",
     "MINUS", "MOD", "NOT", "OR", "PLUS", "PROCEDURE", "PUBLIC", "REENTRANT",

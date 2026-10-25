@@ -221,9 +221,15 @@ The full list of messages is in `plmc.md`.
 - Sema's `take_values()` walks each variable's scalars in storage order and builds `Symbol.init_vals`: numbers, or an `E_ADDR` plus an addend. A string supplies one character per BYTE and two per ADDRESS; `restricted()` checks the manual's restricted expressions. Leftover items are an error after the last name of the list.
 - Codegen in absolute mode: INITIAL becomes `FCB`/`FDB` in the data section and DATA the same among the code, with addresses as label expressions (`addr_text`).
 - Codegen with `--os9`:
-  - DATA is in the module, padded with `ZMB`, and reached as `,PCR` (`var_ref` checks `in_code()`). It may not contain addresses.
+  - DATA is in the module, padded with `ZMB`, and reached as `,PCR` (`var_ref` → `pic_suffix()` checks `Symbol.in_code`). It may not contain addresses.
   - INITIAL gets a module template, which a `PLM_MAIN` prologue copies with `RT_COPY` (assembled only when `RT_NEED_COPY` is defined). The prologue then computes each address with `gen_addr` and stores it.
 - Constant lists are emitted last, because initial values can register them.
+
+**AT:**
+- The parser attaches one `AtSpec` to all names of a declaration; sema's `place_at()` evaluates it once with `restricted()` and gives each name the next offset (`Symbol.at_off`), after INITIAL so that `(*)` dimensions are known.
+- A number makes the variable `absolute` (labels `M_X`); a location makes an alias, which inherits the target's `absolute` and `in_code`.
+- Codegen emits an `EQU` instead of storage. INITIAL AT is `ORG` to the address, `FCB`/`FDB`, and `ORG` back; in `--os9` mode it goes through the same `RT_COPY` prologue as other INITIAL variables.
+- The os9 suite builds the `PLMCARGS` run tests too (including `atabs`, whose fixed addresses can't run under memory protection) and checks their code, and `os9_check_pic` rejects an `M_X` operand with an index register.
 
 **Structures:**
 - The parser builds `StructType`/`Member` (`parse_members`); `member_suffix()` turns `NAME[(i)].M[(j)]` into `E_MEMBER`.
@@ -283,6 +289,7 @@ The full list of messages is in `plmc.md`.
 **Names in the output**
 - global variables `V_X`
 - variables and parameters of nested scope n: `Vn_X`
+- variables AT a fixed address: `M_X` / `Mn_X`
 - procedures `P_X` / `Pn_X`
 - statement labels `G_X` / `Gn_X`
 - compiler labels `Lnnn`

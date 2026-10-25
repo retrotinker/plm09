@@ -278,8 +278,14 @@ static void check_expr(Expr *e, Scope *scope)
 
 /* ------------------------------------------------- INITIAL and DATA */
 
+/* what restricted() is evaluating, for its messages */
+static const char *restricted_what = "an initial value";
+
 static _Noreturn void bad_initial(Loc loc)
 {
+    if (strcmp(restricted_what, "an initial value"))
+        error_at(loc, "%s must be a number or a location reference plus or minus numbers",
+                 restricted_what);
     error_at(loc, "an initial value must be a number, a string, or a location "
              "reference plus or minus numbers");
 }
@@ -311,9 +317,10 @@ static void restricted(Expr *e, Scope *scope, InitVal *iv)
         check_expr(e, scope);
         if (e->lhs && e->lhs->sym->kind == SYM_VAR) {
             if (e->lhs->sym->base)
-                error_at(e->loc, "an initial value cannot use the address of a BASED variable");
+                error_at(e->loc, "%s cannot use the address of a BASED variable",
+                         restricted_what);
             if (!constant_ref(e->lhs))
-                error_at(e->loc, "subscripts in an initial value must be constants");
+                error_at(e->loc, "subscripts in %s must be constants", restricted_what);
         }
         iv->addr = e;
         iv->value = 0;
@@ -395,6 +402,38 @@ static unsigned count_values(const InitList *l, Type t)
     return n;
 }
 
+/* AT (restricted expression), PL/M-80 manual 6.2.8: the first name of the
+   declaration is placed at that address, the others follow in sequence.
+   A numeric address is absolute; the location of a variable makes an
+   alias, which shares that variable's storage (data area, code, ...). */
+static void place_at(Symbol *sym, VarDecl *v, Scope *scope)
+{
+    AtSpec *a = v->at;
+
+    if (v->init && v->init->kind == INIT_DATA)
+        error_at(a->loc, "AT cannot be used with DATA");
+    if (!a->done) {
+        restricted_what = "an AT address";
+        restricted(a->expr, scope, &a->val);
+        restricted_what = "an initial value";
+        if (a->val.addr && (!a->val.addr->lhs || a->val.addr->lhs->sym->kind != SYM_VAR))
+            error_at(a->loc, "AT needs a number or the location of a variable");
+        a->done = 1;
+    }
+    sym->at = a;
+    sym->at_off = a->next;
+    a->next += (sym->dim ? (unsigned)sym->dim : 1) * elem_bytes(sym);
+    if (a->val.addr) {
+        const Symbol *target = a->val.addr->lhs->sym;
+        sym->absolute = target->absolute;
+        sym->in_code = target->in_code;
+    } else {
+        sym->absolute = 1;
+    }
+    if (sym->absolute)
+        sym->asm_name[0] = 'M';         /* M_X: at a fixed memory address */
+}
+
 /* the base of a BASED variable: a declared ADDRESS scalar, not itself
    based (PL/M-80 manual 3.6.3) */
 static Symbol *resolve_base(VarDecl *v, Scope *scope)
@@ -449,6 +488,8 @@ static void declare_var(VarDecl *v, Scope *scope)
             error_at(v->loc, "parameter %s cannot be BASED", v->name);
         if (v->st)
             error_at(v->loc, "parameter %s cannot be a structure", v->name);
+        if (v->at)
+            error_at(v->loc, "parameter %s cannot be declared AT", v->name);
         sym->type = v->type;
         v->sym = sym;
         return;
@@ -462,8 +503,11 @@ static void declare_var(VarDecl *v, Scope *scope)
     v->sym = sym;
     if (v->init) {
         sym->init = v->init->kind;
+        sym->in_code |= sym->init == INIT_DATA;
         take_values(sym, v->init, scope);
     }
+    if (v->at)                  /* after INITIAL, which may set a (*) dimension */
+        place_at(sym, v, scope);
     if (!base)                  /* a BASED variable has no storage of its own */
         vec_push(&sema_vars, sym);
 }

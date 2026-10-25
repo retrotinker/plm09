@@ -613,6 +613,17 @@ static void parse_declare(Block *b)
         }
         StructType *st;
         Type type = parse_type(&st);
+        AtSpec *at = NULL;
+        if (peek_type(0) == K_AT) {
+            at = xcalloc(1, sizeof *at);
+            at->loc = next().loc;
+            expect(T_LPAREN);
+            at->expr = parse_expr();
+            expect(T_RPAREN);
+            for (int i = 0; i < names.len; i++)
+                if (bases.items[i])
+                    error_at(at->loc, "a BASED variable cannot be declared AT");
+        }
         InitList *init = parse_init();
         if (implicit) {
             if (names.len > 1)
@@ -635,6 +646,7 @@ static void parse_declare(Block *b)
             v->dim_loc = dim_loc;
             v->implicit_dim = implicit;
             v->init = init;
+            v->at = at;
             if (bases.items[i]) {
                 Token *base = bases.items[i];
                 v->base = base->text;

@@ -58,16 +58,25 @@ static void emit_source(Loc loc)
 
 /* operand naming a variable, or the byte `offset` bytes into it: absolute,
    or relative to U (the data area) in position-independent mode */
-/* a DATA variable: stored with the code, so in an --os9 module it is
-   reached PC-relative (,PCR) instead of through U */
-static int in_code(const char *name)
+static const Symbol *find_var(const char *name)
 {
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
-        if (v->init == INIT_DATA && !strcmp(v->asm_name, name))
-            return 1;
+        if (!strcmp(v->asm_name, name))
+            return v;
     }
-    return 0;
+    return NULL;
+}
+
+/* how a variable is addressed in an --os9 module: U-relative in the data
+   area, PC-relative if it is stored with the code (DATA), or plainly if it
+   is at a fixed address (AT n) */
+static const char *pic_suffix(const char *name)
+{
+    const Symbol *v = find_var(name);
+    if (v && v->absolute)
+        return "";
+    return v && v->in_code ? ",PCR" : ",U";
 }
 
 static const char *var_ref(const char *name, unsigned offset)
@@ -79,8 +88,7 @@ static const char *var_ref(const char *name, unsigned offset)
 
     if (offset)
         snprintf(off, sizeof off, "+%u", offset & 0xffff);
-    snprintf(b, sizeof bufs[0], "%s%s%s", name, off,
-             !pic ? "" : in_code(name) ? ",PCR" : ",U");
+    snprintf(b, sizeof bufs[0], "%s%s%s", name, off, pic ? pic_suffix(name) : "");
     return b;
 }
 
@@ -212,7 +220,7 @@ static void gen_base_x(const Symbol *sym)
 {
     if (sym->base)
         emit("LDX\t%s", var_ref(sym->base->asm_name, 0));
-    else if (pic)
+    else if (pic && !sym->absolute)
         emit("LEAX\t%s", var_ref(sym->asm_name, 0));
     else
         emit("LDX\t#%s", sym->asm_name);
@@ -446,7 +454,7 @@ static void gen_addr(const Expr *e)
         return;
     }
     if (fixed_location(v, &off)) {
-        if (pic) {
+        if (pic && !v->sym->absolute) {
             emit("LEAX\t%s", var_ref(v->sym->asm_name, off));
             emit("TFR\tX,D");
         } else if (off) {
@@ -921,7 +929,10 @@ static void emit_initial_prologue(void)
             n += ((InitVal *)v->init_vals.items[k])->size;
         fprintf(out, "; INITIAL %s\n", v->name);
         emit("LEAX\tL%d,PCR", tpl[i]);
-        emit("LEAY\t%s", var_ref(v->asm_name, 0));
+        if (v->absolute)
+            emit("LDY\t#%s", v->asm_name);
+        else
+            emit("LEAY\t%s", var_ref(v->asm_name, 0));
         emit("LDD\t#%u", n);
         emit_call("RT_COPY");
         unsigned off = 0;
@@ -938,6 +949,29 @@ static void emit_initial_prologue(void)
     }
 }
 
+/* where an AT variable is: a number, or another variable's label */
+static const char *at_text(const Symbol *v)
+{
+    static char buf[96];
+    const InitVal *iv = &v->at->val;
+    unsigned off = 0;
+
+    if (!iv->addr) {
+        snprintf(buf, sizeof buf, "$%04X", (iv->value + v->at_off) & 0xffff);
+        return buf;
+    }
+    const Expr *t = iv->addr->lhs;
+    const_offset(t, &off);
+    unsigned add = (off + iv->value + v->at_off) & 0xffff;
+    if (!add)
+        snprintf(buf, sizeof buf, "%s", t->sym->asm_name);
+    else if (add < 0x8000)
+        snprintf(buf, sizeof buf, "%s+%u", t->sym->asm_name, add);
+    else
+        snprintf(buf, sizeof buf, "%s-%u", t->sym->asm_name, 0x10000 - add);
+    return buf;
+}
+
 static void emit_variables(void)
 {
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
@@ -947,6 +981,18 @@ static void emit_variables(void)
         const Symbol *v = sema_vars.items[i];
         if (v->init == INIT_DATA)
             continue;                       /* stored with the code */
+        if (v->at) {                        /* no storage of its own */
+            fprintf(out, "%s\tEQU\t%s\n", v->asm_name, at_text(v));
+            if (v->init == INIT_INITIAL && !pic) {
+                /* put the values there, then carry on where we were */
+                int here = new_label();
+                fprintf(out, "L%d\tEQU\t*\n", here);
+                emit("ORG\t%s", v->asm_name);
+                emit_init(v, "", 1);
+                emit("ORG\tL%d", here);
+            }
+            continue;
+        }
         if (v->init == INIT_INITIAL && !pic)
             emit_init(v, v->asm_name, 0);   /* loaded with the program */
         else

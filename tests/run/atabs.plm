@@ -1,0 +1,35 @@
+/* PLMCARGS: --org 0100H */
+/* AT with a number: variables at fixed addresses, here sim6809's MMIO
+   ports and some RAM.  (The PLMCARGS line keeps this test out of the os9
+   suites, whose memory protection forbids fixed addresses.) */
+ATABS: DO;
+DECLARE OUTCH BYTE AT (0FF00H);                 /* putch port */
+DECLARE (DECHI, DECLO) BYTE AT (0FF04H);        /* print-decimal port */
+DECLARE DEC ADDRESS AT (0FF04H);
+DECLARE TABLE (3) BYTE AT (7000H) INITIAL (11, 22, 33);
+DECLARE MIDDLE BYTE AT (.TABLE(1));             /* follows TABLE: absolute */
+DECLARE WORD ADDRESS AT (7000H);
+DECLARE P ADDRESS, B BASED P BYTE;
+DECLARE I BYTE;
+
+PUT: PROCEDURE (C);
+    DECLARE C BYTE;
+    DECLARE PORT BYTE AT (0FF00H);
+    PORT = C;
+END PUT;
+
+OUTCH = 'O'; OUTCH = 'K'; OUTCH = 10;           /* OK */
+DEC = 1234;                                     /* 1234 */
+DECHI = 0; DECLO = 77;                          /* 77 */
+DO I = 0 TO 2;
+    DEC = TABLE(I);                             /* 11 22 33 */
+END;
+DEC = MIDDLE;                                   /* 22 */
+DEC = WORD;                                     /* 2838 = 0B16H */
+P = 7002H;
+DEC = B;                                        /* 33 */
+MIDDLE = 99;
+DEC = .MIDDLE;                                  /* 28673 = 7001H */
+DEC = TABLE(1);                                 /* 99 */
+CALL PUT('!'); CALL PUT(10);                    /* ! */
+END ATABS;

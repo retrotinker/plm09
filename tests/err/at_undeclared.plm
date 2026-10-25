@@ -1,0 +1,1 @@
+T: DO; DECLARE X BYTE AT (.Y); END T;

@@ -107,6 +107,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - `DECLARE ITEM BASED PTR BYTE;` makes `ITEM` mean whatever `PTR` points at; BASED arrays work too.
   - `.X`, `.A(i)` and `.P` give the address of a variable, an element or an outer-level procedure.
   - `.('TEXT', 0)` gives the address of constant bytes stored with the program.
+  - `DECLARE (LO, HI) BYTE AT (.WORD);` makes aliases that share another variable's storage, and `DECLARE PORT BYTE AT (0FF00H);` puts a variable at a fixed address (for I/O registers). The 6809 is big-endian, so a BYTE AT an ADDRESS is its high-order byte.
 - **Arrays:**
   - `DECLARE BUF(80) BYTE;` declares `BUF(0)` to `BUF(79)`.
   - Elements can be used anywhere a variable can, including as assignment targets.
@@ -249,6 +250,7 @@ lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
   |---|---|
   | `V_X` | global variable |
   | `Vn_X` | variable in nested scope n |
+  | `M_X` / `Mn_X` | variable AT a fixed address |
   | `P_X` / `Pn_X` | procedure |
   | `G_X` / `Gn_X` | statement label |
   | `Lnnn` | compiler-generated label |

@@ -36,7 +36,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
   - Trap addresses need a `0x` prefix.
   - `-load` doesn't put a `.BIN` in RAM, and `-run` starts it without going through BASIC's `EXEC`. That's why the suite builds a disk image with `decb` and types `LOADM`.
   - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
-- **os9:** reuses `tests/run/*.plm` (except `PLMCARGS` ones) plus fuzz seeds, built with `--os9` and run by `sim6809 --os9` at two placements. It also fails on `JSR`/`JMP` or a variable operand without `,U` in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
+- **os9:** reuses `tests/run/*.plm` plus fuzz seeds, built with `--os9` and run by `sim6809 --os9` at two placements (`PLMCARGS` tests are only built and checked, not run). It also fails on `JSR`/`JMP`, a variable operand without `,U`, or an `M_X` (AT a number) operand with an index in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
 - **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
   - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
   - The startup script needs `-x` to survive non-zero exit statuses.
@@ -159,6 +159,7 @@ Debug output: `plmc --tokens` and `plmc --ast`.
 |---|---|
 | `V_X` | global variable |
 | `Vn_X` | variable local to procedure scope n |
+| `M_X` / `Mn_X` | variable AT a fixed address (`Symbol.absolute`) |
 | `P_X` | procedure |
 | `G_X` / `Gn_X` | statement label |
 | `Lnnn` | compiler label |
@@ -182,7 +183,9 @@ The hooks are selected only through the include path: `-I runtime/sim` for the s
 - BASED variables are never `fixed_location()`. They are reached through `based_location()` / `gen_base_x()`, which loads X with the base's value, or through `gen_elem_offset()`.
 - `gen_addr()` handles every form of the dot operator. In `--os9` mode the address of a variable must come from `LEAX ...,U` and that of a procedure or constant list from `,PCR`, never from an immediate label.
 
-**INITIAL/DATA in codegen:** absolute programs emit `FCB`/`FDB` (INITIAL in the data section, DATA among the code). In `--os9` modules, DATA lives in the module and must be reached `,PCR` (`var_ref()` checks `in_code()`), and INITIAL is a module template copied in by the `PLM_MAIN` prologue (`RT_COPY`), with addresses stored at run time. Emit constant lists after everything that might register one.
+**INITIAL/DATA in codegen:** absolute programs emit `FCB`/`FDB` (INITIAL in the data section, DATA among the code). In `--os9` modules, DATA lives in the module and must be reached `,PCR` (`var_ref()` → `pic_suffix()` checks `Symbol.in_code`), and INITIAL is a module template copied in by the `PLM_MAIN` prologue (`RT_COPY`), with addresses stored at run time. Emit constant lists after everything that might register one.
+
+**AT in codegen:** an AT variable is an `EQU` (`at_text()`): `M_X EQU $nnnn` for a number, or the target's label plus offset for an alias, which inherits the target's `absolute`/`in_code`. `pic_suffix()` gives no suffix for absolute variables, and `gen_base_x()`/`gen_addr()` use `#M_X` for them even in `--os9` mode. INITIAL AT is emitted with `ORG` to the address and back.
 
 **Structures in codegen:** every reference (`E_NAME`, `E_INDEX`, `E_MEMBER`) goes through `const_offset()` → `fixed_location`/`based_location`, or through `gen_elem_offset()` (computed offset in D, base in X after any `RT_MUL16`). Element sizes come from the symbol (`elem_size`), not from the expression's type.
 

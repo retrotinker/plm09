@@ -243,6 +243,11 @@ static void dump_block(const Block *b, int depth)
                 }
                 putchar(')');
             }
+            if (d->var->at) {
+                printf(" AT (");
+                dump_expr(d->var->at->expr);
+                putchar(')');
+            }
             if (d->var->init && d->var->init != shown) {
                 dump_init(d->var->init);
                 shown = d->var->init;

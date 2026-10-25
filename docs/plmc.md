@@ -158,7 +158,7 @@ compiles means what PL/M-80 says it means.
 
   Used as a value anywhere else, it is an error.
 * **Reserved words:** all PL/M-80 reserved words, including ones for features
-  plmc doesn't implement, so they can't be used as names: `ADDRESS AND BASED
+  plmc doesn't implement, so they can't be used as names: `ADDRESS AND AT BASED
   BY BYTE CALL CASE DATA DECLARE DISABLE DO ELSE ENABLE END EOF EXTERNAL GO
   GOTO HALT IF INITIAL INTERRUPT LABEL LITERALLY MINUS MOD NOT OR PLUS
   PROCEDURE PUBLIC REENTRANT RETURN STRUCTURE THEN TO WHILE XOR`.
@@ -454,6 +454,46 @@ first, so a BYTE BASED on an ADDRESS variable sees its high byte.
 
 In an `--os9` module, `.X` gives the variable's actual run-time address
 inside the process's data area, and constant lists live in the module.
+
+## AT
+
+```
+DECLARE BUFFER (3) BYTE;
+DECLARE (CHAR$A, CHAR$B, CHAR$C) BYTE AT (.BUFFER);
+DECLARE STATUS BYTE AT (0FF00H);
+```
+
+`AT (address)` places a variable at an address of your choosing instead of
+giving it storage of its own (PL/M-80 manual 6.2.8).
+
+* **Placement:** the first name of the declaration is at the address, and
+  any others follow it in order, so `CHAR$A`, `CHAR$B` and `CHAR$C` above
+  are `BUFFER(0)`, `BUFFER(1)` and `BUFFER(2)`. `AT` goes after the type
+  and before any `INITIAL`.
+* **The address** is a restricted expression, as for `INITIAL`:
+  * a number, as in `AT (0FF00H)`: the variable is at that fixed address,
+    for example a memory-mapped I/O register. Plus or minus numbers is
+    allowed.
+  * the location of a variable declared earlier, plus or minus numbers:
+    `AT (.BUFFER)`, `AT (.TABLE(3) - 2)`, `AT (.REC.VAL(1) + 1)`. The new
+    variable is an **alias**: it shares that variable's storage, wherever
+    that is. Subscripts must be constants.
+* **Byte order:** the 6809 is big-endian, so `DECLARE ITEM BYTE AT
+  (.DATUM)`, where `DATUM` is an ADDRESS, is the *high-order* byte of
+  `DATUM` (on the 8080 it would be the low-order byte). Use
+  `AT (.DATUM + 1)` for the low-order byte.
+* **Any type:** scalars, arrays and structures can be declared `AT`, in
+  procedures as well as in the main program.
+* **With INITIAL:** the values are stored at the address, as part of the
+  load image (`ORG` to the address, then `FCB`/`FDB`). In an `--os9` module
+  they are copied there at start-up.
+* **Not allowed:** `AT` with `BASED`, with `DATA`, for a parameter, or
+  with the address of a procedure, of a constant list or of a BASED
+  variable.
+* **In `--os9` modules:** an alias stays in the data area (`,U`) or, if it
+  is AT a DATA variable, in the module (`,PCR`). A variable AT a number is
+  used at that absolute address, which is fine for I/O registers but
+  leaves the program's own memory.
 
 ## Procedures
 
@@ -765,6 +805,9 @@ next multiple of 8 plus 1.
 | `X is not an array`, `X.M is not an array` | a subscript on something that isn't an array |
 | `structures cannot be nested ...`, `structure members cannot be factored`, `a structure member cannot be BASED`, `member M is declared twice` | bad member list |
 | `parameter X cannot be a structure` | a structure declared as a parameter |
+| `a BASED variable cannot be declared AT`, `AT cannot be used with DATA`, `parameter X cannot be declared AT` | `AT` in the wrong place |
+| `AT needs a number or the location of a variable` | e.g. `AT (.P)` for a procedure, or `AT (.(1, 2))` |
+| `an AT address must be a number or a location reference plus or minus numbers`, `subscripts in an AT address must be constants`, `an AT address cannot use the address of a BASED variable` | e.g. `AT (2 * 100H)`, `AT (.B(I))` |
 | `literal X expands recursively (more than 32 levels)` | a literal whose text uses itself |
 | `a LITERALLY declaration cannot be factored`, `... cannot have a dimension` | `DECLARE (A, B) LITERALLY ...`, `DECLARE A(3) LITERALLY ...` |
 | `expected a string, found ...` | `LITERALLY` not followed by a string |
@@ -1187,6 +1230,9 @@ listing and simulator traces easy to follow.
   * DATA variables are emitted the same way, among the code.
   * Addresses become label expressions such as `FDB V_TABLE+2`.
   * In `--os9` modules, see [OS-9 modules].
+* **AT:** a variable declared `AT` gets no storage: its label is an `EQU`,
+  `M_X EQU $FF00` for a fixed address or `V_X EQU V_BUFFER+1` for an alias.
+  `M_X` is used as a plain absolute operand even in `--os9` modules.
 * **Structures:**
   * A member reference whose subscripts are all constants is a fixed
     location, `V_X+offset` (structure subscript × structure size + member
@@ -1220,6 +1266,7 @@ listing and simulator traces easy to follow.
   |---|---|
   | `V_X` | variable `X` of the program |
   | `Vn_X` | variable or parameter `X` of nested scope *n* |
+  | `M_X`, `Mn_X` | variable `X` declared `AT` a fixed address |
   | `P_X`, `Pn_X` | procedure `X` |
   | `G_X`, `Gn_X` | statement label `X` (in scope *n*) |
   | `Lnnn` | compiler-generated label |
@@ -1276,7 +1323,7 @@ group of instructions.
 | `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
-| `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
+| `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |
 

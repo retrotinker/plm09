@@ -24,6 +24,10 @@ typedef struct Symbol {
     StructType *st;         /* STRUCTURE variable: its layout */
     InitKind init;          /* INITIAL or DATA */
     Vec init_vals;          /* InitVal*: the initialized scalars, in order */
+    AtSpec *at;             /* declared AT: no storage of its own */
+    unsigned at_off;        /* offset from the AT address (factored names) */
+    int absolute;           /* at a fixed numeric address (AT n): never U/PC-relative */
+    int in_code;            /* stored with the code (DATA, or AT one) */
     Proc *proc;             /* SYM_PROC */
     Proc *owner;            /* SYM_LABEL: enclosing procedure, NULL in main */
     struct Symbol *next;    /* next symbol in the same scope */

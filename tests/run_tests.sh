@@ -247,6 +247,9 @@ os9_check_pic() {   # $1 = name, $2 = generated .asm
     if grep -nE '^[[:space:]]+[A-Z]+[[:space:]]+#?V[0-9]*_[A-Z0-9]+(\+[0-9]+)?([[:space:]]|$)' "$2" >"$2.pic"; then
         bad "$1" "variable reference that is not U-relative"; cat "$2.pic"; return 1
     fi
+    if grep -nE '^[[:space:]]+[A-Z]+[[:space:]]+M[0-9]*_[A-Z0-9]+(\+[0-9]+)?,' "$2" >"$2.pic"; then
+        bad "$1" "fixed-address (AT) variable reference that is relative"; cat "$2.pic"; return 1
+    fi
     if command -v os9 >/dev/null && ! os9 ident "${2%.asm}.mod" 2>&1 | grep -q 'CRC.*(Good)'; then
         bad "$1" "os9 ident does not accept the module"; return 1
     fi
@@ -266,11 +269,12 @@ suite_os9() {
     local f name base exp n=${1:-25} seed gen=$BUILD/exprgen
     for f in "$ROOT"/tests/run/*.plm; do
         [ -e "$f" ] || continue
-        grep -q '^/\* PLMCARGS:' "$f" && continue     # --org/--vectors tests
         name=os9/$(basename "$f" .plm)
         base=$OUT/os9-$(basename "$f" .plm)
         os9_build "$f" "$base" || { bad "$name" "build failed"; continue; }
         os9_check_pic "$name" "$base.asm" || continue
+        # --org/--vectors/AT-a-number tests: build and check only
+        grep -q '^/\* PLMCARGS:' "$f" && { ok; continue; }
         exp=$base.expected
         cat "${f%.plm}.out" >"$exp"
         echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"

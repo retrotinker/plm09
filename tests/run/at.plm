@@ -1,0 +1,75 @@
+/* AT with the location of a variable (PL/M-80 manual 6.2.8): aliases that
+   share storage.  The 6809 is big-endian, so a BYTE AT an ADDRESS is its
+   high-order byte.  Expected values in comments. */
+ATS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE BUFFER (3) BYTE;
+DECLARE (CHAR$A, CHAR$B, CHAR$C) BYTE AT (.BUFFER);
+DECLARE DATUM ADDRESS;
+DECLARE ITEM BYTE AT (.DATUM), LOWBYTE BYTE AT (.DATUM + 1);
+DECLARE BYTES (6) BYTE;
+DECLARE WORDS (3) ADDRESS AT (.BYTES);
+DECLARE REC STRUCTURE (KEY BYTE, VAL (2) ADDRESS);
+DECLARE RAW (5) BYTE AT (.REC);
+DECLARE TAIL BYTE AT (.REC.VAL(1) + 1);
+DECLARE TABLE (4) ADDRESS INITIAL (10, 20, 30, 40);
+DECLARE (FIRST, SECOND) ADDRESS AT (.TABLE(1));
+DECLARE BACK ADDRESS AT (.TABLE(3) - 2);
+DECLARE STORE (8) BYTE;
+DECLARE MSG (*) BYTE AT (.STORE) INITIAL ('PL/M', 10);
+DECLARE NEXT$FREE BYTE AT (.STORE(5));
+DECLARE I BYTE;
+
+SHOW: PROCEDURE;
+    DECLARE (A, B) BYTE AT (.BUFFER(1));    /* local aliases of globals */
+    CALL PUTDEC(A);
+    CALL PUTDEC(B);
+END SHOW;
+
+BUFFER(0) = 'X'; BUFFER(1) = 'Y'; BUFFER(2) = 'Z';
+CALL PUTCH(CHAR$A); CALL PUTCH(CHAR$B); CALL PUTCH(CHAR$C); CALL PUTCH(10);  /* XYZ */
+CHAR$B = 'Q';
+CALL PUTCH(BUFFER(1)); CALL PUTCH(10);                  /* Q */
+CALL SHOW;                                              /* 81 90 */
+
+DATUM = 1234H;
+CALL PUTDEC(ITEM);                                      /* 18 */
+CALL PUTDEC(LOWBYTE);                                   /* 52 */
+ITEM = 56H;
+CALL PUTDEC(DATUM);                                     /* 22068 = 5634H */
+
+DO I = 0 TO 5;
+    BYTES(I) = I + 1;
+END;
+CALL PUTDEC(WORDS(0));                                  /* 258 = 0102H */
+CALL PUTDEC(WORDS(2));                                  /* 1286 = 0506H */
+I = 1;
+WORDS(I) = 0AABBH;
+CALL PUTDEC(BYTES(2));                                  /* 170 */
+CALL PUTDEC(BYTES(3));                                  /* 187 */
+
+REC.KEY = 7; REC.VAL(0) = 0102H; REC.VAL(1) = 0304H;
+DO I = 0 TO LAST(RAW);
+    CALL PUTDEC(RAW(I));                                /* 7 1 2 3 4 */
+END;
+CALL PUTDEC(TAIL);                                      /* 4 */
+TAIL = 99;
+CALL PUTDEC(REC.VAL(1));                                /* 867 = 0363H */
+
+CALL PUTDEC(FIRST);                                     /* 20 */
+CALL PUTDEC(SECOND);                                    /* 30 */
+CALL PUTDEC(BACK);                                      /* 30 */
+SECOND = 33;
+CALL PUTDEC(TABLE(2));                                  /* 33 */
+CALL PUTDEC(.SECOND - .TABLE);                          /* 4 */
+
+DO I = 0 TO LAST(MSG);                                  /* PL/M */
+    CALL PUTCH(STORE(I));
+END;
+CALL PUTDEC(LENGTH(MSG));                               /* 5 */
+NEXT$FREE = 'X';
+CALL PUTCH(STORE(5)); CALL PUTCH(10);                   /* X */
+CALL PUTDEC(.NEXT$FREE - .MSG);                         /* 5 */
+CALL PUTDEC(SIZE(WORDS));                               /* 6 */
+END ATS;

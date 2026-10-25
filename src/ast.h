@@ -104,6 +104,16 @@ typedef struct InitVal {
     struct Expr *addr;      /* a location reference, or NULL */
 } InitVal;
 
+/* AT (restricted expression), shared by the names of one declaration:
+   the first is placed there, the others follow in sequence */
+typedef struct AtSpec {
+    struct Expr *expr;
+    Loc loc;
+    int done;               /* sema: evaluated into val */
+    InitVal val;
+    unsigned next;          /* sema: offset of the next name */
+} AtSpec;
+
 typedef struct VarDecl {
     char *name;
     Loc loc;
@@ -113,6 +123,7 @@ typedef struct VarDecl {
     StructType *st;         /* STRUCTURE variable (type TY_STRUCT) */
     int implicit_dim;       /* (*): dim comes from the INITIAL/DATA list */
     InitList *init;         /* INITIAL/DATA values, or NULL */
+    AtSpec *at;             /* AT (...), or NULL */
     char *base;             /* BASED variable: name of its base, else NULL */
     Loc base_loc;
     struct Symbol *sym;
