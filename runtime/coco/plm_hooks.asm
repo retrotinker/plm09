@@ -21,8 +21,28 @@ ROM_POLCAT	EQU	$A000		; vector: poll keyboard; A = key, Z set if none
 ROM_CHROUT	EQU	$A002		; vector: output A to device DEVNUM
 ROM_CLS	EQU	$A928		; Color BASIC: clear text screen, home cursor
 
-; end of program; back to BASIC (the exit status in B is discarded by EXEC)
-PLM_EXIT	LDS	RT_ENTRYS
+; end of program; back to BASIC (the exit status in B is discarded by EXEC).
+; Puts back any interrupt vectors PLM_SETINT changed, and leaves IRQ
+; enabled and FIRQ disabled, as BASIC runs.
+PLM_EXIT	ORCC	#$50
+	LDX	#COCO_SAVE
+	LDY	#COCO_VECS
+PLM_EXIT1	TST	3,X		; changed?
+	BEQ	PLM_EXIT2
+	LDU	,Y
+	LDA	,X		; the old JMP instruction
+	STA	,U
+	LDA	1,X
+	STA	1,U
+	LDA	2,X
+	STA	2,U
+	CLR	3,X
+PLM_EXIT2	LEAX	4,X
+	LEAY	2,Y
+	CMPY	#COCO_VECS+6
+	BNE	PLM_EXIT1
+	ANDCC	#$EF
+	LDS	RT_ENTRYS
 	RTS
 
 ; HALT statement: also back to BASIC
@@ -72,3 +92,35 @@ EXIT	JMP	PLM_EXIT
 
 ; CLS: PROCEDURE EXTERNAL;   clear the text screen
 CLS	JMP	ROM_CLS
+
+; PLM_SETINT: install handler X for interrupt B (0 IRQ, 1 FIRQ, 2 NMI);
+; called at start-up for each INTERRUPT procedure.  The ROM's vectors
+; jump through RAM: a JMP at $010C (IRQ), $010F (FIRQ) or $0109 (NMI),
+; which is pointed at the handler.  The old JMP is saved for PLM_EXIT.
+; The IRQ handler must acknowledge the PIA (read $FF02 for the 60 Hz
+; field sync, $FF00 for line sync), or the interrupt repeats at once;
+; BASIC's own IRQ work (TIMER, PLAY, ...) stops while it is replaced.
+PLM_SETINT	PSHS	CC
+	ORCC	#$50		; not while the vector is half written
+	ASLB
+	LDY	#COCO_VECS
+	LDU	B,Y
+	ASLB
+	LDY	#COCO_SAVE
+	LEAY	B,Y
+	TST	3,Y		; saved already?
+	BNE	PLM_SETINT1
+	LDA	,U
+	STA	,Y
+	LDA	1,U
+	STA	1,Y
+	LDA	2,U
+	STA	2,Y
+	INC	3,Y
+PLM_SETINT1	LDA	#$7E		; JMP extended
+	STA	,U
+	STX	1,U
+	PULS	CC,PC
+
+COCO_VECS	FDB	$010C,$010F,$0109
+COCO_SAVE	FCB	0,0,0,0,0,0,0,0,0,0,0,0	; per vector: old JMP, saved flag

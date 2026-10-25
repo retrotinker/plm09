@@ -26,6 +26,7 @@ Vec sema_vars;      /* Symbol*: every variable, for the data section */
 Vec sema_procs;     /* Proc*: every procedure, in declaration order */
 int sema_goto_out;  /* some GOTO leaves a procedure */
 int sema_reentrant; /* some procedure is REENTRANT (Y is a frame pointer) */
+Proc *sema_interrupt[INTERRUPTS];
 int sema_pic;       /* compiling an --os9 module */
 
 static const char *const register_names[] = {
@@ -598,6 +599,26 @@ static void declare_proc(Proc *p, Scope *scope)
                      "level of the main program");
         sema_reentrant = 1;
     }
+    if (p->interrupt) {
+        int n = p->interrupt - 1;
+        if (p->external)
+            error_at(p->interrupt_loc, "an EXTERNAL procedure cannot be an INTERRUPT procedure");
+        if (scope->id != 0)
+            error_at(p->interrupt_loc, "an INTERRUPT procedure must be declared at the outer "
+                     "level of the main program");
+        if (p->ret != TY_NONE || p->params.len)
+            error_at(p->interrupt_loc, "INTERRUPT procedure %s must be untyped and have no "
+                     "parameters", p->name);
+        if (sema_pic)
+            error_at(p->interrupt_loc, "INTERRUPT procedures cannot be used in an --os9 module");
+        if (n >= INTERRUPTS)
+            error_at(p->interrupt_loc, "INTERRUPT %d: the 6809's interrupts are 0 (IRQ), "
+                     "1 (FIRQ) and 2 (NMI)", n);
+        if (sema_interrupt[n])
+            error_at(p->interrupt_loc, "INTERRUPT %d is already used by procedure %s", n,
+                     sema_interrupt[n]->name);
+        sema_interrupt[n] = p;
+    }
     if (scope->proc && scope->proc->reentrant)
         error_at(p->loc, "REENTRANT procedure %s cannot contain procedure declarations",
                  scope->proc->name);
@@ -837,6 +858,11 @@ static void check_stmt(Stmt *s, Scope *scope)
         } else if (cur->ret != TY_NONE) {
             error_at(s->loc, "RETURN in typed procedure %s needs a value", cur->name);
         }
+        break;
+    case S_ENABLE:
+    case S_DISABLE:
+        if (sema_pic)
+            error_at(s->loc, "ENABLE and DISABLE cannot be used in an --os9 module");
         break;
     case S_HALT:
     case S_NULL:

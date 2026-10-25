@@ -31,3 +31,13 @@ GETCH	LDB	SIM_IO+1
 
 ; EXIT: PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE;
 EXIT	JMP	PLM_EXIT
+
+; PLM_SETINT: install handler X for interrupt B (0 IRQ, 1 FIRQ, 2 NMI);
+; called at start-up for each INTERRUPT procedure.  The simulator's
+; vectors are in RAM.
+PLM_SETINT	LDY	#SIM_VECS
+	ASLB
+	LDY	B,Y
+	STX	,Y
+	RTS
+SIM_VECS	FDB	$FFF8,$FFF6,$FFFC

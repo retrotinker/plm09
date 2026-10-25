@@ -1,7 +1,9 @@
 ; Stand-in for the Color BASIC ROM so runtime/coco hooks can be tested in
 ; sim6809.  Only what the hooks use: the POLCAT/CHROUT vectors at $A000,
-; CLS at $A928, plus a fake EXEC caller that runs the program at $3000
-; on a BASIC-like stack and checks that it comes back with S intact.
+; CLS at $A928, the interrupt vectors, which jump through RAM at
+; $0109-$0111, plus a fake EXEC caller that runs the program at $3000
+; on a BASIC-like stack and checks that it comes back with S intact and
+; BASIC's RAM interrupt vectors put back.
 ; Assemble to S-records and load AFTER the program, so this END wins.
 	PRAGMA	6809
 SIM_IO	EQU	$FF00
@@ -23,15 +25,35 @@ FCHROUT	STA	SIM_IO
 
 ; EXEC: B (the hooks' exit status) becomes the simulator's exit status;
 ; 99 means the program came back with the wrong stack pointer.
+; 98 means an interrupt vector in RAM wasn't put back.
 FBASIC	LDS	#BASIC_S
 	CLRA
 	TFR	A,DP
+	LDX	#$0109		; NMI, IRQ, FIRQ: JMP FRTI
+FBASIC0	LDA	#$7E
+	STA	,X+
+	LDD	#FRTI
+	STD	,X++
+	CMPX	#$0112
+	BNE	FBASIC0
+	ANDCC	#$EF		; BASIC runs with IRQ enabled
 	JSR	$3000
 	CMPS	#BASIC_S
 	BEQ	FBASIC1
 	LDB	#99
-FBASIC1	STB	SIM_IO+2
+	BRA	FBASIC3
+FBASIC1	LDX	#$010A
+FBASIC2	LDY	,X++
+	CMPY	#FRTI
+	BNE	FBASIC4
+	LEAX	1,X
+	CMPX	#$0113
+	BNE	FBASIC2
+FBASIC3	STB	SIM_IO+2
 	BRA	*
+FBASIC4	LDB	#98
+	BRA	FBASIC3
+FRTI	RTI
 
 	ORG	$A928
 FCLS	LDA	#'[
@@ -41,4 +63,9 @@ FCLS	LDA	#'[
 	LDA	#']
 	STA	SIM_IO
 	RTS
+	ORG	$FFF6		; the ROM's vectors: through RAM
+	FDB	$010F		; FIRQ
+	FDB	$010C		; IRQ
+	FDB	$0106		; SWI
+	FDB	$0109		; NMI
 	END	FBASIC

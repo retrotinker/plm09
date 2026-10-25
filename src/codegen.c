@@ -698,6 +698,17 @@ static void gen_cond_false(const Expr *e, int false_label)
 static void gen_block(const Block *b);
 static void gen_stmt(const Stmt *s);
 
+static const char *const int_name[INTERRUPTS] = { "IRQ", "FIRQ", "NMI" };
+static const unsigned int_vector[INTERRUPTS] = { 0xfff8, 0xfff6, 0xfffc };
+
+static int has_interrupts(void)
+{
+    for (int n = 0; n < INTERRUPTS; n++)
+        if (sema_interrupt[n])
+            return 1;
+    return 0;
+}
+
 /* return from a procedure; B/D (the result) are left alone */
 static void gen_epilogue(const Proc *p)
 {
@@ -821,6 +832,14 @@ static void gen_stmt(const Stmt *s)
     }
     case S_CALL:
         gen_call(s->expr);
+        if (s->expr->sym->proc->interrupt)
+            emit("ANDCC\t#$AF\t\t; a CALLed INTERRUPT procedure enables interrupts");
+        break;
+    case S_ENABLE:
+        emit("ANDCC\t#$AF\t\t; clear I and F");
+        break;
+    case S_DISABLE:
+        emit("ORCC\t#$50\t\t; set I and F");
         break;
     case S_IF: {
         int else_label = new_label();
@@ -869,6 +888,8 @@ static void gen_stmt(const Stmt *s)
         emit("LBRA\t%s", s->expr->sym->asm_name);
         break;
     case S_HALT:
+        if (has_interrupts())
+            emit("ANDCC\t#$AF\t\t; HALT enables interrupts");
         emit_jump("PLM_HALT");
         break;
     case S_NULL:
@@ -1096,6 +1117,13 @@ static void emit_code(const Program *prog)
         emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
     if (pic)
         emit_initial_prologue();
+    for (int n = 0; n < INTERRUPTS; n++) {
+        if (!sema_interrupt[n])
+            continue;
+        emit("LDX\t#RT_INT%d\t\t; install the %s handler", n, int_name[n]);
+        emit("LDB\t#%d", n);
+        emit_call("PLM_SETINT");
+    }
     gen_block(prog->body);
     emit("RTS");
 
@@ -1115,6 +1143,24 @@ static void emit_code(const Program *prog)
         }
         gen_block(p->body);
         gen_epilogue(p);
+    }
+
+    /* interrupt entry points: IRQ and NMI stack every register, FIRQ only
+       PC and CC; the handler's code expects DP = 0 */
+    for (int n = 0; n < INTERRUPTS; n++) {
+        const Proc *p = sema_interrupt[n];
+        if (!p)
+            continue;
+        fprintf(out, "\n; %s handler: procedure %s (INTERRUPT %d)\nRT_INT%d\n",
+                int_name[n], p->name, n, n);
+        if (n == 1)
+            emit("PSHS\tU,Y,X,DP,D");
+        emit("CLRA");
+        emit("TFR\tA,DP");
+        emit_call(p->sym->asm_name);
+        if (n == 1)
+            emit("PULS\tD,DP,X,Y,U");
+        emit("RTI\t\t\t; restores CC: interrupts enabled again");
     }
 
     emit_code_data();
@@ -1170,6 +1216,12 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
     emit_variables();
     emit_pools();
     if (opt->vectors) {
+        for (int n = 0; n < INTERRUPTS; n++) {
+            if (!sema_interrupt[n])
+                continue;
+            emit("ORG\t$%04X", int_vector[n]);
+            emit("FDB\tRT_INT%d\t\t; %s", n, int_name[n]);
+        }
         emit("ORG\t$FFFE");
         emit("FDB\tRT_START");
     }

@@ -1,0 +1,118 @@
+/* PLMCARGS: --vectors */
+/* NOT-OS9: OS-9 programs can't have interrupt procedures */
+/* INTERRUPT procedures, ENABLE and DISABLE (PL/M-80 manual 8.1.6), driven
+   by sim6809's interrupt lines and timer, reached through AT variables.
+   Expected values in comments. */
+INTS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE INTSET BYTE AT (0FF06H);    /* write: assert lines; read: lines */
+DECLARE INTCLR BYTE AT (0FF07H);    /* write: release lines */
+DECLARE (TIMHI, TIMLO) BYTE AT (0FF08H);    /* IRQ every N instructions */
+DECLARE TIMLINE BYTE AT (0FF0AH);   /* which line the timer asserts */
+DECLARE (TICKS, FAST, NMIS, CHECKS, BAD) ADDRESS, I BYTE;
+DECLARE (R, M) ADDRESS;
+
+/* the manual's case for REENTRANT: used by the main program and by an
+   interrupt procedure that may interrupt it */
+SUM$TO: PROCEDURE (N) ADDRESS REENTRANT;
+    DECLARE N ADDRESS;
+    IF N = 0 THEN RETURN 0;
+    RETURN N + SUM$TO(N - 1);
+END SUM$TO;
+
+TIMER: PROCEDURE (N);
+    DECLARE N ADDRESS;
+    TIMHI = N / 256;
+    TIMLO = N;                      /* starts it; 0 stops it */
+END TIMER;
+
+TICK: PROCEDURE INTERRUPT 0;        /* IRQ */
+    INTCLR = 1;                     /* acknowledge: release the line */
+    TICKS = TICKS + 1;
+    IF SUM$TO(10) <> 55 THEN BAD = BAD + 1;
+    CHECKS = CHECKS + 1;
+END TICK;
+
+QUICK: PROCEDURE INTERRUPT 1;       /* FIRQ */
+    INTCLR = 2;
+    FAST = FAST + 1;
+END QUICK;
+
+PANIC: PROCEDURE INTERRUPT 2;       /* NMI: leaves for good */
+    NMIS = NMIS + 1;
+    GOTO RECOVER;
+END PANIC;
+
+TICKS, FAST, NMIS, CHECKS, BAD = 0;
+
+/* nothing happens while interrupts are disabled */
+DISABLE;
+INTSET = 1;
+CALL PUTDEC(TICKS);                             /* 0 */
+CALL PUTDEC(INTSET);                            /* 1: still asserted */
+ENABLE;                                         /* taken at once */
+CALL PUTDEC(TICKS);                             /* 1 */
+CALL PUTDEC(INTSET);                            /* 0 */
+
+/* DISABLE masks IRQ (and FIRQ) again */
+DISABLE;
+INTSET = 3;
+CALL PUTDEC(TICKS + FAST);                      /* 1 */
+INTCLR = 3;
+ENABLE;
+
+/* FIRQ, and both lines at once (FIRQ first) */
+INTSET = 2;
+CALL PUTDEC(FAST);                              /* 1 */
+DISABLE;
+INTSET = 3;
+ENABLE;
+CALL PUTDEC(FAST);                              /* 2 */
+CALL PUTDEC(TICKS);                             /* 2 */
+
+/* a CALLed interrupt procedure enables interrupts when it returns */
+DISABLE;
+CALL TICK;
+CALL PUTDEC(TICKS);                             /* 3 */
+INTSET = 1;                                     /* taken: enabled again */
+CALL PUTDEC(TICKS);                             /* 4 */
+
+/* the timer: the main program and the IRQ procedure share SUM$TO */
+TICKS, CHECKS = 0;
+CALL TIMER(400);
+DO I = 1 TO 200;
+    R = SUM$TO(I);
+    IF R <> I * (I + 1) / 2 THEN BAD = BAD + 1;
+END;
+CALL TIMER(0);
+CALL PUTDEC(BAD);                               /* 0 */
+CALL PUTDEC(TICKS > 50);                        /* 255: many interrupts */
+CALL PUTDEC(TICKS = CHECKS);                    /* 255 */
+
+/* FIRQ from the timer, in the middle of the main program's arithmetic:
+   the FIRQ entry code must save the registers FIRQ doesn't */
+FAST = 0;
+TIMLINE = 2;
+CALL TIMER(23);
+DO I = 1 TO 200;
+    R = I * 3 + I / 7;
+    M = (R - I) * 2 + (I AND 0FH);
+    IF M <> (I * 3 + I / 7 - I) * 2 + (I MOD 16) THEN BAD = BAD + 1;
+END;
+CALL TIMER(0);
+TIMLINE = 1;
+CALL PUTDEC(BAD);                               /* 0 */
+CALL PUTDEC(FAST > 50);                         /* 255 */
+
+/* NMI can't be disabled; its procedure GOes TO RECOVER, so interrupts
+   stay disabled */
+INTSET = 4;
+CALL PUTDEC(999);                               /* not reached */
+RECOVER:
+CALL PUTDEC(NMIS);                              /* 1 */
+M = TICKS;
+INTSET = 1;
+CALL PUTDEC(TICKS - M);                         /* 0: still disabled */
+ENABLE;
+CALL PUTDEC(TICKS - M);                         /* 1 */
+END INTS;

@@ -68,3 +68,10 @@ PUTDEC2	PULS	B
 
 ; EXIT: PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE;
 EXIT	JMP	PLM_EXIT
+
+; PLM_SETINT: install handler X for interrupt B (0 IRQ, 1 FIRQ, 2 NMI);
+; called at start-up for each INTERRUPT procedure.  On a board whose
+; vectors are in ROM there is nothing to do: build the ROM image with
+; plmc --vectors, which puts RT_INT0/1/2 in the vector table.  If your
+; vectors go through RAM (as on the CoCo), store X there instead.
+PLM_SETINT	RTS

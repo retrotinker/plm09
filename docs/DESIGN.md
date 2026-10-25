@@ -186,8 +186,8 @@ Operators group left to right.
 
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
 - LABEL declarations
-- INTERRUPT, PUBLIC
-- PLUS/MINUS, `:=`, ENABLE/DISABLE
+- PUBLIC
+- PLUS/MINUS, `:=`
 
 The full list of messages is in `plmc.md`.
 
@@ -315,19 +315,21 @@ These can't clash with user names because PL/M identifiers have no `_`.
 4. `PLM_MAIN` (main program), then each non-EXTERNAL procedure
 5. `INCLUDE "plm_rt.asm"` and `INCLUDE "plm_hooks.asm"`. Hooks come after the runtime, so they can call RT_DIV16/RT_MUL16.
 6. the `RMB` data section (all variables and parameters)
-7. with `--vectors`, `ORG $FFFE` / `FDB RT_START`
+7. with `--vectors`, the vectors of INTERRUPT procedures and `ORG $FFFE` / `FDB RT_START`
 8. `END RT_START`
 
 **The hooks contract.** A `plm_hooks.asm` must define:
 - `RT_STACKTOP`
 - `PLM_EXIT` (exit status in B; must not return)
 - `PLM_HALT`
+- `PLM_SETINT` (B = interrupt number, X = entry routine), only for programs with INTERRUPT procedures
 - one label per EXTERNAL procedure the program uses
 
 Other details:
 - Mnemonics are always emitted with a leading tab.
 - No `@` local labels.
-- `HALT` becomes `JMP PLM_HALT`.
+- `HALT` becomes `JMP PLM_HALT` (preceded by `ANDCC #$AF` when the program has INTERRUPT procedures).
+- INTERRUPT procedures: `PLM_MAIN` installs each through `PLM_SETINT`; the entry routines `RT_INTn` (after the procedures) set DP = 0, call the procedure and `RTI` (FIRQ's also save the registers the CPU doesn't). ENABLE/DISABLE are `ANDCC #$AF`/`ORCC #$50`; a CALL of an interrupt procedure is followed by `ANDCC #$AF`.
 
 **Driver options**
 - `-o FILE`
@@ -395,11 +397,12 @@ All four provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 
 ## Simulator (sim/)
 **CPU**
-- The full documented MC6809 instruction set and all addressing modes. No interrupts and no cycle accuracy.
+- The full documented MC6809 instruction set and all addressing modes. No cycle accuracy.
+- Interrupts: IRQ and FIRQ lines (level-triggered) and NMI (edge), asserted and released through MMIO, plus an instruction-count timer. `cpu_interrupt()` is called before each step; it stacks and vectors as the MC6809 does. CWAI and SYNC wait for an interrupt (the wait counts against `-n`).
 - Reset state: all registers 0, including S, and CC=$50.
 - Memory starts filled with $A5 (`--zero` for 0), so tests catch use of uninitialized variables.
 - Where the datasheet leaves results undefined (H after subtract, V after DAA/SEX, mixed-size TFR/EXG), the choices are documented in `sim6809.md`.
-- Undocumented opcodes, reserved indexed postbytes, and SWI/SWI2/SWI3/SYNC/CWAI stop the simulator with a register dump and exit status 125.
+- Undocumented opcodes, reserved indexed postbytes, and SWI/SWI2/SWI3 stop the simulator with a register dump and exit status 125.
 - The instruction limit (`-n`, default 100,000,000) stops it with exit status 124.
 - Usage and load errors give exit status 2.
 - `-t` prints a trace with disassembly to stderr.
@@ -413,11 +416,15 @@ All four provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 | +1 | read | get a character (0 at end of input) |
 | +2 | write | exit with that status |
 | +4/+5 | write | print the 16-bit value in decimal; `STD $FF04` is enough |
+| +6 | write / read | assert interrupt lines (1 IRQ, 2 FIRQ, 4 NMI) / the asserted lines |
+| +7 | write | release lines |
+| +8/+9 | write | timer period in instructions, started by the write to +9 (0 stops it) |
+| +10 | write | the lines the timer asserts (default IRQ) |
 
 Instruction fetches bypass MMIO; all other accesses go through it.
 
 **Checking the simulator itself**
-1. Self-checking assembly tests for flags, branches, indexed modes, PSH/PUL, TFR/EXG, RTI, DAA and MUL. They use `sim/tests/harness.inc`, with expected values worked out by hand from the datasheet at the edge cases.
+1. Self-checking assembly tests for flags, branches, indexed modes, PSH/PUL, TFR/EXG, RTI, DAA, MUL and interrupts (IRQ/FIRQ/NMI, timer, CWAI, SYNC). They use `sim/tests/harness.inc`, with expected values worked out by hand from the datasheet at the edge cases.
 2. An instruction-length check. `gen_len_ops.py` generates every opcode in every addressing mode as straight-line code (about 11,000 instructions). The traced (address, bytes) pairs must match the lwasm listing (`--list=`).
 3. Mutation checks during development. Injected bugs, such as wrong flags or a mis-decoded offset, were confirmed to fail the tests.
 
@@ -484,10 +491,11 @@ How the nitros9 suite works:
 - structures and `SIZE`, and BYTE/ADDRESS typing for `LENGTH`/`LAST`: the run test `structs`, structure members in the fuzz generator, a parse golden and error tests
 - labels and GOTO: the run test `goto` (including 10000 GOTOs out of three nested calls, which crashes if the stack isn't reset), a parse golden and error tests
 - AT: the run tests `at` (aliases) and `atabs` (fixed addresses, sim6809's I/O ports), a parse golden and error tests
+- INTERRUPT, ENABLE and DISABLE, with IRQ/FIRQ/NMI and a timer in sim6809: the sim test `interrupts`, the run test `interrupt`, the coco tests `interrupt` (CoCo hooks against the fake ROM) and `vsync` (60 Hz IRQs on XRoar), a parse golden and error tests
 - REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
 
 ## Known gaps
-- **Language:** LABEL declarations (and so PUBLIC/EXTERNAL labels), INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** LABEL declarations (and so PUBLIC/EXTERNAL labels), PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

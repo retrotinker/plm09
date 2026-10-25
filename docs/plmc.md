@@ -100,7 +100,7 @@ plmc [options] file.plm
 |---|---|
 | `-o FILE` | Write the assembly to *FILE*. The default is standard output. |
 | `--org ADDR` | Address where the program is loaded and starts. The default is `$0100`. |
-| `--vectors` | Also emit `ORG $FFFE` / `FDB RT_START`, setting the 6809 reset vector, for programs that run from ROM or straight from reset. |
+| `--vectors` | Also emit `ORG $FFFE` / `FDB RT_START`, setting the 6809 reset vector, for programs that run from ROM or straight from reset, and the IRQ, FIRQ and NMI vectors of any INTERRUPT procedures. |
 | `--os9` | Generate a position-independent OS-9 program module instead of a program for a fixed address. See [OS-9 modules]. |
 | `--stack N` | With `--os9`: bytes of stack to reserve in the module's data area (default 256, at least 32). |
 | `--name NAME` | With `--os9`: the module name (default: the PL/M program's name). |
@@ -498,7 +498,8 @@ giving it storage of its own (PL/M-80 manual 6.2.8).
 ## Procedures
 
 ```
-NAME: PROCEDURE [(PARAM, ...)] [BYTE | ADDRESS] [EXTERNAL | REENTRANT];
+NAME: PROCEDURE [(PARAM, ...)] [BYTE | ADDRESS] [EXTERNAL | REENTRANT]
+                [INTERRUPT n];
     declarations
     statements
 END [NAME];
@@ -567,6 +568,63 @@ interrupt procedure while it is running.
 * **Pointers:** `.X` of a variable on the stack is its address in the
   current activation, valid until the procedure returns.
 
+### INTERRUPT procedures, ENABLE and DISABLE
+
+```
+DECLARE PIA0B BYTE AT (0FF02H);
+TICK: PROCEDURE INTERRUPT 0;
+    DECLARE ACK BYTE;
+    ACK = PIA0B;                    /* acknowledge the device */
+    TICKS = TICKS + 1;
+END TICK;
+```
+
+`INTERRUPT n` makes a procedure run when interrupt *n* occurs (PL/M-80
+manual 8.1.6). The 8080's numbers are RST levels; on the 6809 they are:
+
+| n | Interrupt | Vector | Registers stacked by the CPU |
+|---|---|---|---|
+| 0 | IRQ | `$FFF8` | all |
+| 1 | FIRQ | `$FFF6` | PC and CC (plmc's entry code saves the others) |
+| 2 | NMI | `$FFFC` | all |
+
+* **What happens:** the CPU masks interrupts (IRQ sets I; FIRQ and NMI set I
+  and F) and enters the procedure through a small entry routine, `RT_INTn`,
+  which sets DP = 0 and calls it. When the procedure returns (`RETURN` or
+  `END`), `RTI` restores the interrupted program's registers, including CC,
+  so interrupts are enabled again.
+* **Acknowledge the device:** IRQ and FIRQ stay asserted until the device
+  that raised them is serviced. The procedure must do that (typically by
+  reading or writing a device register, declared `AT` its address), or it
+  will be entered again as soon as it returns.
+* **Installation:** at start-up the program calls the hooks' `PLM_SETINT`
+  for each INTERRUPT procedure, which points that interrupt at `RT_INTn`. The
+  simulator's hooks store the vector; the CoCo's patch BASIC's RAM vector
+  (and `PLM_EXIT` puts it back). For a ROM-based system, `--vectors` also
+  writes `RT_INTn` into the vector table.
+* **`ENABLE;` and `DISABLE;`** clear and set both the I and F masks
+  (`ANDCC #$AF`, `ORCC #$50`). NMI can't be disabled. Programs start with
+  interrupts as the hooks leave them: masked after a reset (and in the
+  simulator), enabled under Color BASIC.
+* **CALL:** an interrupt procedure may also be called like any untyped
+  procedure. Interrupts aren't masked for such a call, and when it returns
+  they are enabled, as by `ENABLE`.
+* **GOTO out:** an interrupt procedure may `GOTO` a label at the outer level
+  of the main program. Control never returns to the interrupted code, and
+  interrupts stay masked until `ENABLE`.
+* **HALT** enables interrupts before it stops the program, as in PL/M-80.
+* **Shared procedures:** a procedure that might be running when an interrupt
+  procedure calls it again must be `REENTRANT` (its static variables would
+  otherwise be overwritten). The runtime routines (`RT_MUL16`, `RT_DIV16`)
+  use only the stack and are safe.
+* **Rules:**
+  * untyped, with no parameters;
+  * only at the outer level of the main program;
+  * not `EXTERNAL`;
+  * each number at most once, and only 0, 1 and 2;
+  * not in `--os9` modules (OS-9 owns the interrupts), and neither are
+    `ENABLE` and `DISABLE`.
+
 ### EXTERNAL procedures
 
 An `EXTERNAL` procedure is written in assembly language, usually in the hooks
@@ -596,7 +654,8 @@ convention is described under [Hooks].
 | Counted loop | `[LABEL:] DO I = start TO limit [BY step]; statements END [LABEL];` (see [Iterative DO]) |
 | Case | `[LABEL:] DO CASE expression; statement-0; statement-1; ... END [LABEL];` (see [DO CASE]) |
 | Return | `RETURN;` or `RETURN expression;` (inside procedures only) |
-| Halt | `HALT;` stops the program through the hooks' `PLM_HALT` |
+| Halt | `HALT;` stops the program through the hooks' `PLM_HALT` (enabling interrupts first if the program has INTERRUPT procedures) |
+| Interrupt masks | `ENABLE;` and `DISABLE;` (see [INTERRUPT procedures, ENABLE and DISABLE]) |
 | Empty | `;` |
 | Jump | `GOTO label;` or `GO TO label;` (see [Labels and GOTO]) |
 
@@ -795,10 +854,9 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | Feature | Error message |
 |---|---|
 | `LABEL` declarations | `... is not supported` |
-| `INTERRUPT`, `PUBLIC` | `... is not supported` |
+| `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
-| `ENABLE`, `DISABLE` | `ENABLE/DISABLE is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
 
 Of the PL/M-80 built-in procedures, only `LENGTH`, `LAST` and `SIZE` are
@@ -879,6 +937,10 @@ next multiple of 8 plus 1.
 | `X is not declared (only a REENTRANT procedure can use a REENTRANT procedure declared after it)` | a REENTRANT procedure used before its declaration outside a REENTRANT procedure |
 | `a REENTRANT procedure must be declared at the outer level of the main program`, `REENTRANT procedure P cannot contain procedure declarations`, `an EXTERNAL procedure cannot be REENTRANT` | REENTRANT in the wrong place |
 | `the variables of REENTRANT procedure P take more than 32767 bytes` | too big a stack frame |
+| `INTERRUPT n: the 6809's interrupts are 0 (IRQ), 1 (FIRQ) and 2 (NMI)`, `an INTERRUPT number must be from 0 to 255` | bad interrupt number |
+| `INTERRUPT n is already used by procedure P` | two procedures for one interrupt |
+| `INTERRUPT procedure P must be untyped and have no parameters`, `an INTERRUPT procedure must be declared at the outer level of the main program`, `an EXTERNAL procedure cannot be an INTERRUPT procedure` | INTERRUPT in the wrong place |
+| `INTERRUPT procedures cannot be used in an --os9 module`, `ENABLE and DISABLE cannot be used in an --os9 module` | see [OS-9 modules] |
 | `END X does not match ...` | label after `END` differs from the block or procedure |
 | `declarations must come before statements` | `DECLARE` or procedure after the first statement |
 | `declarations are only allowed in procedures and simple DO blocks` | `DECLARE` inside `DO WHILE` |
@@ -919,6 +981,7 @@ lwasm -9 -f decb -I runtime -I runtime/coco -o PROG.BIN prog.asm   # CoCo
 | `RT_STACKTOP` | Initial stack pointer; the stack grows down from here. The value 0 means "keep the caller's stack". |
 | `PLM_EXIT` | Jumped to when the program ends, with the exit status in B (0 for a normal end). Must not return. |
 | `PLM_HALT` | Jumped to by `HALT`. |
+| `PLM_SETINT` | Only for programs with INTERRUPT procedures: called at start-up with B = the interrupt number (0 IRQ, 1 FIRQ, 2 NMI) and X = the entry routine; it must make that interrupt go to X. May change any register but S. |
 | each `EXTERNAL` | A label with the procedure's PL/M name in upper case. |
 
 The startup code saves the stack pointer it was entered with in `RT_ENTRYS`.
@@ -978,6 +1041,7 @@ EXIT:   PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE; END EXIT;
 | `PUTDEC` | simulator decimal port | via `RT_DIV16` and CHROUT | via `RT_DIV16`, one `I$Write`, ends with CR | via `RT_DIV16`, ends with CR LF |
 | `EXIT`, end of program | simulator exit status | back to BASIC (status discarded) | `F$Exit` with the status | stops in a loop |
 | `HALT` | exit status 0 | back to BASIC | `F$Exit` with status 0 | stops in a loop |
+| `PLM_SETINT` | stores the vector at `$FFF8`/`$FFF6`/`$FFFC` | patches BASIC's RAM vector (`JMP` at `$010C`/`$010F`/`$0109`); `PLM_EXIT` restores it | (not used) | does nothing: use `--vectors` |
 | extra | | `CLS` clears the screen | | |
 | stack | `$FF00` | BASIC's | in the data area (`--stack`) | `$8000` |
 
@@ -1035,6 +1099,11 @@ area and points U at it.
 
 **Startup.** `runtime/plm_crt0_os9.asm` keeps the stack, U and DP that OS-9
 set up, calls the program, and ends with `F$Exit`.
+
+**Not available:** INTERRUPT procedures, `ENABLE` and `DISABLE` (OS-9 owns
+the interrupts; a user program must not mask them), and `--org`/`--vectors`.
+Variables `AT` a number are used at that absolute address, outside the data
+area. REENTRANT procedures work, with their frames on the process's stack.
 
 **Module header.**
 
@@ -1156,6 +1225,13 @@ LOADM"HELLO":EXEC
   prints the same way on the CoCo.
 * **Lower case:** on a CoCo 1 or 2, lower-case letters appear as inverse
   video.
+* **Interrupts:** an INTERRUPT procedure replaces BASIC's handler while the
+  program runs, through the RAM vectors at `$0109`--`$0111`. The 60 Hz IRQ
+  comes from PIA 0's field-sync input, which BASIC leaves enabled, and must
+  be acknowledged by reading `$FF02` (`DECLARE PIA0B BYTE AT (0FF02H)`).
+  BASIC's own IRQ work (`TIMER`, `PLAY`, the disk motor timeout) pauses until
+  the program ends, when `PLM_EXIT` restores the vectors and returns to BASIC
+  with IRQ enabled and FIRQ disabled.
 
 The test suite checks these hooks in two ways. They run in the simulator
 against a stand-in for the BASIC ROM. They also run on an emulated CoCo 2
@@ -1316,6 +1392,12 @@ listing and simulator traces easy to follow.
   * Y belongs to the running REENTRANT procedure. Ordinary procedures and
     the runtime don't use it, REENTRANT procedures restore it, and EXTERNAL
     calls save it.
+* **INTERRUPT procedures:** `PLM_MAIN` starts with `LDX #RT_INTn` /
+  `LDB #n` / `JSR PLM_SETINT` for each one. The entry routine `RT_INTn`
+  follows the procedures: `CLRA`, `TFR A,DP`, `JSR P_X`, `RTI`, with
+  `PSHS U,Y,X,DP,D` / `PULS D,DP,X,Y,U` around it for FIRQ. `ENABLE` is
+  `ANDCC #$AF`, `DISABLE` is `ORCC #$50`, and a `CALL` of an interrupt
+  procedure is followed by `ANDCC #$AF`.
 * **Procedure calls:** arguments are stored in the procedure's fixed
   parameter locations and the procedure is called with `JSR`. If an argument
   itself contains a call, all arguments are evaluated and pushed first, then
@@ -1381,10 +1463,10 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
+| `err` | 164 programs that must fail, each with the expected message and position |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
-| `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
+| `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |

@@ -191,6 +191,12 @@ static void dump_stmt(const Stmt *s, int depth)
     case S_HALT:
         printf("HALT\n");
         break;
+    case S_ENABLE:
+        printf("ENABLE\n");
+        break;
+    case S_DISABLE:
+        printf("DISABLE\n");
+        break;
     case S_NULL:
         printf("NULL\n");
         break;
@@ -269,6 +275,8 @@ static void dump_block(const Block *b, int depth)
             printf(" EXTERNAL");
         if (p->reentrant)
             printf(" REENTRANT");
+        if (p->interrupt)
+            printf(" INTERRUPT %d", p->interrupt - 1);
         putchar('\n');
         dump_block(p->body, depth + 1);
     }

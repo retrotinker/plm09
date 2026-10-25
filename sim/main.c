@@ -140,7 +140,10 @@ int main(int argc, char **argv)
     }
 
     for (v = 0; v < limit; v++) {
-        if (tracing)
+        int took = cpu_interrupt(&cpu);
+        if (tracing && took)
+            fprintf(stderr, "---- %s\n", took == TOOK_IRQ ? "IRQ" : took == TOOK_FIRQ ? "FIRQ" : "NMI");
+        if (tracing && !cpu.waiting)
             trace(&cpu);
         if (cpu_step(&cpu))
             break;

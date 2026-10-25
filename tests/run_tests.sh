@@ -165,7 +165,7 @@ suite_coco() {
         bad coco/fakerom "lwasm failed"; cat "$rom.err"; return
     fi
     for f in "$ROOT"/tests/coco/*.plm; do
-        [ -e "$f" ] || continue
+        [ -e "${f%.plm}.out" ] || continue          # XRoar-only (vsync)
         name=coco/$(basename "$f" .plm)
         base=$OUT/coco-$(basename "$f" .plm)
         if ! "$PLMC" --org 3000H -o "$base.asm" "$f" 2>"$base.plmc.err"; then
@@ -269,6 +269,7 @@ suite_os9() {
     local f name base exp n=${1:-25} seed gen=$BUILD/exprgen
     for f in "$ROOT"/tests/run/*.plm; do
         [ -e "$f" ] || continue
+        grep -q '^/\* NOT-OS9:' "$f" && continue      # e.g. INTERRUPT procedures
         name=os9/$(basename "$f" .plm)
         base=$OUT/os9-$(basename "$f" .plm)
         os9_build "$f" "$base" || { bad "$name" "build failed"; continue; }

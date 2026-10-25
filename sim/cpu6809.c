@@ -1,7 +1,8 @@
 /* MC6809 CPU core for sim6809.
  *
- * Full documented 6809 instruction set and addressing modes.  No interrupts,
- * no cycle counting.  SWI/SWI2/SWI3/SYNC/CWAI stop the simulator (STOP_TRAP),
+ * Full documented 6809 instruction set and addressing modes, and IRQ, FIRQ
+ * and NMI driven through MMIO.  No cycle counting.  SWI/SWI2/SWI3 stop the
+ * simulator (STOP_TRAP),
  * except that SWI2 calls swi2_hook when one is set (OS-9 system calls);
  * undocumented opcodes and indexed postbytes stop it (STOP_ILLEGAL).
  */
@@ -24,6 +25,7 @@ void cpu_init(Cpu *c, uint16_t io_base, uint8_t fill)
     memset(c->mem, fill, sizeof c->mem);
     c->io_base = io_base;
     c->cc = CC_I | CC_F;    /* reset state */
+    c->timer_lines = INT_IRQ;
 }
 
 /* ---------------------------------------------------------------- memory */
@@ -49,6 +51,8 @@ uint8_t cpu_read8(Cpu *c, uint16_t addr)
             int ch = getchar();
             return ch == EOF ? 0 : (uint8_t)ch;
         }
+        if (addr - c->io_base == IO_INTSET)
+            return c->lines;
         return 0;
     }
     return c->mem[addr];
@@ -79,6 +83,23 @@ void cpu_write8(Cpu *c, uint16_t addr, uint8_t v)
         break;
     case IO_DECLO:
         printf("%u\n", (unsigned)(c->dec_hi << 8 | v));
+        break;
+    case IO_INTSET:
+        c->lines |= v & (INT_IRQ | INT_FIRQ);
+        if (v & INT_NMI)
+            c->nmi_pending = 1;
+        break;
+    case IO_INTCLR:
+        c->lines &= (uint8_t)~v;
+        break;
+    case IO_TIMHI:
+        c->tim_hi = v;
+        break;
+    case IO_TIMLO:
+        c->timer_period = c->timer_count = (uint16_t)(c->tim_hi << 8 | v);
+        break;
+    case IO_TIMLINE:
+        c->timer_lines = v & (INT_IRQ | INT_FIRQ | INT_NMI);
         break;
     }
 }
@@ -697,6 +718,43 @@ static void op_daa(Cpu *c)
     setf(c, CC_V, 0);
 }
 
+/* stack the state and jump through a vector */
+static void take(Cpu *c, int entire, uint8_t mask, uint16_t vector)
+{
+    if (c->waiting != 1) {              /* CWAI stacked it already */
+        if (entire)
+            c->cc |= CC_E;
+        else
+            c->cc &= (uint8_t)~CC_E;
+        op_psh(c, &c->s, c->u, entire ? 0xff : 0x81);
+    }
+    c->waiting = 0;
+    c->cc |= mask;
+    c->pc = read16(c, vector);
+}
+
+int cpu_interrupt(Cpu *c)
+{
+    if (c->stop)
+        return TOOK_NONE;
+    if (c->nmi_pending) {
+        c->nmi_pending = 0;
+        take(c, 1, CC_I | CC_F, 0xfffc);
+        return TOOK_NMI;
+    }
+    if ((c->lines & INT_FIRQ) && !(c->cc & CC_F)) {
+        take(c, 0, CC_I | CC_F, 0xfff6);
+        return TOOK_FIRQ;
+    }
+    if ((c->lines & INT_IRQ) && !(c->cc & CC_I)) {
+        take(c, 1, CC_I, 0xfff8);
+        return TOOK_IRQ;
+    }
+    if (c->waiting == 2 && (c->lines & (INT_IRQ | INT_FIRQ)))
+        c->waiting = 0;                 /* SYNC ends even on a masked line */
+    return TOOK_NONE;
+}
+
 int cpu_step(Cpu *c)
 {
     uint8_t r;
@@ -704,6 +762,14 @@ int cpu_step(Cpu *c)
 
     if (c->stop)
         return c->stop;
+    if (c->timer_period && --c->timer_count == 0) {
+        c->timer_count = c->timer_period;
+        c->lines |= c->timer_lines & (INT_IRQ | INT_FIRQ);
+        if (c->timer_lines & INT_NMI)
+            c->nmi_pending = 1;
+    }
+    if (c->waiting)
+        return 0;
     c->stop_pc = c->pc;
     if (c->protect && !in(c->pc, c->mod_lo, c->mod_hi))
         return cpu_stop(c, STOP_ILLEGAL, "PC outside the module");
@@ -732,7 +798,7 @@ int cpu_step(Cpu *c)
     case 0x10: return page2(c);
     case 0x11: return page3(c);
     case 0x12: return 0;                                        /* NOP */
-    case 0x13: return cpu_stop(c, STOP_TRAP, "SYNC");
+    case 0x13: c->waiting = 2; return 0;                       /* SYNC */
     case 0x16: {                                                /* LBRA */
         uint16_t off = fetch16(c);
         c->pc = (uint16_t)(c->pc + off);
@@ -782,7 +848,12 @@ int cpu_step(Cpu *c)
             op_pul(c, &c->s, &c->u, 0x7e);
         c->pc = pull16(c, &c->s);
         return c->stop;
-    case 0x3c: return cpu_stop(c, STOP_TRAP, "CWAI");
+    case 0x3c:                                                  /* CWAI */
+        c->cc &= fetch8(c);
+        c->cc |= CC_E;
+        op_psh(c, &c->s, c->u, 0xff);
+        c->waiting = 1;
+        return c->stop;
     case 0x3d:                                                  /* MUL */
         set_d(c, (uint16_t)(c->a * c->b));
         setf(c, CC_Z, DREG(c) == 0);

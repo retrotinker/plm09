@@ -60,6 +60,7 @@ typedef struct Expr {
 
 typedef enum StmtKind {
     S_ASSIGN, S_CALL, S_IF, S_DO, S_WHILE, S_ITER, S_CASE, S_RETURN, S_HALT, S_NULL,
+    S_ENABLE, S_DISABLE,
     S_GOTO,
 } StmtKind;
 
@@ -137,6 +138,8 @@ typedef struct Proc {
     int external;
     int reentrant;          /* REENTRANT: parameters and locals in a stack frame */
     Loc reentrant_loc;
+    int interrupt;          /* INTERRUPT n: n + 1, or 0 */
+    Loc interrupt_loc;
     struct Block *body;
     struct Symbol *sym;
     Vec callees;            /* Proc*: set by sema */

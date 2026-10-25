@@ -31,12 +31,12 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 - **lex / parse:** `tests/lex/X.plm` + `.tok` and `tests/parse/X.plm` + `.ast`. These are golden files compared with `plmc --tokens` and `plmc --ast` output.
 - **err:** `tests/err/X.plm` + `.err`. Compilation must fail, and its stderr must contain the first line of `.err`.
 - **run:** `tests/run/X.plm` + `.out`, plus optional `.rc` (expected exit status, default 0) and `.in` (fed to stdin). An optional first line `/* PLMCARGS: ... */` passes extra compiler options. The suite also checks that compiled code assembles with `runtime/example/` hooks.
-- **coco:** `tests/coco/X.plm` + `.out` (+ `.in`, `.rc`), compiled with `--org 3000H` against `runtime/coco` hooks and run in sim6809 together with `tests/coco/fakerom.asm`. The fake ROM is loaded last so its S9 entry (a fake `EXEC`) wins. Output keeps the CoCo's CR newlines, so write `.out` files with `printf '...\r'`.
+- **coco:** `tests/coco/X.plm` + `.out` (+ `.in`, `.rc`; a test without `.out` runs only under XRoar, like `vsync`), compiled with `--org 3000H` against `runtime/coco` hooks and run in sim6809 together with `tests/coco/fakerom.asm`. The fake ROM is loaded last so its S9 entry (a fake `EXEC`) wins. Output keeps the CoCo's CR newlines, so write `.out` files with `printf '...\r'`.
 - **xroar:** the `tests/coco` programs that have a `.screen` file (and optional `.keys`, typed after `EXEC`), run on an emulated CoCo 2 (machine `cocous`, Disk Extended BASIC 1.1). Start each test program with `CALL CLS` so the screen doesn't depend on the ROM's banner. XRoar facts this suite relies on:
   - Trap addresses need a `0x` prefix.
   - `-load` doesn't put a `.BIN` in RAM, and `-run` starts it without going through BASIC's `EXEC`. That's why the suite builds a disk image with `decb` and types `LOADM`.
   - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
-- **os9:** reuses `tests/run/*.plm` plus fuzz seeds, built with `--os9` and run by `sim6809 --os9` at two placements (`PLMCARGS` tests are only built and checked, not run). It also fails on `JSR`/`JMP`, a variable operand without `,U`, or an `M_X` (AT a number) operand with an index in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
+- **os9:** reuses `tests/run/*.plm` (except those with a `/* NOT-OS9: ... */` line, such as `interrupt`) plus fuzz seeds, built with `--os9` and run by `sim6809 --os9` at two placements (`PLMCARGS` tests are only built and checked, not run). It also fails on `JSR`/`JMP`, a variable operand without `,U`, or an `M_X` (AT a number) operand with an index in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
 - **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
   - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
   - The startup script needs `-x` to survive non-zero exit statuses.
@@ -49,7 +49,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 
 | Option | Effect |
 |---|---|
-| `-t` | trace each instruction to stderr (address, bytes, disassembly, registers before execution) |
+| `-t` | trace each instruction to stderr (address, bytes, disassembly, registers before execution), and `---- IRQ` etc. when an interrupt is taken |
 | `-n N` | instruction limit (default 100M) |
 | `--io BASE` | move the MMIO base |
 | `--entry ADDR` | start address when there is no S9 record |
@@ -61,7 +61,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 |---|---|
 | byte written to the exit port | normal exit |
 | 124 | instruction limit reached |
-| 125 | illegal opcode, or SWI/SWI2/SWI3/SYNC/CWAI (registers are dumped to stderr) |
+| 125 | illegal opcode, or SWI/SWI2/SWI3 (registers are dumped to stderr) |
 | 2 | usage or load error |
 
 ## Documentation rule
@@ -80,7 +80,7 @@ Then run `make docs` and commit the regenerated PDFs. The manuals quote real out
 
 | File | Contents |
 |---|---|
-| `cpu6809.c` | the CPU core: full MC6809 instruction set, no interrupts or cycle counts |
+| `cpu6809.c` | the CPU core: full MC6809 instruction set, IRQ/FIRQ/NMI (`cpu_interrupt()`, called by `main.c` before each step), CWAI/SYNC; no cycle counts |
 | `disasm.c` | table-driven disassembler, used only by `-t` |
 | `srec.c` | S1/S9 loader |
 | `main.c` | the driver |
@@ -95,6 +95,10 @@ MMIO at $FF00 (`IO_*` in `cpu6809.h`):
 | +1 | read | get a character (0 at EOF) |
 | +2 | write | exit with that status |
 | +4/+5 | write | print the 16-bit value in decimal and a newline; the write to +5 triggers it, so `STD $FF04` is enough |
+| +6 | write/read | assert interrupt lines (1 IRQ, 2 FIRQ, 4 NMI) / read the asserted lines |
+| +7 | write | release lines (IRQ and FIRQ are level-triggered: a handler must release its line) |
+| +8/+9 | write | timer period in instructions (handlers' instructions count too); the write to +9 starts it, 0 stops it |
+| +10 | write | lines the timer asserts (default IRQ) |
 
 How the simulator itself is tested:
 - **Hand-checked tests:** most `sim/tests/*.asm` files `INCLUDE harness.inc`. It provides:
@@ -114,7 +118,7 @@ The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` node
   - A name being *defined* must be read with `next_raw_ident()`, and tested with `raw_type()`, never with an expanding peek. Otherwise an outer literal would be substituted for it.
   - The parser has its own scope stack (`lit_push`/`lit_pop`/`declare_name`) for literals and the names that hide them.
   - Strings are `T_STRING` tokens: one or two characters make a constant, and longer ones are only valid as LITERALLY text.
-- **Unsupported features** (INTERRUPT, LABEL declarations, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (PUBLIC, LABEL declarations, and so on) are rejected in the parser with "X is not supported".
 - **Labels:** any statement can carry labels (`Stmt.labels`). Every DO body is its own scope, and `collect_labels()` must run before a block's declarations and statements are checked, because labels may be used before they are defined, even from procedures.
 - **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST`/`SIZE` into constants (`LENGTH`/`LAST` are BYTE if 255 or less). Assignment targets are parsed as `E_INDEX` directly.
 - **Structures:** `NAME[(i)].M[(j)]` becomes `E_MEMBER` (`member_suffix()`). A whole structure is only allowed under `.` and the built-ins, which sema tracks with `whole_ok`/`shorthand_ok`; always check subscripts with `check_sub()`, which clears them.
@@ -197,6 +201,8 @@ The hooks are selected only through the include path: `-I runtime/sim` for the s
 **Iterative DO / DO CASE:** these follow the PL/M-80 manual's rules exactly (limit and step re-evaluated, exit on wrap-around), and the fuzz model in `exprgen.c` mirrors them. Change both together. DO CASE tables hold offsets (`FDB Lk-Ltab`), so they stay position-independent.
 
 **REENTRANT in codegen:** a REENTRANT procedure's parameters and variables are `Symbol.storage == ST_FRAME` (still in `sema_vars`, with `owner` = the procedure, skipped by `emit_variables`). `layout_frame()` in sema gives offsets from Y; `emit_frame()` emits them as `EQU`s before the procedure, and `var_ref()` adds `,Y`. Y must survive everything a REENTRANT procedure calls: EXTERNAL calls are wrapped in `PSHS Y`/`PULS Y` whenever `sema_reentrant`, and nothing else may use Y (only the `--os9` INITIAL prologue does, before any procedure runs). Callers push arguments in their declared widths and pop them with `LEAS`.
+
+**INTERRUPT in codegen:** `sema_interrupt[n]` (0 IRQ, 1 FIRQ, 2 NMI). `PLM_MAIN` calls the hook `PLM_SETINT` (B = n, X = `RT_INTn`) for each; `RT_INTn` (after the procedures) sets DP=0, calls the procedure and does `RTI`, saving the registers itself for FIRQ. A CALL of an interrupt procedure is followed by `ANDCC #$AF`. Not allowed with `--os9`. Hooks for new targets need `PLM_SETINT` only if programs use INTERRUPT.
 
 Keep the PL/M-80 reserved words of unimplemented features reserved in the lexer.
 

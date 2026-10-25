@@ -728,8 +728,13 @@ static Proc *parse_procedure(void)
             p->reentrant = 1;
             p->reentrant_loc = next().loc;
         }
-        else if (t->type == K_INTERRUPT)
-            unsupported(t->loc, "INTERRUPT");
+        else if (t->type == K_INTERRUPT) {
+            p->interrupt_loc = next().loc;
+            Token n = expect(T_NUMBER);
+            if (n.value > 255)
+                error_at(n.loc, "an INTERRUPT number must be from 0 to 255");
+            p->interrupt = (int)n.value + 1;
+        }
         else if (t->type == K_PUBLIC)
             unsupported(t->loc, "PUBLIC");
         else
@@ -925,7 +930,9 @@ static Stmt *parse_unlabeled(const Vec *labels)
     }
     case K_ENABLE:
     case K_DISABLE:
-        unsupported(loc, "ENABLE/DISABLE");
+        s = new_stmt(next().type == K_ENABLE ? S_ENABLE : S_DISABLE, loc);
+        expect(T_SEMI);
+        return s;
     default:
         unexpected("a statement");
     }

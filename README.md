@@ -54,7 +54,7 @@ format, such as `-f decb` or `-f raw`.
 |---|---|
 | `-o FILE` | output file (default: stdout) |
 | `--org ADDR` | load and start address, default `$0100` (`$2000`, `2000H` and `0x2000` are all accepted) |
-| `--vectors` | also emit `FDB RT_START` at `$FFFE`, the reset vector |
+| `--vectors` | also emit `FDB RT_START` at `$FFFE`, the reset vector, and the vectors of INTERRUPT procedures |
 | `--os9` | generate a position-independent OS-9 program module |
 | `--stack N` | with `--os9`: stack bytes in the data area (default 256) |
 | `--name NAME` | with `--os9`: module name (default: the program's name) |
@@ -124,7 +124,8 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - `DO CASE expr; case-0; case-1; ... END;`; an out-of-range selector runs no case
   - `CALL`, `RETURN [expr]`, `HALT`, and the empty statement `;`
 - **Procedures:**
-  - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL|REENTRANT]; ... END P;`
+  - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL|REENTRANT] [INTERRUPT n]; ... END P;`
+  - `INTERRUPT 0`, `1` and `2` are IRQ, FIRQ and NMI. The procedure runs when that interrupt occurs and returns with `RTI`; it must acknowledge the device itself. The hooks' `PLM_SETINT` installs it at start-up (CoCo: BASIC's RAM vectors, restored at exit), and `--vectors` puts it in the vector table. `ENABLE;` and `DISABLE;` unmask and mask IRQ and FIRQ. Not available with `--os9`.
   - Each parameter must be declared in the procedure body.
   - Procedures may be nested, and a nested procedure can see the variables of the procedures around it.
   - A typed procedure with no parameters is called just by naming it in an expression.
@@ -149,7 +150,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- `INTERRUPT`, `PUBLIC`
+- `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)
 - embedded assignment `:=`
 - built-in procedures other than `LENGTH`, `LAST` and `SIZE`, such as `HIGH`, `LOW` and `SHL`
@@ -281,13 +282,17 @@ build/sim6809 --os9 [--load ADDR] [--data ADDR] [--param STR] module
 | `$FF01` | read | get a character (0 at end of input) |
 | `$FF02` | write | exit with this status |
 | `$FF04`/`$FF05` | write | print the 16-bit value and a newline, triggered by the write to `$FF05` (`STD $FF04`) |
+| `$FF06` | write / read | assert interrupt lines (1 IRQ, 2 FIRQ, 4 NMI) / read the asserted lines |
+| `$FF07` | write | release interrupt lines |
+| `$FF08`/`$FF09` | write | timer: assert lines every N instructions, started by the write to `$FF09` (0 stops it) |
+| `$FF0A` | write | the lines the timer asserts (default IRQ) |
 
 **Exit status**
 - the value the program writes to `$FF02`
 - 124 if the instruction limit is reached
-- 125 for an illegal opcode or an unsupported instruction (SWI, SYNC, CWAI)
+- 125 for an illegal opcode or an unsupported instruction (SWI, SWI2, SWI3)
 
-It implements the full MC6809 instruction set, but not interrupts or cycle timing.
+It implements the full MC6809 instruction set, IRQ/FIRQ/NMI (level-triggered IRQ and FIRQ, as on the chip) with `CWAI` and `SYNC`, but not cycle timing.
 
 ## Tests
 

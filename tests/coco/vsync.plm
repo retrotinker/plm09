@@ -1,0 +1,25 @@
+/* A real CoCo's 60 Hz field-sync IRQ (run only under XRoar: there is no
+   .out file for the simulator).  The INTERRUPT procedure replaces BASIC's
+   IRQ handler, acknowledges the PIA, and counts; PLM_EXIT puts BASIC's
+   handler back. */
+VSYNC: DO;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+CLS: PROCEDURE EXTERNAL; END CLS;
+DECLARE PIA0B BYTE AT (0FF02H);     /* reading it acknowledges field sync */
+DECLARE (TICKS, SEEN) BYTE, SPINS ADDRESS;
+TICK: PROCEDURE INTERRUPT 0;
+    SEEN = PIA0B;
+    TICKS = TICKS + 1;
+END TICK;
+CALL CLS;
+TICKS = 0;
+SPINS = 0;
+ENABLE;
+DO WHILE TICKS < 60;                /* about a second */
+    SPINS = SPINS + 1;
+END;
+DISABLE;
+CALL PUTDEC(TICKS);
+IF SPINS > 1000 THEN CALL PUTCH('Y'); ELSE CALL PUTCH('N');
+END VSYNC;

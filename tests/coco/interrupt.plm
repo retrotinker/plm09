@@ -1,0 +1,23 @@
+/* INTERRUPT procedures with the CoCo hooks: PLM_SETINT points BASIC's RAM
+   vectors at the handlers and PLM_EXIT puts them back (the fake ROM checks).
+   The interrupts come from sim6809's MMIO ports. */
+CI: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE INTSET BYTE AT (0FF06H), INTCLR BYTE AT (0FF07H);
+DECLARE (TICKS, FAST) BYTE;
+TICK: PROCEDURE INTERRUPT 0;
+    INTCLR = 1;
+    TICKS = TICKS + 1;
+END TICK;
+QUICK: PROCEDURE INTERRUPT 1;
+    INTCLR = 2;
+    FAST = FAST + 1;
+END QUICK;
+TICKS, FAST = 0;
+INTSET = 1;                 /* BASIC left IRQ enabled */
+CALL PUTDEC(TICKS);         /* 1 */
+ENABLE;
+INTSET = 3;
+CALL PUTDEC(FAST);          /* 1 */
+CALL PUTDEC(TICKS);         /* 2 */
+END CI;
