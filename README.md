@@ -133,6 +133,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - Any statement may be labeled (`L1: L2: stmt`), and `GOTO L` / `GO TO L` jumps to a label in the same block or an enclosing one (never into a block).
   - A GOTO out of a procedure may only go to the outer level of the main program; the stack is reset.
   - `END name` after a DO is checked against its labels.
+  - `DECLARE (L1, L2) LABEL;` declares labels at the start of a block; they must label statements at the outer level of that block. `LABEL PUBLIC` also exports the label to assembly code under its own name, and `LABEL EXTERNAL` names an assembly-language label (in the hooks, say) that GOTO can jump to.
 
 **Semantics** (following PL/M-80)
 - **Unsigned:** all arithmetic and comparisons are unsigned.

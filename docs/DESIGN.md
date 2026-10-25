@@ -185,8 +185,7 @@ Operators group left to right.
 - **Mixed lookahead:** `NAME: PROC` works with `PROC LITERALLY 'PROCEDURE'`, because the name and ':' are checked raw and only the third token is expanded.
 
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
-- LABEL declarations
-- PUBLIC
+- PUBLIC (except on labels)
 - PLUS/MINUS, `:=`
 
 The full list of messages is in `plmc.md`.
@@ -219,6 +218,8 @@ The full list of messages is in `plmc.md`.
   - Labels are `SYM_LABEL` symbols with `owner` = the enclosing procedure; their assembler names are `G_X` / `Gn_X`.
   - `check_goto()` resolves the target through normal scope lookup, so labels in nested blocks are invisible. If the label's owner differs from the current procedure, it must be in scope 0 (the main program's outer level). Such a jump sets `Stmt.goto_out` and `sema_goto_out`.
   - A label/declaration clash is reported at the label.
+  - LABEL declarations are entered first (`declare_label`, `Symbol.label_declared`); `collect_labels()` binds a definition at the outer level of the same block to the declared symbol instead of defining a new one. After the block is checked, a declared label that is used (or PUBLIC) but undefined is an error, and an unused one a warning.
+  - `LABEL EXTERNAL` symbols take their exact name as assembler name and are never defined; GOTO treats them as main-program outer-level labels. `LABEL PUBLIC` symbols go in `sema_public_labels`, and codegen emits `NAME EQU G_NAME` for them.
 - **Codegen:** labels are emitted before their statement's code, and a GOTO is `LBRA`. With `sema_goto_out`, `PLM_MAIN` starts with `STS RT_MAINS`, and a `goto_out` GOTO does `LDS RT_MAINS` first.
 
 **INITIAL and DATA:**
@@ -492,10 +493,11 @@ How the nitros9 suite works:
 - labels and GOTO: the run test `goto` (including 10000 GOTOs out of three nested calls, which crashes if the stack isn't reset), a parse golden and error tests
 - AT: the run tests `at` (aliases) and `atabs` (fixed addresses, sim6809's I/O ports), a parse golden and error tests
 - INTERRUPT, ENABLE and DISABLE, with IRQ/FIRQ/NMI and a timer in sim6809: the sim test `interrupts`, the run test `interrupt`, the coco tests `interrupt` (CoCo hooks against the fake ROM) and `vsync` (60 Hz IRQs on XRoar), a parse golden and error tests
+- LABEL declarations: the run test `labels` (declared labels in the program, a procedure and a DO block, an inner implicit label hiding a declared one, a PUBLIC label, and an EXTERNAL label naming the hooks' `EXIT`), a parse golden and error tests
 - REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
 
 ## Known gaps
-- **Language:** LABEL declarations (and so PUBLIC/EXTERNAL labels), PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** PUBLIC (other than on labels), PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

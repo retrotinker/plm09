@@ -26,6 +26,7 @@ Vec sema_vars;      /* Symbol*: every variable, for the data section */
 Vec sema_procs;     /* Proc*: every procedure, in declaration order */
 int sema_goto_out;  /* some GOTO leaves a procedure */
 int sema_reentrant; /* some procedure is REENTRANT (Y is a frame pointer) */
+Vec sema_public_labels;
 Proc *sema_interrupt[INTERRUPTS];
 int sema_pic;       /* compiling an --os9 module */
 
@@ -656,7 +657,7 @@ static void declare_proc(Proc *p, Scope *scope)
             Decl *d = p->body->decls.items[i];
             Symbol *ps = d->kind == D_VAR ? scope_lookup_local(inner, d->var->name) : NULL;
             if (!ps || !ps->is_param || ps->type != TY_NONE)
-                error_at(d->kind == D_VAR ? d->var->loc : d->proc->loc,
+                error_at(d->kind == D_PROC ? d->proc->loc : d->var->loc,
                          "an EXTERNAL procedure may only declare its parameters");
             if (d->var->dim)
                 error_at(d->var->loc, "parameter %s cannot be an array", d->var->name);
@@ -701,14 +702,53 @@ static void collect_labels(Stmt *s, Scope *scope)
 {
     for (int i = 0; i < s->labels.len; i++) {
         Expr *l = s->labels.items[i];
-        Symbol *sym = scope_define(scope, l->name, SYM_LABEL, l->loc);
-        sym->owner = scope->proc;
+        Symbol *sym = scope_lookup_local(scope, l->name);
+        if (sym && sym->kind == SYM_LABEL && sym->label_declared && !sym->defined) {
+            /* the definition of a label declared at the start of the block */
+            if (sym->label_attr == LBL_EXTERNAL)
+                error_at(l->loc, "%s is declared LABEL EXTERNAL, so it cannot label a "
+                         "statement here", l->name);
+        } else {
+            sym = scope_define(scope, l->name, SYM_LABEL, l->loc);
+            sym->owner = scope->proc;
+        }
+        sym->defined = 1;
         l->sym = sym;
     }
     if (s->kind == S_IF) {
         collect_labels(s->then_s, scope);
         if (s->else_s)
             collect_labels(s->else_s, scope);
+    }
+}
+
+/* DECLARE L LABEL [PUBLIC | EXTERNAL] (PL/M-80 manual 6.3): the label of a
+   statement at the outer level of this block, declared at its start.
+   PUBLIC exports it by its own name; EXTERNAL makes it an assembly-language
+   label of that name (for example in the hooks), which can't be defined in
+   PL/M.  Both only at the outer level of the main program. */
+static void declare_label(Decl *d, Scope *scope)
+{
+    VarDecl *v = d->var;
+
+    if (d->attr != LBL_PLAIN && scope->id != 0)
+        error_at(d->attr_loc, "PUBLIC and EXTERNAL labels must be declared at the outer "
+                 "level of the main program");
+    Symbol *sym = scope_define(scope, v->name, SYM_LABEL, v->loc);
+    sym->owner = scope->proc;
+    sym->label_declared = 1;
+    sym->label_attr = d->attr;
+    v->sym = sym;
+    if (d->attr == LBL_PLAIN)
+        return;
+    if (is_register_name(v->name))
+        error_at(v->loc, "%s name %s is also a 6809 register name",
+                 d->attr == LBL_PUBLIC ? "PUBLIC" : "EXTERNAL", v->name);
+    if (d->attr == LBL_EXTERNAL) {
+        free(sym->asm_name);
+        sym->asm_name = xstrdup(v->name);
+    } else {
+        vec_push(&sema_public_labels, sym);
     }
 }
 
@@ -719,6 +759,7 @@ static void check_goto(Stmt *s, Scope *scope)
 
     if (sym->kind != SYM_LABEL)
         error_at(l->loc, "%s is not a label", l->name);
+    sym->used = 1;
     if (sym->owner == scope->proc)
         return;                         /* a jump within one procedure (or main) */
     /* leaving a procedure: only to the outer level of the main program */
@@ -745,14 +786,20 @@ static void check_block(Block *b, Scope *scope)
             sym->pending = 1;
         }
     }
-    /* labels first: procedures declared in this block may GOTO them */
+    /* LABEL declarations, then the labels of this block's statements:
+       procedures declared in this block may GOTO them */
+    for (int i = 0; i < b->decls.len; i++) {
+        Decl *d = b->decls.items[i];
+        if (d->kind == D_LABEL)
+            declare_label(d, scope);
+    }
     for (int i = 0; i < b->stmts.len; i++)
         collect_labels(b->stmts.items[i], scope);
     for (int i = 0; i < b->decls.len; i++) {
         Decl *d = b->decls.items[i];
         if (d->kind == D_VAR)
             declare_var(d->var, scope);
-        else
+        else if (d->kind == D_PROC)
             declare_proc(d->proc, scope);
         /* the last name sharing a value list: every value must be used */
         InitList *l = d->kind == D_VAR ? d->var->init : NULL;
@@ -772,6 +819,16 @@ static void check_block(Block *b, Scope *scope)
     }
     for (int i = 0; i < b->stmts.len; i++)
         check_stmt(b->stmts.items[i], scope);
+    for (int i = 0; i < b->decls.len; i++) {
+        Decl *d = b->decls.items[i];
+        Symbol *sym = d->kind == D_LABEL ? d->var->sym : NULL;
+        if (!sym || sym->defined || sym->label_attr == LBL_EXTERNAL)
+            continue;
+        if (sym->label_attr == LBL_PUBLIC || sym->used)
+            error_at(d->var->loc, "label %s is declared here but no statement at the outer "
+                     "level of this block has it", d->var->name);
+        warning_at(d->var->loc, "label %s is declared but never used", d->var->name);
+    }
 }
 
 static void check_stmt(Stmt *s, Scope *scope)

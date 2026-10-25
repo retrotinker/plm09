@@ -1,0 +1,1 @@
+1:16: error: label L is declared here but no statement at the outer level of this block has it

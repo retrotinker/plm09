@@ -499,8 +499,6 @@ static StructType *parse_members(void)
 /* BYTE | ADDRESS | STRUCTURE (...); *st is set for a structure */
 static Type parse_type(StructType **st)
 {
-    Token *t = peek();
-
     *st = NULL;
     if (accept(K_BYTE))
         return TY_BYTE;
@@ -510,10 +508,7 @@ static Type parse_type(StructType **st)
         *st = parse_members();
         return TY_STRUCT;
     }
-    switch (t->type) {
-    case K_LABEL: unsupported(t->loc, "LABEL declarations");
-    default: unexpected("BYTE, ADDRESS or STRUCTURE");
-    }
+    unexpected("BYTE, ADDRESS, STRUCTURE or LABEL");
 }
 
 /* [INITIAL | DATA] '(' value {, value} ')'
@@ -566,6 +561,7 @@ static void decl_name(Vec *names, Vec *bases)
 
 /* DECLARE item {, item} ;
    item := (name | '(' name {, name} ')') ['(' NUMBER ')'] type
+         | (IDENT | '(' IDENT {, IDENT} ')') LABEL [PUBLIC | EXTERNAL]
    name := IDENT [BASED IDENT] */
 static void parse_declare(Block *b)
 {
@@ -609,6 +605,34 @@ static void parse_declare(Block *b)
             if (peek_type(0) != T_STRING)
                 unexpected("a string");
             declare_name(first->text, next().text, first->loc);
+            continue;
+        }
+        if (peek_type(0) == K_LABEL) {
+            Loc label_loc = next().loc;
+            LabelAttr attr = LBL_PLAIN;
+            Loc attr_loc = peek()->loc;
+            if (dim || implicit)
+                error_at(dim_loc, "a LABEL declaration cannot have a dimension");
+            for (int i = 0; i < names.len; i++)
+                if (bases.items[i])
+                    error_at(label_loc, "a LABEL declaration cannot be BASED");
+            if (accept(K_PUBLIC))
+                attr = LBL_PUBLIC;
+            else if (accept(K_EXTERNAL))
+                attr = LBL_EXTERNAL;
+            for (int i = 0; i < names.len; i++) {
+                Token *id = names.items[i];
+                VarDecl *v = xcalloc(1, sizeof *v);
+                Decl *d = xcalloc(1, sizeof *d);
+                declare_name(id->text, NULL, id->loc);
+                v->name = id->text;
+                v->loc = id->loc;
+                d->kind = D_LABEL;
+                d->var = v;
+                d->attr = attr;
+                d->attr_loc = attr_loc;
+                vec_push(&b->decls, d);
+            }
             continue;
         }
         StructType *st;

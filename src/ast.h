@@ -148,12 +148,17 @@ typedef struct Proc {
     unsigned arg_size;      /* REENTRANT: bytes of arguments the caller pushes */
 } Proc;
 
-typedef enum DeclKind { D_VAR, D_PROC } DeclKind;
+typedef enum DeclKind { D_VAR, D_PROC, D_LABEL } DeclKind;
+
+/* attribute of a LABEL declaration */
+typedef enum LabelAttr { LBL_PLAIN, LBL_PUBLIC, LBL_EXTERNAL } LabelAttr;
 
 typedef struct Decl {
     DeclKind kind;
-    VarDecl *var;
+    VarDecl *var;           /* D_VAR; for D_LABEL only name and loc */
     Proc *proc;
+    LabelAttr attr;         /* D_LABEL */
+    Loc attr_loc;
 } Decl;
 
 typedef struct Block {

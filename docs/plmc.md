@@ -716,6 +716,39 @@ FINISHED: ;
 
 `GO TO`, written as two words, is the same as `GOTO`.
 
+### LABEL declarations
+
+```
+DECLARE (AGAIN, DONE) LABEL;
+DECLARE RESTART LABEL PUBLIC;
+DECLARE MONITOR LABEL EXTERNAL;
+```
+
+A label is normally declared just by labeling a statement. A LABEL
+declaration (PL/M-80 manual 6.3) declares it explicitly at the start of a
+block, before the statements (a procedure's body, a simple `DO`, or the
+program), and can give it an attribute.
+
+* **Definition:** the declared label must label a statement at the **outer
+  level of the same block**. A statement with that label inside a nested
+  block is a different label, implicitly declared in that block.
+* **Undefined labels:** a declared label that no statement has is an error
+  if a GOTO uses it (or it is PUBLIC); otherwise it only gets a warning.
+* **Factoring:** `DECLARE (A, B) LABEL PUBLIC;` declares each name, with
+  the attribute.
+* **`PUBLIC`:** the label is also exported under its own name, as
+  `RESTART EQU G_RESTART`, so assembly code (your hooks) can jump to it.
+* **`EXTERNAL`:** the label is an assembly-language label with exactly that
+  name, for example an entry point in the hooks or a ROM monitor; `GOTO
+  MONITOR` becomes `LBRA MONITOR`. It can't label a PL/M statement. A GOTO
+  to it from inside a procedure resets the stack first, as for a GOTO out of
+  a procedure.
+* **Rules:**
+  * no dimension, `BASED`, type or initialization;
+  * PUBLIC and EXTERNAL labels only at the outer level of the main program;
+  * their names can't be 6809 register names, and must not clash with
+    other labels in the assembly (such as hook entry points).
+
 ## Iterative DO
 
 ```
@@ -853,7 +886,6 @@ These parts of PL/M-80 are recognized and rejected with an error:
 
 | Feature | Error message |
 |---|---|
-| `LABEL` declarations | `... is not supported` |
 | `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
@@ -919,6 +951,11 @@ next multiple of 8 plus 1.
 | `DATA in an --os9 module cannot hold addresses (use INITIAL)` | see [OS-9 modules] |
 | `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, BASED, or undeclared |
 | `L is not a label` | `GOTO X` where X is a variable or procedure |
+| `label L is declared here but no statement at the outer level of this block has it` | a declared label used by a GOTO (or PUBLIC) but never defined |
+| warning: `label L is declared but never used` | a declared label that is neither defined nor used |
+| `L is declared LABEL EXTERNAL, so it cannot label a statement here` | definition of an EXTERNAL label |
+| `PUBLIC and EXTERNAL labels must be declared at the outer level of the main program`, `a LABEL declaration cannot have a dimension`, `a LABEL declaration cannot be BASED` | LABEL in the wrong place or with the wrong options |
+| `PUBLIC name X is also a 6809 register name`, `EXTERNAL name X is also a 6809 register name` | a label name the assembler would misread |
 | `a GOTO out of a procedure must go to a label at the outer level of the main program` | the target is in an enclosing procedure, or in a block of the main program |
 | `a label must be followed by a statement (use 'L: ;')` | a label right before `END` |
 | `L is a label, not a variable or procedure`, `cannot assign to label L` | a label used as a value |
@@ -1463,8 +1500,8 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 164 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `err` | 175 programs that must fail, each with the expected message and position |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |

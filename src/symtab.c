@@ -42,7 +42,7 @@ Symbol *scope_define(Scope *s, const char *name, SymKind kind, Loc loc)
     if (old) {
         /* labels are collected before a block's declarations; report a clash
            at the label, which comes later in the text */
-        if (old->kind == SYM_LABEL && kind != SYM_LABEL)
+        if (old->kind == SYM_LABEL && !old->label_declared && kind != SYM_LABEL)
             error_at(old->loc, "%s is already declared at line %d", name, loc.line);
         error_at(loc, "%s is already declared at line %d", name, old->loc.line);
     }

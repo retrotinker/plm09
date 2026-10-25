@@ -33,6 +33,10 @@ typedef struct Symbol {
                                ST_FRAME variable: its procedure */
     unsigned frame_off;     /* ST_FRAME: offset from Y */
     int pending;            /* REENTRANT procedure not declared yet */
+    int label_declared;     /* SYM_LABEL from a LABEL declaration */
+    LabelAttr label_attr;   /* ... and its attribute */
+    int defined;            /* SYM_LABEL: a statement carries it */
+    int used;               /* SYM_LABEL: some GOTO names it */
     struct Symbol *next;    /* next symbol in the same scope */
 } Symbol;
 

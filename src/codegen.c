@@ -1145,6 +1145,14 @@ static void emit_code(const Program *prog)
         gen_epilogue(p);
     }
 
+    /* LABEL PUBLIC: the PL/M label under its own name, for assembly code */
+    if (sema_public_labels.len)
+        fputc('\n', out);
+    for (int i = 0; i < sema_public_labels.len; i++) {
+        const Symbol *l = sema_public_labels.items[i];
+        fprintf(out, "%s\tEQU\t%s\t\t; LABEL PUBLIC\n", l->name, l->asm_name);
+    }
+
     /* interrupt entry points: IRQ and NMI stack every register, FIRQ only
        PC and CC; the handler's code expects DP = 0 */
     for (int n = 0; n < INTERRUPTS; n++) {

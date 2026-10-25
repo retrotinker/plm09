@@ -1,0 +1,38 @@
+/* LABEL declarations (PL/M-80 manual 6.3).  Expected values in comments. */
+LBLS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE (AGAIN, DONE) LABEL, RESTART LABEL PUBLIC;
+/* EXTERNAL: a label in assembly code, here the sim/os9 hooks' EXIT entry,
+   which exits with the status in B */
+DECLARE EXIT LABEL EXTERNAL;
+DECLARE (I, N) BYTE;
+
+CHECK: PROCEDURE (X);
+    DECLARE X BYTE;
+    DECLARE BAIL LABEL;             /* declared in the procedure */
+    IF X > 3 THEN GOTO DONE;        /* out to the main program */
+    IF X = 2 THEN GOTO BAIL;
+    CALL PUTDEC(X);
+    RETURN;
+BAIL: CALL PUTDEC(200 + X);
+END CHECK;
+
+I, N = 0;
+AGAIN: I = I + 1;
+CALL CHECK(I);                      /* 1, 202, 3 (then 5: none) */
+GOTO AGAIN;
+DONE: CALL PUTDEC(99);              /* 99 twice */
+N = N + 1;
+DO;
+    DECLARE SKIP LABEL;
+    IF N = 1 THEN GOTO SKIP;
+    CALL PUTDEC(1000);              /* only on the second pass */
+    /* AGAIN here is a new label of this block, not the declared one */
+    AGAIN: CALL PUTDEC(2000);       /* only on the second pass */
+SKIP: ;
+END;
+RESTART: IF N < 2 THEN GOTO AGAIN;
+I = 42;                             /* leaves 42 in B */
+GOTO EXIT;                          /* exit status 42 */
+CALL PUTDEC(999);                   /* not reached */
+END LBLS;

@@ -1,0 +1,1 @@
+T: DO; DECLARE L LABEL; GOTO L; DO; L: ; END; END T;

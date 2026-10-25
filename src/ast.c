@@ -228,6 +228,11 @@ static void dump_block(const Block *b, int depth)
     for (int i = 0; i < b->decls.len; i++) {
         const Decl *d = b->decls.items[i];
         indent(depth);
+        if (d->kind == D_LABEL) {
+            printf("DECLARE %s LABEL%s\n", d->var->name,
+                   d->attr == LBL_PUBLIC ? " PUBLIC" : d->attr == LBL_EXTERNAL ? " EXTERNAL" : "");
+            continue;
+        }
         if (d->kind == D_VAR) {
             printf("DECLARE %s", d->var->name);
             if (d->var->base)
