@@ -16,6 +16,8 @@
 ; may be changed.
 
 RT_STACKTOP	EQU	0		; keep BASIC's stack
+RT_PORTS	EQU	$FF00		; INPUT(n)/OUTPUT(n): the I/O page, $FF00 + n
+RT_CYCLES100	EQU	89		; TIME: 0.895 MHz (179 after POKE &HFFD7,0)
 
 ROM_POLCAT	EQU	$A000		; vector: poll keyboard; A = key, Z set if none
 ROM_CHROUT	EQU	$A002		; vector: output A to device DEVNUM

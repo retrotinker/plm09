@@ -1,0 +1,2 @@
+/* PLMCARGS: --memory 10 */
+T: DO; END T;

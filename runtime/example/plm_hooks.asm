@@ -18,6 +18,12 @@ ACIA_BASE	EQU	$A000		; control/status register; data at +1
 	IFNDEF	RT_STACKTOP
 RT_STACKTOP	EQU	$8000		; stack grows down from here (top of RAM)
 	ENDC
+	IFNDEF	RT_PORTS
+RT_PORTS	EQU	ACIA_BASE	; INPUT(n)/OUTPUT(n): I/O registers from here
+	ENDC
+	IFNDEF	RT_CYCLES100
+RT_CYCLES100	EQU	100		; TIME: E clock cycles in 100 us (1 MHz)
+	ENDC
 ACIA_STAT	EQU	ACIA_BASE
 ACIA_DATA	EQU	ACIA_BASE+1
 

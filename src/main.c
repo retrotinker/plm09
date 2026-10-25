@@ -22,6 +22,7 @@ static void usage(FILE *f)
             "  --os9         generate a position-independent OS-9 program module\n"
             "  --stack N     with --os9: stack bytes in the data area (default 256)\n"
             "  --name NAME   with --os9: module name (default: the program's name)\n"
+            "  --memory N    with --os9: bytes of the data area for MEMORY (default 0)\n"
             "  --tokens      print the token stream and stop\n"
             "  --ast         print the syntax tree and stop\n");
 }
@@ -86,7 +87,8 @@ int main(int argc, char **argv)
 {
     const char *path = NULL, *out_path = NULL, *mod_name = NULL;
     int tokens = 0, ast = 0, vectors = 0, os9 = 0, org_given = 0, stack_given = 0;
-    unsigned long org = 0x100, stack = 256;
+    int memory_given = 0;
+    unsigned long org = 0x100, stack = 256, memory = 0;
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -110,6 +112,10 @@ int main(int argc, char **argv)
             if (!parse_addr(argv[++i], &stack) || stack < 32)
                 fatal("bad --stack size '%s' (32 to 65535 bytes)", argv[i]);
             stack_given = 1;
+        } else if (!strcmp(a, "--memory") && i + 1 < argc) {
+            if (!parse_addr(argv[++i], &memory))
+                fatal("bad --memory size '%s' (0 to 65535 bytes)", argv[i]);
+            memory_given = 1;
         } else if (!strcmp(a, "-o") && i + 1 < argc) {
             out_path = argv[++i];
         } else if (!strcmp(a, "--org") && i + 1 < argc) {
@@ -134,6 +140,8 @@ int main(int argc, char **argv)
         fatal("--stack is only used with --os9");
     if (mod_name && !os9)
         fatal("--name is only used with --os9");
+    if (memory_given && !os9)
+        fatal("--memory is only used with --os9 (elsewhere MEMORY is all memory after the program)");
 
     src_name = path;
     char *text = read_file(path);
@@ -149,7 +157,8 @@ int main(int argc, char **argv)
     sema_pic = os9;
     sema_program(prog);
 
-    CodegenOptions opt = { (unsigned)org, vectors, os9, (unsigned)stack, mod_name };
+    CodegenOptions opt = { (unsigned)org, vectors, os9, (unsigned)stack, (unsigned)memory,
+                           mod_name };
     FILE *f = stdout;
     if (out_path && !(f = fopen(out_path, "w")))
         fatal("%s: %s", out_path, strerror(errno));

@@ -1,0 +1,92 @@
+/* PL/M-80's flag built-ins (manual 12.3-12.5): SCL, SCR, DEC, CARRY, ZERO,
+   SIGN, PARITY.  plmc defines the flags as those of the last + - PLUS
+   MINUS SCL SCR or DEC executed.  Expected values in comments. */
+FLAGS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (A, B, I) BYTE, (W, V) ADDRESS;
+DECLARE X (3) BYTE, Y (3) BYTE, S (3) BYTE;     /* BCD, low byte first */
+
+PUTHEX: PROCEDURE (V);                          /* two hex digits */
+    DECLARE V BYTE;
+    DECLARE DIGITS (*) BYTE DATA ('0123456789ABCDEF');
+    CALL PUTCH(DIGITS(SHR(V, 4)));
+    CALL PUTCH(DIGITS(V AND 0FH));
+END PUTHEX;
+
+/* start: no carry, a result of 0 */
+CALL PUTDEC(CARRY);                             /* 0 */
+CALL PUTDEC(ZERO);                              /* 255 */
+
+/* DEC: decimal adjust after a BYTE addition */
+A = DEC(38H + 45H); CALL PUTHEX(A); CALL PUTCH(10);         /* 83 */
+A = DEC(19H + 28H); CALL PUTHEX(A); CALL PUTCH(10);         /* 47: half carry */
+A = DEC(99H + 1); CALL PUTHEX(A); CALL PUTCH(10);          /* 00 */
+CALL PUTDEC(CARRY);                             /* 255 */
+A = DEC(0 PLUS 0); CALL PUTHEX(A); CALL PUTCH(10);          /* 01: the carry */
+
+/* six-digit BCD addition: 199999 + 800001 = 1000000 (000000, carry) */
+X(0) = 99H; X(1) = 99H; X(2) = 19H;
+Y(0) = 01H; Y(1) = 00H; Y(2) = 80H;
+S(0) = DEC(X(0) + Y(0));
+DO I = 1 TO 2;
+    S(I) = DEC(X(I) PLUS Y(I));
+END;
+CALL PUTDEC(CARRY);                             /* 255 */
+CALL PUTHEX(S(2)); CALL PUTHEX(S(1)); CALL PUTHEX(S(0)); CALL PUTCH(10);  /* 000000 */
+/* (the loop's own + of I doesn't count; only the DEC carries on) */
+X(2) = 12H;
+S(0) = DEC(X(0) + Y(0));
+DO I = 1 TO 2;
+    S(I) = DEC(X(I) PLUS Y(I));
+END;
+CALL PUTDEC(CARRY);                             /* 0 */
+CALL PUTHEX(S(2)); CALL PUTHEX(S(1)); CALL PUTHEX(S(0)); CALL PUTCH(10);  /* 930000 */
+
+/* SCL, SCR: 9- and 17-bit rotations through the carry */
+B = 0 + 0;                                      /* carry 0 */
+CALL PUTDEC(SCL(10000001B, 1));                 /* 00000010B = 2, carry 1 */
+CALL PUTDEC(SCL(0, 1));                         /* the carry comes in: 1 */
+B = 255 + 1;                                    /* carry 1 */
+CALL PUTDEC(SCR(0, 2));                         /* 01000000B = 64, carry 0 */
+CALL PUTDEC(CARRY);                             /* 0 */
+B = 255 + 1;
+CALL PUTDEC(SCR(1, 9));                         /* 9 of 9 bits: 1 again */
+CALL PUTDEC(CARRY);                             /* 255 */
+W = 8000H; B = 0 + 0;
+V = SCL(W, 1); CALL PUTDEC(V); CALL PUTDEC(CARRY);           /* 0 255 */
+V = SCL(V, 1); CALL PUTDEC(V);                  /* 1 */
+I = 16;
+V = SCR(1, I);                  /* BYTE, carry 0 (from the last SCL): 16 steps
+                                   of a 9-bit rotation are 7: 00000100B */
+CALL PUTDEC(V);                                 /* 4 */
+/* 32-bit shift left through two ADDRESS halves: 0001:8000H * 2 */
+V = 1; W = 8000H;
+B = 0 + 0;
+W = SCL(W, 1); V = SCL(V, 1);
+CALL PUTDEC(V); CALL PUTDEC(W);                 /* 3 0 */
+
+/* ZERO, SIGN, PARITY: the result of the last + - PLUS MINUS SCL SCR DEC */
+A = 5 - 5;
+CALL PUTDEC(ZERO); CALL PUTDEC(SIGN); CALL PUTDEC(PARITY);  /* 255 0 255 */
+A = 3 - 4;                                      /* 0FFH */
+CALL PUTDEC(ZERO); CALL PUTDEC(SIGN); CALL PUTDEC(PARITY);  /* 0 255 255 */
+A = 6 + 1;                                      /* 07H: three 1 bits */
+CALL PUTDEC(PARITY);                            /* 0 */
+W = 7FFFH + 1;                                  /* ADDRESS: bit 15 */
+CALL PUTDEC(SIGN);                              /* 255 */
+W = 0FF00H + 100H;                              /* ADDRESS 0, carry */
+CALL PUTDEC(ZERO); CALL PUTDEC(CARRY);          /* 255 255 */
+W = 0FFH + 1;                                   /* BYTE: 0 */
+CALL PUTDEC(ZERO);                              /* 255 */
+W = 255 + 256;                                  /* ADDRESS: 511 */
+CALL PUTDEC(ZERO); CALL PUTDEC(PARITY);         /* 0 255 (low byte 0FFH) */
+/* other operations leave the flags alone */
+A = 5 - 5;
+B = 3 * 7; B = B AND 1; IF B > 2 THEN B = 0;
+CALL PUTDEC(ZERO);                              /* 255 */
+/* the usual test of a value: add 0 */
+A = 80H;
+B = A + 0;
+CALL PUTDEC(SIGN);                              /* 255 */
+END FLAGS;

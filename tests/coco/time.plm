@@ -1,0 +1,30 @@
+/* TIME on a real (emulated) CoCo, run only under XRoar: 40 * TIME(250)
+   should take a second, which the 60 Hz field-sync IRQ counts.  The
+   count is printed only if it is far off. */
+TIMING: DO;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+CLS: PROCEDURE EXTERNAL; END CLS;
+DECLARE PIA0B BYTE AT (0FF02H);
+DECLARE (TICKS, SEEN, I, T) BYTE;
+TICK: PROCEDURE INTERRUPT 0;
+    SEEN = PIA0B;
+    TICKS = TICKS + 1;
+END TICK;
+CALL CLS;
+TICKS = 0;
+ENABLE;
+T = TICKS;
+DO WHILE T = TICKS;                 /* start just after a tick */
+END;
+T = TICKS;
+DO I = 1 TO 40;
+    CALL TIME(250);
+END;
+T = TICKS - T;
+DISABLE;
+IF T >= 57 AND T <= 62 THEN DO;
+    CALL PUTCH('O'); CALL PUTCH('K');
+END;
+ELSE CALL PUTDEC(T);
+END TIMING;

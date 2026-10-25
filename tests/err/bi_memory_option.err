@@ -1,0 +1,1 @@
+plmc: --memory is only used with --os9 (elsewhere MEMORY is all memory after the program)

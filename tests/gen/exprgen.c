@@ -28,12 +28,13 @@
  *   to BYTE, and a count of 0 leaves the pattern alone (plmc's choice).
  * Expressions that would divide by zero are regenerated.
  *
- * Carry statements test PLUS and MINUS: "RB = x + y;" sets a known carry,
- * then an expression of + - PLUS MINUS over leaves is assigned and
- * printed.  The carry is the one out of the last + - PLUS MINUS executed
- * (8 or 16 bits, as the operation), and plmc evaluates a right operand
- * before the left one, so the model generates (and evaluates) right
- * operands first.
+ * Carry statements test the PL/M-80 "flags" (PLUS, MINUS, SCL, SCR, DEC,
+ * CARRY, ZERO, SIGN, PARITY): "RB = x + y;" sets a known carry and
+ * result, then an expression of those over leaves is assigned and
+ * printed.  The flags are those of the last + - PLUS MINUS SCL SCR DEC
+ * executed (8 or 16 bits, as the operation), and plmc evaluates a right
+ * operand before the left one (and a count before its pattern), so the
+ * model generates (and evaluates) them in that order.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -107,39 +108,134 @@ static Val leaf(char *buf)
 
 static Val expr(char *buf, int depth);
 
-/* PLUS/MINUS: the carry left by the last + - PLUS MINUS, and one of them */
-static unsigned carry;
+/* The flags of PL/M-80 chapter 12 as plmc keeps them: the carry of the
+   last + - PLUS MINUS SCL SCR DEC executed, and its result (a BYTE result
+   is kept twice, so ZERO, SIGN and PARITY read it as a 16-bit value). */
+static unsigned carry, result;
 
-static Val carry_op(int op, Val x, Val y)
+static Val track(Val r)
+{
+    result = r.w == 8 ? r.v << 8 | r.v : r.v;
+    return r;
+}
+
+/* + - PLUS MINUS; *half is set to the half carry of a BYTE addition */
+static Val carry_op(int op, Val x, Val y, unsigned *half)
 {
     Val r;
     r.w = x.w == 8 && y.w == 8 ? 8 : 16;
     unsigned m = mask(r.w), c = op >= 2 ? carry : 0;
     if (op == 0 || op == 2) {               /* + PLUS */
         unsigned s = x.v + y.v + c;
+        if (half)
+            *half = (x.v & 0xf) + (y.v & 0xf) + c > 0xf;
         carry = s > m;
         r.v = s & m;
     } else {                                /* - MINUS */
         carry = x.v < y.v + c;
         r.v = (x.v - y.v - c) & m;
     }
-    return r;
+    return track(r);
 }
 
-/* an expression of + - PLUS MINUS over leaves; the right operand is made
-   (and so evaluated) first */
+/* DEC: the 6809's DAA on the result of a BYTE addition (as sim6809 does it) */
+static Val dec_adjust(Val a, unsigned half)
+{
+    unsigned msn = a.v >> 4, lsn = a.v & 0xf, cf = 0;
+    if (half || lsn > 9)
+        cf |= 0x06;
+    if (carry || msn > 9 || (msn > 8 && lsn > 9))
+        cf |= 0x60;
+    unsigned t = a.v + cf;
+    carry |= t > 0xff;
+    a.v = t & 0xff;
+    return track(a);
+}
+
+/* SCL / SCR: rotate through the carry, n times */
+static Val carry_rotate(int left, Val p, unsigned n)
+{
+    unsigned top = p.w - 1;
+    while (n--) {
+        unsigned out = left ? p.v >> top & 1 : p.v & 1;
+        p.v = left ? (p.v << 1 | carry) & mask(p.w) : p.v >> 1 | carry << top;
+        carry = out;
+    }
+    return track(p);
+}
+
+static Val carry_expr(char *buf, int depth);
+
+/* an operand of DEC's addition: a BYTE */
+static Val byte_operand(char *buf, int depth)
+{
+    char a[BUFSZ];
+    Val v = carry_expr(a, depth);
+    if (v.w == 16) {
+        snprintf(buf, BUFSZ, "LOW(%s)", a);
+        v.v &= 0xff;
+        v.w = 8;
+    } else {
+        snprintf(buf, BUFSZ, "%s", a);
+    }
+    return v;
+}
+
+/* an expression of + - PLUS MINUS SCL SCR DEC and the flag procedures over
+   leaves, generated (and so evaluated by the model) in the order plmc
+   evaluates it: a right operand before the left, a count before its
+   pattern */
 static Val carry_expr(char *buf, int depth)
 {
     static const char *const ops[] = { "+", "-", "PLUS", "MINUS" };
+    static const char *const flags[] = { "CARRY", "ZERO", "SIGN", "PARITY" };
     char a[BUFSZ], b[BUFSZ];
+    Val x, y;
 
-    if (depth >= MAXDEPTH || rnd(3) == 0)
-        return leaf(buf);
-    int op = rnd(4);
-    Val y = carry_expr(b, depth + 1);
-    Val x = carry_expr(a, depth + 1);
-    snprintf(buf, BUFSZ, "(%s) %s (%s)", a, ops[op], b);
-    return carry_op(op, x, y);
+    if (depth >= MAXDEPTH || rnd(3) == 0) {
+        if (rnd(4))
+            return leaf(buf);
+        int f = rnd(4), t;
+        unsigned lo = result & 0xff, bits = 0;
+        for (unsigned k = lo; k; k >>= 1)
+            bits += k & 1;
+        t = f == 0 ? (int)carry : f == 1 ? result == 0 : f == 2 ? (int)(result >> 15) : !(bits & 1);
+        sprintf(buf, "%s", flags[f]);
+        x.v = t ? 0xff : 0;
+        x.w = 8;
+        return x;
+    }
+    switch (rnd(6)) {
+    case 0: {                               /* SCL SCR */
+        int left = rnd(2);
+        unsigned n;
+        if (rnd(2)) {
+            n = rnd(20);
+            sprintf(b, "%u", n);
+        } else {
+            n = carry_expr(b, depth + 1).v & 0xff;
+        }
+        x = carry_expr(a, depth + 1);
+        snprintf(buf, BUFSZ, "%s(%s, %s)", left ? "SCL" : "SCR", a, b);
+        return carry_rotate(left, x, n);
+    }
+    case 1: {                               /* DEC of a BYTE addition */
+        int op = rnd(2) ? 0 : 2;
+        unsigned half = 0;
+        y = byte_operand(b, depth + 1);
+        x = byte_operand(a, depth + 1);
+        snprintf(buf, BUFSZ, "DEC((%s) %s (%s))", a, ops[op], b);
+        Val sum = carry_op(op, x, y, &half);
+        return dec_adjust(sum, half);
+    }
+    default: {
+        int op = rnd(4);
+        y = carry_expr(b, depth + 1);
+        x = carry_expr(a, depth + 1);
+        snprintf(buf, BUFSZ, "(%s) %s (%s)", a, ops[op], b);
+        return carry_op(op, x, y, NULL);
+    }
+    }
 }
 
 /* subscript 0..3: a constant, or (expr) AND 3 */
@@ -472,7 +568,7 @@ int main(int argc, char **argv)
             /* PLUS and MINUS, after a + that sets a known carry */
             char a[BUFSZ], b[BUFSZ], c[BUFSZ];
             Val x = leaf(a), y = leaf(b);
-            Val r = carry_op(0, x, y);
+            Val r = carry_op(0, x, y, NULL);
             Val e = carry_expr(c, 1);
             int word = rnd(2);
             fprintf(plm, "RB = (%s) + (%s);\n%s = %s;\nCALL PUTDEC(%s);\n",

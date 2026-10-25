@@ -234,7 +234,8 @@ suite_xroar() {
 OS9_PLACES=("" "--load 0x3123 --data 0x9E00")
 
 os9_build() {     # $1 = source, $2 = base path, [$3 = module name]; module in $2.mod
-    "$PLMC" --os9 ${3:+--name "$3"} -o "$2.asm" "$1" 2>"$2.plmc.err" || { cat "$2.plmc.err"; return 1; }
+    # --memory: room for MEMORY (the memory test uses 100 bytes of it)
+    "$PLMC" --os9 --memory 128 ${3:+--name "$3"} -o "$2.asm" "$1" 2>"$2.plmc.err" || { cat "$2.plmc.err"; return 1; }
     lwasm -9 -f os9 -I "$ROOT/runtime" -I "$ROOT/runtime/os9" \
         --list="$2.lst" -o "$2.mod" "$2.asm" 2>"$2.err" || { cat "$2.err"; return 1; }
 }

@@ -162,7 +162,9 @@ Operators group left to right.
 - Relationals give 0FFH or 0.
 - IF and WHILE test only bit 0 of the condition.
 - AND and OR are evaluated in full, without short-circuiting.
-- `PLUS`/`MINUS` follow the `+ -` typing and add/subtract the carry (borrow) of the last `+ - PLUS MINUS` executed. The 8080 compiler uses the CPU flag, which the manual calls unpredictable; plmc keeps it in `RT_CARRY` (bit 0), updated by `ROL` after each of those operations when the program uses PLUS or MINUS, and restored with `LSR` before `ADCB`/`ADCA` or `SBCB`/`SBCA`. Interrupt entry code saves and restores it.
+- `PLUS`/`MINUS` follow the `+ -` typing and add/subtract the carry (borrow); `SCL`/`SCR` rotate through it, `DEC` uses it and the half carry, and `CARRY`/`ZERO`/`SIGN`/`PARITY` read the flags. The 8080 compiler uses the CPU flags, which the manual calls unpredictable; plmc defines them as those of the last `+ - PLUS MINUS SCL SCR DEC` executed and keeps them in memory, as far as the program needs them: the carry (and, for BYTE operations when DEC is used, the half carry) in `RT_CC`, by `ROL` (or `TFR CC,A`/`STA`); the result in `RT_RES`. PLUS, MINUS, SCL and SCR get the carry back with `LSR`; DEC puts carry and half carry into CC (leaving I and F) before `DAA`. Interrupt entry code saves and restores them.
+- **I/O ports:** port n of `INPUT(n)`/`OUTPUT(n)` is the byte at `RT_PORTS + n`, defined by the hooks (`$FF00` for the simulator, CoCo and OS-9; `ACIA_BASE` for the example).
+- **TIME** is `RT_TIME`, a loop of 8 × `RT_TIMEK` + 8 cycles per 100 µs, from the hooks' `RT_CYCLES100`. **MOVE** uses `RT_COPY`. **MEMORY** is the label `RT_MEMORY` (after everything, or `--memory` bytes of an OS-9 data area). **STACKPTR** is `TFR S,D` / `TFR D,S`.
 - Assigning ADDRESS to BYTE keeps the low byte. BYTE to ADDRESS zero-extends. Arguments and RETURN values are converted to the declared type.
 - Division by zero gives a quotient of 0FFFFH and a remainder equal to the dividend. This is documented as something not to rely on.
 - The order in which operands are evaluated is unspecified. The code generator evaluates the right operand first, except when it can be used directly as an instruction operand.
@@ -326,6 +328,7 @@ These can't clash with user names because PL/M identifiers have no `_`.
 - `PLM_EXIT` (exit status in B; must not return)
 - `PLM_HALT`
 - `PLM_SETINT` (B = interrupt number, X = entry routine), only for programs with INTERRUPT procedures
+- `RT_PORTS` (address of port 0), only for programs using INPUT or OUTPUT, and `RT_CYCLES100` (cycles in 100 µs), only for programs using TIME
 - one label per EXTERNAL procedure the program uses
 
 Other details:
@@ -498,10 +501,11 @@ How the nitros9 suite works:
 - LABEL declarations: the run test `labels` (declared labels in the program, a procedure and a DO block, an inner implicit label hiding a declared one, a PUBLIC label, and an EXTERNAL label naming the hooks' `EXIT`), a parse golden and error tests
 - PLUS and MINUS: the run test `carry` (32- and 24-bit arithmetic, what changes the carry, evaluation order), 32-bit counting under interrupts in `interrupt`, carry statements in the fuzz generator, a parse golden and error tests
 - HIGH, LOW, DOUBLE, SHL, SHR, ROL, ROR: the run test `builtins`, the coco test `builtins` (also on XRoar), built-ins in the fuzz generator's expressions, a parse golden and error tests
+- the other built-ins and predeclared variables: the run tests `flags` (BCD arithmetic with DEC, SCL/SCR, CARRY/ZERO/SIGN/PARITY), `memory` (MOVE, MEMORY, STACKPTR, TIME; in the os9 suites with `--memory 128`) and `ports` (INPUT/OUTPUT on the simulator's I/O block), the XRoar test `time` (40 × TIME(250) is 59 field-sync ticks, predicted 0.983 s), flag statements in the fuzz generator, a parse golden and error tests
 - REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
 
 ## Known gaps
-- **Language:** PUBLIC (other than on labels), `:=`, and the built-ins other than LENGTH/LAST/SIZE/HIGH/LOW/DOUBLE/SHL/SHR/ROL/ROR (MOVE, TIME, SCL, CARRY, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** PUBLIC (other than on labels), `:=`, are not supported. TIME's timing is only checked on an emulated CoCo; sim6809 has no cycle counts. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

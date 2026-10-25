@@ -11,7 +11,8 @@ Scope *scope_new(Scope *parent, Proc *proc)
     Scope *s = xcalloc(1, sizeof *s);
     s->parent = parent;
     s->proc = proc;
-    s->id = parent ? ++next_scope_id : 0;
+    s->id = parent && parent->id >= 0 ? ++next_scope_id : 0;   /* the predeclared
+                                   scope (id -1) is around the program's (id 0) */
     return s;
 }
 

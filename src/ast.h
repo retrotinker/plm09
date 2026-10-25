@@ -42,6 +42,10 @@ typedef enum ExprKind {
 
 typedef enum Builtin {
     BI_HIGH, BI_LOW, BI_DOUBLE, BI_SHL, BI_SHR, BI_ROL, BI_ROR,
+    BI_SCL, BI_SCR, BI_DEC, BI_INPUT,               /* (lhs [, rhs]) */
+    BI_CARRY, BI_ZERO, BI_SIGN, BI_PARITY,          /* no arguments */
+    BI_TIME, BI_MOVE,                               /* untyped: CALL only; MOVE uses args */
+    BI_STACKPTR,                                    /* a read of STACKPTR */
 } Builtin;
 
 struct Symbol;

@@ -27,7 +27,8 @@ Vec sema_procs;     /* Proc*: every procedure, in declaration order */
 int sema_goto_out;  /* some GOTO leaves a procedure */
 int sema_reentrant; /* some procedure is REENTRANT (Y is a frame pointer) */
 Vec sema_public_labels;
-int sema_carry;
+int sema_carry, sema_half, sema_result;
+int sema_uses_copy, sema_uses_time, sema_uses_parity;
 Proc *sema_interrupt[INTERRUPTS];
 int sema_pic;       /* compiling an --os9 module */
 
@@ -132,6 +133,8 @@ static int check_builtin(Expr *e, Scope *scope)
             && arg->kind != E_MEMBER)
         || !(sym = scope_lookup(scope, arg->name)) || sym->kind != SYM_VAR)
         error_at(e->loc, "%s needs the name of a variable", e->name);
+    if (sym->predef)
+        error_at(e->loc, "%s can't be used with %s, whose size isn't known", e->name, sym->name);
 
     int w = whole_ok, sh = shorthand_ok;
     whole_ok = shorthand_ok = 1;
@@ -164,48 +167,91 @@ static int check_builtin(Expr *e, Scope *scope)
    become E_BUILTIN, with the argument (pattern) in lhs and the count in
    rhs.  HIGH, LOW, ROL, ROR are BYTE (ROL and ROR rotate the pattern as a
    BYTE); DOUBLE is ADDRESS; SHL and SHR have the pattern's type. */
-static const char *const builtin_names[] = {
-    [BI_HIGH] = "HIGH", [BI_LOW] = "LOW", [BI_DOUBLE] = "DOUBLE", [BI_SHL] = "SHL",
-    [BI_SHR] = "SHR", [BI_ROL] = "ROL", [BI_ROR] = "ROR",
+static const struct {
+    const char *name;
+    int nargs;
+    Type type;              /* TY_NONE: untyped (CALL only); TY_STRUCT: the pattern's type */
+} builtins[] = {
+    [BI_HIGH] = { "HIGH", 1, TY_BYTE }, [BI_LOW] = { "LOW", 1, TY_BYTE },
+    [BI_DOUBLE] = { "DOUBLE", 1, TY_ADDRESS },
+    [BI_SHL] = { "SHL", 2, TY_STRUCT }, [BI_SHR] = { "SHR", 2, TY_STRUCT },
+    [BI_ROL] = { "ROL", 2, TY_BYTE }, [BI_ROR] = { "ROR", 2, TY_BYTE },
+    [BI_SCL] = { "SCL", 2, TY_STRUCT }, [BI_SCR] = { "SCR", 2, TY_STRUCT },
+    [BI_DEC] = { "DEC", 1, TY_BYTE }, [BI_INPUT] = { "INPUT", 1, TY_BYTE },
+    [BI_CARRY] = { "CARRY", 0, TY_BYTE }, [BI_ZERO] = { "ZERO", 0, TY_BYTE },
+    [BI_SIGN] = { "SIGN", 0, TY_BYTE }, [BI_PARITY] = { "PARITY", 0, TY_BYTE },
+    [BI_TIME] = { "TIME", 1, TY_NONE }, [BI_MOVE] = { "MOVE", 3, TY_NONE },
 };
 
 /* the Builtin named name, or -1 */
 static int value_builtin(const char *name)
 {
-    for (int i = 0; i < (int)(sizeof builtin_names / sizeof *builtin_names); i++)
-        if (!strcmp(name, builtin_names[i]))
+    for (int i = 0; i < (int)(sizeof builtins / sizeof *builtins); i++)
+        if (builtins[i].name && !strcmp(name, builtins[i].name))
             return i;
     return -1;
 }
 
-static int check_value_builtin(Expr *e, Scope *scope)
+/* PL/M-80 built-in procedures other than LENGTH, LAST and SIZE (manual
+   11.1, 12.3-12.5), used only where the name isn't declared.  e (an E_NAME
+   or E_CALL) becomes E_BUILTIN, with the first argument in lhs and the
+   second (a count) in rhs; MOVE keeps its three in args.  as_call: e is
+   the procedure of a CALL statement. */
+static int check_value_builtin(Expr *e, Scope *scope, int as_call)
 {
+    static const char *const counts[] = {
+        "no arguments", "one argument", "two arguments, a pattern and a count",
+        "three arguments, a count, a source and a destination",
+    };
     int b = value_builtin(e->name);
 
     if (b < 0)
         return 0;
-    int nargs = b >= BI_SHL ? 2 : 1;
-    if (e->args.len != nargs)
-        error_at(e->loc, "%s takes %s", e->name,
-                 nargs == 1 ? "one argument" : "two arguments, a pattern and a count");
+    if (as_call && builtins[b].type != TY_NONE)
+        error_at(e->loc, "built-in %s returns a value and must be used in an expression, "
+                 "not CALLed", e->name);
+    if (!as_call && builtins[b].type == TY_NONE)
+        error_at(e->loc, "built-in %s is untyped, so it can't be used in an expression "
+                 "(use CALL %s)", e->name, e->name);
+    if (e->args.len != builtins[b].nargs)
+        error_at(e->loc, "%s takes %s", e->name, counts[builtins[b].nargs]);
     e->kind = E_BUILTIN;
     e->builtin = (Builtin)b;
-    e->lhs = e->args.items[0];
-    check_expr(e->lhs, scope);
-    if (nargs == 2) {
+    for (int i = 0; i < e->args.len; i++)
+        check_expr(e->args.items[i], scope);
+    if (e->args.len >= 1)
+        e->lhs = e->args.items[0];
+    if (e->args.len == 2)
         e->rhs = e->args.items[1];
-        check_expr(e->rhs, scope);
-    }
+    e->type = builtins[b].type == TY_STRUCT ? e->lhs->type : builtins[b].type;
+
     switch (e->builtin) {
-    case BI_DOUBLE:
-        e->type = TY_ADDRESS;
+    case BI_INPUT:              /* a port number, as with OUTPUT */
+        if (e->lhs->kind != E_NUM || e->lhs->value > 255)
+            error_at(e->lhs->loc, "INPUT needs a port number from 0 to 255 (a constant)");
         break;
-    case BI_SHL:
-    case BI_SHR:
-        e->type = e->lhs->type;
+    case BI_SCL:
+    case BI_SCR:
+    case BI_CARRY:
+        sema_carry = 1;
+        break;
+    case BI_DEC:
+        sema_carry = sema_half = 1;
+        break;
+    case BI_ZERO:
+    case BI_SIGN:
+        sema_result = 1;
+        break;
+    case BI_PARITY:
+        sema_result = sema_uses_parity = 1;
+        break;
+    case BI_TIME:
+        sema_uses_time = 1;
+        break;
+    case BI_MOVE:
+        sema_uses_copy = 1;
         break;
     default:
-        e->type = TY_BYTE;
         break;
     }
     return 1;
@@ -262,12 +308,22 @@ static void check_expr(Expr *e, Scope *scope)
         if (!scope_lookup(scope, e->name)) {
             if (check_builtin(e, scope))
                 break;
-            if (check_value_builtin(e, scope))
+            if (check_value_builtin(e, scope, 0))
                 break;
         }
         sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind == SYM_LABEL)
             error_at(e->loc, "%s is a label, not a variable or procedure", e->name);
+        if (sym->predef == PRE_OUTPUT)
+            error_at(e->loc, "OUTPUT can only be assigned to, as in OUTPUT(port) = value");
+        if (sym->predef == PRE_STACKPTR) {      /* the S register */
+            if (e->kind == E_CALL)
+                error_at(e->loc, "STACKPTR is not a procedure or an array");
+            e->kind = E_BUILTIN;
+            e->builtin = BI_STACKPTR;
+            e->type = TY_ADDRESS;
+            break;
+        }
         if (sym->kind == SYM_VAR) {
             if (e->kind == E_CALL) {
                 /* NAME(i) on an array is an element, not a call */
@@ -331,6 +387,8 @@ static void check_expr(Expr *e, Scope *scope)
                      sym->kind == SYM_LABEL ? "label" : "procedure", e->name);
         if (!sym->dim)
             error_at(e->loc, "%s is not an array", e->name);
+        if (sym->predef == PRE_OUTPUT && (e->lhs->kind != E_NUM || e->lhs->value > 255))
+            error_at(e->lhs->loc, "OUTPUT needs a port number from 0 to 255 (a constant)");
         check_sub(e->lhs, scope);
         e->type = sym->type;
         if (e->type == TY_STRUCT && !whole_ok)
@@ -511,7 +569,7 @@ static Symbol *resolve_base(VarDecl *v, Scope *scope)
 
     if (!b)
         error_at(v->base_loc, "%s, the base of %s, is not declared", v->base, v->name);
-    if (b->kind != SYM_VAR || b->type != TY_ADDRESS || b->dim || b->base)
+    if (b->kind != SYM_VAR || b->type != TY_ADDRESS || b->dim || b->base || b->predef)
         error_at(v->base_loc, "the base of a BASED variable must be an ADDRESS scalar "
                  "that is not itself BASED");
     return b;
@@ -907,6 +965,8 @@ static void check_stmt(Stmt *s, Scope *scope)
                 continue;
             }
             Symbol *sym = t->sym = lookup(scope, t->name, t->loc);
+            if (sym->predef == PRE_OUTPUT)
+                error_at(t->loc, "OUTPUT needs a port number, as in OUTPUT(port) = value");
             if (sym->kind != SYM_VAR)
                 error_at(t->loc, "cannot assign to %s %s",
                          sym->kind == SYM_LABEL ? "label" : "procedure", t->name);
@@ -919,9 +979,8 @@ static void check_stmt(Stmt *s, Scope *scope)
         break;
     case S_CALL: {
         Expr *e = s->expr;
-        if (!scope_lookup(scope, e->name) && value_builtin(e->name) >= 0)
-            error_at(e->loc, "built-in %s returns a value and must be used in an expression, "
-                     "not CALLed", e->name);
+        if (!scope_lookup(scope, e->name) && check_value_builtin(e, scope, 1))
+            break;                      /* CALL TIME(n), CALL MOVE(n, from, to) */
         Symbol *sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind != SYM_PROC)
             error_at(e->loc, "%s is not a procedure", e->name);
@@ -949,7 +1008,7 @@ static void check_stmt(Stmt *s, Scope *scope)
         Symbol *sym = v->sym = scope_lookup(scope, v->name);
         if (sym && sym->init == INIT_DATA)
             error_at(v->loc, "%s is DATA and cannot be assigned", v->name);
-        if (!sym || sym->kind != SYM_VAR || sym->dim || sym->base || sym->st)
+        if (!sym || sym->kind != SYM_VAR || sym->dim || sym->base || sym->st || sym->predef)
             error_at(v->loc, "the index of an iterative DO must be a scalar variable%s",
                      sym ? "" : " (not declared)");
         v->type = sym->type;
@@ -1028,9 +1087,30 @@ static void check_recursion(Proc *p)
     error_at(p->loc, "procedure %s is recursive (%s) but not REENTRANT", p->name, chain);
 }
 
+/* a predeclared variable (manual 11.2) */
+static Symbol *predeclare(Scope *pre, const char *name, Predef what, Type type, int dim,
+                          const char *asm_name)
+{
+    Symbol *sym = scope_define(pre, name, SYM_VAR, (Loc){ 0, 0 });
+    sym->predef = what;
+    sym->type = type;
+    sym->dim = dim;
+    free(sym->asm_name);
+    sym->asm_name = xstrdup(asm_name);
+    return sym;
+}
+
 void sema_program(Program *prog)
 {
-    Scope *global = scope_new(NULL, NULL);
+    /* MEMORY: a BYTE array of unknown length after the program's storage;
+       OUTPUT: 256 BYTE ports, at RT_PORTS (from the hooks) and up;
+       STACKPTR: the S register */
+    Scope *pre = scope_new(NULL, NULL);
+    pre->id = -1;
+    predeclare(pre, "MEMORY", PRE_MEMORY, TY_BYTE, 1, "RT_MEMORY");
+    predeclare(pre, "OUTPUT", PRE_OUTPUT, TY_BYTE, 256, "RT_PORTS")->absolute = 1;
+    predeclare(pre, "STACKPTR", PRE_STACKPTR, TY_ADDRESS, 0, "RT_STACKPTR");
+    Scope *global = scope_new(pre, NULL);
 
     check_block(prog->body, global);
     for (int i = 0; i < sema_procs.len; i++) {

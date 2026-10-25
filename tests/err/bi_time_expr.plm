@@ -1,0 +1,1 @@
+T: DO; DECLARE B BYTE; B = TIME(5); END T;

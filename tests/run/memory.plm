@@ -1,0 +1,82 @@
+/* MOVE, MEMORY, STACKPTR and TIME (PL/M-80 manual 11.1.5, 11.1.6, 11.2).
+   Expected values in comments. */
+MEM: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE (I, N) BYTE, (SP, P, Q) ADDRESS;
+DECLARE BUF (10) BYTE, WORDS (4) ADDRESS;
+DECLARE LAST$VAR BYTE;
+
+PRINT: PROCEDURE (P, N);                        /* N bytes at P */
+    DECLARE P ADDRESS, N BYTE, C BASED P BYTE;
+    DO WHILE N > 0;
+        CALL PUTCH(C);
+        P = P + 1;
+        N = N - 1;
+    END;
+    CALL PUTCH(10);
+END PRINT;
+
+DEPTH: PROCEDURE ADDRESS;                       /* the return address is on top */
+    RETURN SP - STACKPTR;
+END DEPTH;
+
+COPY: PROCEDURE (FROM, N) REENTRANT;            /* MOVE with Y as frame pointer */
+    DECLARE FROM ADDRESS, N BYTE, LOCAL (8) BYTE;
+    CALL MOVE(N, FROM, .LOCAL);
+    CALL MOVE(N, .LOCAL, .MEMORY(20));
+END COPY;
+
+/* MOVE (count, source, destination) */
+CALL MOVE(5, .('HELLO'), .BUF);
+CALL PRINT(.BUF, 5);                            /* HELLO */
+CALL MOVE(3, .('JEL'), .BUF);
+CALL PRINT(.BUF, 5);                            /* JELLO */
+CALL MOVE(0, .('XXXXX'), .BUF);                 /* nothing */
+CALL PRINT(.BUF, 5);                            /* JELLO */
+WORDS(0) = 1234; WORDS(1) = 5678;
+CALL MOVE(SIZE(WORDS) / 2, .WORDS, .WORDS(2));
+CALL PUTDEC(WORDS(3));                          /* 5678 */
+N = 4;
+CALL MOVE(N + 1, .BUF, .MEMORY);
+
+/* MEMORY: the memory after the program's own */
+CALL PRINT(.MEMORY, 5);                         /* JELLO */
+MEMORY(5) = '!';
+CALL PRINT(.MEMORY(1), 5);                      /* ELLO! */
+CALL PUTDEC(.MEMORY > .LAST$VAR);               /* 255 */
+P = .MEMORY;
+DO I = 0 TO 99;                                 /* a table in MEMORY */
+    MEMORY(I) = I;
+END;
+Q = 0;
+DO I = 0 TO 99;
+    Q = Q + MEMORY(I);
+END;
+CALL PUTDEC(Q);                                 /* 4950 */
+CALL COPY(.('ABCDEFGH'), 8);
+CALL PRINT(.MEMORY(20), 8);                     /* ABCDEFGH */
+
+/* STACKPTR: the S register (measured into variables: a call of an
+   EXTERNAL procedure pushes its arguments, and here Y, the frame pointer) */
+SP = STACKPTR;
+Q = DEPTH;
+CALL PUTDEC(Q);                                 /* 2: the return address */
+P = STACKPTR;
+CALL PUTDEC(SP = P);                            /* 255 */
+STACKPTR = SP - 10;                             /* move it, then back */
+P = SP - STACKPTR;
+Q = DEPTH;
+STACKPTR = SP;
+CALL PUTDEC(P);                                 /* 10 */
+CALL PUTDEC(Q);                                 /* 12 */
+Q = DEPTH;
+CALL PUTDEC(Q);                                 /* 2 */
+
+/* TIME: a delay (instant in the simulator, which has no timing) */
+DO I = 1 TO 3;
+    CALL TIME(250);
+END;
+CALL TIME(0);
+CALL PUTDEC(1);                                 /* 1 */
+END MEM;

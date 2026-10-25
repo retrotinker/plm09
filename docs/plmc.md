@@ -104,6 +104,7 @@ plmc [options] file.plm
 | `--vectors` | Also emit `ORG $FFFE` / `FDB RT_START`, setting the 6809 reset vector, for programs that run from ROM or straight from reset, and the IRQ, FIRQ and NMI vectors of any INTERRUPT procedures. |
 | `--os9` | Generate a position-independent OS-9 program module instead of a program for a fixed address. See [OS-9 modules]. |
 | `--stack N` | With `--os9`: bytes of stack to reserve in the module's data area (default 256, at least 32). |
+| `--memory N` | With `--os9`: bytes of the data area for the predeclared array `MEMORY` (default 0); see [MEMORY and STACKPTR]. |
 | `--name NAME` | With `--os9`: the module name (default: the PL/M program's name). |
 | `--tokens` | Print the token stream and stop. See [Inspecting the compiler's view]. |
 | `--ast` | Print the syntax tree and stop. |
@@ -853,22 +854,9 @@ manual 12.2). They have the precedence and the result types of `+` and `-`,
 and are meant for arithmetic on numbers wider than 16 bits, low part first.
 
 On the 8080 the carry is the CPU's flag, so the manual warns that the
-result can't be predicted. plmc defines it instead:
-
-* **The carry is the one out of the last `+`, `-`, `PLUS` or `MINUS`
-  executed**: the carry out of an addition, or the borrow out of a
-  subtraction, at the operation's width (8 bits for BYTE operations, 16 for
-  ADDRESS ones). Before any of them it is 0.
-* **Nothing else changes it:** not comparisons, `*`, `/`, `MOD`, logical
-  operators, assignments, calls, loops, or interrupt procedures (their entry
-  code saves and restores it). The `+` that steps an iterative `DO` doesn't
-  count either. It is kept across statements and procedure calls.
-* **Within an expression,** remember that the right operand is evaluated
-  first: in `(1 PLUS 1) PLUS (200 + 100)`, `200 + 100` sets the carry
-  used by `1 PLUS 1`.
-* **Cost:** a program that uses PLUS or MINUS keeps the carry in a byte
-  (`RT_CARRY`) after every `+` and `-` (one `ROL` instruction each).
-  Programs that don't use them are unaffected.
+result can't be predicted. plmc defines it instead, as described in
+[The flags](#flags): the carry is the one out of the last `+`, `-`, `PLUS`,
+`MINUS`, `SCL`, `SCR` or `DEC` executed, and nothing else changes it.
 
 ### HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR
 
@@ -897,7 +885,110 @@ expressions:
 * **On every target:** they compile to inline code (shifts, rotates and
   `TFR`s, with a short loop for a computed count), not to calls, so they
   need nothing from the hooks and work the same in `--os9` modules. They
-  don't change the carry used by PLUS and MINUS.
+  don't change the flags (see below).
+
+### The flags: CARRY, ZERO, SIGN, PARITY, SCL, SCR and DEC {#flags}
+
+```
+S(0) = DEC(X(0) + Y(0));                /* BCD: two digits per BYTE */
+S(1) = DEC(X(1) PLUS Y(1));
+IF CARRY THEN CALL OVERFLOW;
+```
+
+PL/M-80's chapter 12 gives access to the 8080's flags, warning that the
+compiler's optimizations make them unpredictable. plmc keeps them in
+memory instead, so they are exact:
+
+* **What sets them:** the last `+`, `-`, `PLUS`, `MINUS`, `SCL`, `SCR` or
+  `DEC` executed, at its width (8 bits for a BYTE operation, 16 for an
+  ADDRESS one). Before any of them the carry is 0 and the result 0.
+* **Nothing else changes them:** not comparisons, `*`, `/`, `MOD`, logical
+  operators, shifts, assignments, calls, loops (the `+` that steps an
+  iterative `DO` doesn't count), or interrupt procedures (their entry code
+  saves and restores them). They are kept across statements and procedure
+  calls.
+* **Within an expression,** the right operand is evaluated first (and a
+  count before its pattern): in `(1 PLUS 1) PLUS (200 + 100)`, `200 + 100`
+  sets the carry used by `1 PLUS 1`.
+* **To test a value,** add 0 to it: `B = B + 0; IF PARITY THEN ...`.
+
+| Built-in | Type | Value |
+|---|---|---|
+| `CARRY` | BYTE | `0FFH` if the carry (or borrow) is set, else 0 |
+| `ZERO` | BYTE | `0FFH` if the result was 0 |
+| `SIGN` | BYTE | `0FFH` if the result's top bit (bit 7 of a BYTE, 15 of an ADDRESS) is set |
+| `PARITY` | BYTE | `0FFH` if the result's low byte has an even number of 1 bits |
+| `SCL(p, n)`, `SCR(p, n)` | the type of `p` | `p` rotated left or right `n` times *through the carry*: a 9-bit rotation for a BYTE, 17-bit for an ADDRESS. The carry goes in at one end, and the bit that leaves the other end becomes the carry |
+| `DEC(x)` | BYTE | decimal adjust of `x` (converted to BYTE) after a BYTE addition of two BCD numbers, with the 6809's `DAA`, using that addition's carry and half carry. It sets the carry if the decimal result overflows |
+
+* **DEC** only makes sense right after a BYTE `+` or `PLUS`, as in
+  `DEC(A + B)`: the half carry it needs is only kept for BYTE operations
+  (after an ADDRESS one, or a subtraction, it is undefined).
+* **SCL and SCR** with a count of 0 return `p` and leave the carry as it
+  was; `SCL(W, 1)` followed by `SCL(V, 1)` shifts the 32-bit number V:W
+  left.
+* **Cost:** only programs that use these (or PLUS and MINUS) keep the
+  flags, after each `+`, `-`, `PLUS`, `MINUS`, `SCL`, `SCR` and `DEC`:
+  one `ROL` for the carry (two instructions instead for BYTE operations
+  when `DEC` is used), and one or two stores of the result when `ZERO`,
+  `SIGN` or `PARITY` is used.
+
+### INPUT and OUTPUT
+
+```
+OUTPUT(0) = 'A';                /* write port 0 */
+C = INPUT(1);                   /* read port 1 */
+```
+
+The 8080 has 256 I/O ports; the 6809 has memory-mapped I/O instead. In
+plmc, **port n is the byte at `RT_PORTS + n`**, an address the hooks
+define:
+
+| Hooks | `RT_PORTS` | So |
+|---|---|---|
+| `runtime/sim` | `$FF00`, the I/O block | `OUTPUT(0)` prints a character, `INPUT(1)` reads one, `OUTPUT(4)`/`OUTPUT(5)` print a number, `OUTPUT(2)` exits |
+| `runtime/coco` | `$FF00`, the I/O page | port n is `$FF00 + n`: the PIAs (0--3, 20H--23H), the disk controller (40H--5FH), the SAM (0C0H--0DFH) |
+| `runtime/os9` | `$FF00`, the CoCo 3's I/O page | as on the CoCo; usually better left to OS-9's drivers |
+| `runtime/example` | `ACIA_BASE` | port 0 is the ACIA's status/control register, port 1 its data register |
+
+* **`INPUT(n)`** is a BYTE; `n` must be a constant from 0 to 255.
+* **`OUTPUT(n) = value`** is the only use of `OUTPUT`, again with a
+  constant port; it can be one of several targets (`OUTPUT(0), C = 'X';`).
+* **Code:** `LDB RT_PORTS+n` and `STB RT_PORTS+n`.
+
+### MOVE and TIME
+
+* **`CALL MOVE(count, source, destination);`** copies `count` bytes from
+  the address `source` to the address `destination`, first byte first. All
+  three are ADDRESS values; a count of 0 copies nothing. If the areas
+  overlap with the destination above the source, bytes are copied that
+  have already been overwritten (the manual leaves overlap undefined).
+* **`CALL TIME(n);`** waits `n` × 100 microseconds (`n` is converted to
+  BYTE, so at most 25.5 ms). It is a loop timed in CPU cycles, from the
+  hooks' `RT_CYCLES100` (cycles in 100 µs): 89 on a CoCo at 0.895 MHz,
+  179 for NitrOS-9's 1.79 MHz CoCo 3, 100 (1 MHz) for the example board.
+  Each 100 µs step is a multiple of 8 cycles, the nearest one (88 cycles,
+  98 µs, on a CoCo). Interrupts make the wait longer. The simulator has no
+  timing, so there `TIME` only runs the loop.
+
+### MEMORY and STACKPTR
+
+* **`MEMORY`** is a BYTE array of unknown length: the memory after the
+  program's own. `.MEMORY` is its address; `MEMORY(i)` can be read and
+  written, with any subscript. `LENGTH`, `LAST` and `SIZE` can't be used
+  on it.
+  * In a normal program it starts right after the variables and constant
+    lists (`RT_MEMORY EQU *`) and runs up to whatever comes next (on the
+    simulator, the stack below `$FF00`; on a CoCo started as described
+    in [Running on a Color Computer], RAM up to `$7FFF`).
+  * In an `--os9` module it is `--memory N` bytes of the data area (default
+    0), after the variables and before the stack.
+* **`STACKPTR`** is an ADDRESS variable that is the S register: reading it
+  gives S (`TFR S,D`) and assigning it sets S (`TFR D,S`). As the manual
+  warns, moving the stack is at your own risk; a later `RETURN` uses the
+  stack as it then is.
+* Like the built-in procedures, these names can be declared by the
+  program, which then hides them.
 
 ## Types and conversions {#conversions}
 
@@ -912,7 +1003,9 @@ The type of every expression is worked out at compile time:
 | `LENGTH(A)`, `LAST(A)` | BYTE if 255 or less, otherwise ADDRESS |
 | `HIGH(x)`, `LOW(x)`, `ROL(p, n)`, `ROR(p, n)` | BYTE |
 | `DOUBLE(x)` | ADDRESS |
-| `SHL(p, n)`, `SHR(p, n)` | the type of `p` |
+| `SHL(p, n)`, `SHR(p, n)`, `SCL(p, n)`, `SCR(p, n)` | the type of `p` |
+| `DEC(x)`, `INPUT(n)`, `CARRY`, `ZERO`, `SIGN`, `PARITY` | BYTE |
+| `STACKPTR` | ADDRESS |
 | `SIZE(X)` | ADDRESS |
 | typed procedure call | the procedure's type |
 | `a + b`, `a - b`, `a PLUS b`, `a MINUS b`, `a MOD b`, `a AND b`, `a OR b`, `a XOR b` | BYTE if *both* operands are BYTE, otherwise ADDRESS |
@@ -955,12 +1048,10 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
 
-Of the PL/M-80 built-in procedures, plmc provides `LENGTH`, `LAST`,
-`SIZE`, `HIGH`, `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL` and `ROR`. The others
-(`INPUT`, `OUTPUT`, `MOVE`, `TIME`, `SCL`, `SCR`, `DEC`, `CARRY`, `ZERO`,
-`SIGN`, `PARITY`, `MEMORY`, `STACKPTR`) are not predefined. Using one gives
-`... is not declared`, unless you write it yourself as a procedure or an
-`EXTERNAL`.
+All of PL/M-80's built-in procedures (`LENGTH`, `LAST`, `SIZE`, `HIGH`,
+`LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL`, `ROR`, `SCL`, `SCR`, `DEC`, `CARRY`,
+`ZERO`, `SIGN`, `PARITY`, `INPUT`, `MOVE`, `TIME`) and predeclared variables
+(`OUTPUT`, `MEMORY`, `STACKPTR`) are provided.
 
 # Diagnostics
 
@@ -991,8 +1082,14 @@ next multiple of 8 plus 1.
 | `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
 | `parameter X cannot be an array` | a parameter declared with a dimension |
 | `LENGTH needs the name of a variable` (or `LAST`, `SIZE`) | argument isn't a declared variable |
-| `HIGH takes one argument` (or `LOW`, `DOUBLE`), `SHL takes two arguments, a pattern and a count` (or `SHR`, `ROL`, `ROR`) | wrong number of arguments to a built-in |
-| `built-in LOW returns a value and must be used in an expression, not CALLed` | `CALL` of a built-in |
+| `HIGH takes one argument` (or `LOW`, `DOUBLE`, `DEC`, `INPUT`, `TIME`), `SHL takes two arguments, a pattern and a count` (or `SHR`, `ROL`, `ROR`, `SCL`, `SCR`), `CARRY takes no arguments` (or `ZERO`, `SIGN`, `PARITY`), `MOVE takes three arguments, ...` | wrong number of arguments to a built-in |
+| `built-in LOW returns a value and must be used in an expression, not CALLed` | `CALL` of a typed built-in |
+| `built-in TIME is untyped, so it can't be used in an expression (use CALL TIME)` | `TIME` or `MOVE` in an expression |
+| `INPUT needs a port number from 0 to 255 (a constant)`, `OUTPUT needs a port number ...` | a computed or too large port |
+| `OUTPUT can only be assigned to, as in OUTPUT(port) = value` | reading `OUTPUT` |
+| `LENGTH can't be used with MEMORY, whose size isn't known` (or `LAST`, `SIZE`; `OUTPUT`, `STACKPTR`) | a built-in on a predeclared variable |
+| `STACKPTR is not a procedure or an array` | `STACKPTR(...)` |
+| `plmc: --memory is only used with --os9 ...` | `--memory` without `--os9` |
 | `structure X cannot be used as a value; select a member, as in X.M` | a whole structure, or a structure array's element, as a value or target |
 | `X is not a structure`, `structure X has no member M` | bad member reference |
 | `X is an array of structures: select one, as in X(i).M` | `X.M` without the array's subscript (outside the built-ins) |
@@ -1085,6 +1182,8 @@ lwasm -9 -f decb -I runtime -I runtime/coco -o PROG.BIN prog.asm   # CoCo
 | `RT_STACKTOP` | Initial stack pointer; the stack grows down from here. The value 0 means "keep the caller's stack". |
 | `PLM_EXIT` | Jumped to when the program ends, with the exit status in B (0 for a normal end). Must not return. |
 | `PLM_HALT` | Jumped to by `HALT`. |
+| `RT_PORTS` | Only for programs that use `INPUT` or `OUTPUT`: the address of port 0. |
+| `RT_CYCLES100` | Only for programs that use `TIME`: CPU (E clock) cycles in 100 microseconds. |
 | `PLM_SETINT` | Only for programs with INTERRUPT procedures: called at start-up with B = the interrupt number (0 IRQ, 1 FIRQ, 2 NMI) and X = the entry routine; it must make that interrupt go to X. May change any register but S. |
 | each `EXTERNAL` | A label with the procedure's PL/M name in upper case. |
 
@@ -1146,6 +1245,8 @@ EXIT:   PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE; END EXIT;
 | `EXIT`, end of program | simulator exit status | back to BASIC (status discarded) | `F$Exit` with the status | stops in a loop |
 | `HALT` | exit status 0 | back to BASIC | `F$Exit` with status 0 | stops in a loop |
 | `PLM_SETINT` | stores the vector at `$FFF8`/`$FFF6`/`$FFFC` | patches BASIC's RAM vector (`JMP` at `$010C`/`$010F`/`$0109`); `PLM_EXIT` restores it | (not used) | does nothing: use `--vectors` |
+| `RT_PORTS` (`INPUT`/`OUTPUT`) | `$FF00`, the I/O block | `$FF00`, the I/O page | `$FF00` (CoCo 3) | `ACIA_BASE` |
+| `RT_CYCLES100` (`TIME`) | 100 (no real timing) | 89 (0.895 MHz) | 179 (1.79 MHz CoCo 3) | 100 (1 MHz); override with `-D` |
 | extra | | `CLS` clears the screen | | |
 | stack | `$FF00` | BASIC's | in the data area (`--stack`) | `$8000` |
 
@@ -1216,7 +1317,7 @@ area. REENTRANT procedures work, with their frames on the process's stack.
 | type/language | `$11` (Prgrm+Objct) |
 | attributes/revision | `$81` (ReEnt, revision 1) |
 | edition | 1 |
-| data size | variables + hook buffers + `--stack` bytes |
+| data size | variables + hook buffers + `--memory` + `--stack` bytes |
 | name | the PL/M program name, or `--name` |
 
 The beginning of the `SUM` example compiled with `--os9`:
@@ -1240,6 +1341,7 @@ PLM_MAIN
         CLRA
         STD     V_TOTAL,U
 ...
+RT_MEMORY RMB   0               ; MEMORY (--memory)
 RT_STACK RMB    256             ; stack space (--stack)
 RT_SIZE EQU     .               ; data area size
         EMOD
@@ -1358,6 +1460,8 @@ P_PROC1                               ; each procedure
         INCLUDE "plm_rt.asm"          ; RT_MUL16, RT_DIV16
         INCLUDE "plm_hooks.asm"       ; target-specific hooks
 V_X     RMB     1                     ; variables, parameters, locals
+L12     FCB     ...                   ; constant lists
+RT_MEMORY EQU   *                     ; MEMORY
         END     RT_START
 ```
 
@@ -1481,11 +1585,27 @@ listing and simulator traces easy to follow.
   `TFR` when a 16-bit count is 8 or more, and a rotate as `TFR B,A` /
   `LSLA` / `ROLB` (or `LSRA` / `RORB`), going the shorter way round. A
   computed count is pushed and counted down with `DEC ,S`.
-* **PLUS and MINUS:** when a program uses them, every `+`, `-`, `PLUS` and
-  `MINUS` is followed by `ROL RT_CARRY`, which shifts the carry into bit 0
-  of that byte without touching A or B. PLUS is `LSR RT_CARRY` (the carry
-  back into C) and `ADCB`, plus `ADCA` on the high bytes for ADDRESS (the
-  6809 has no 16-bit add with carry); MINUS uses `SBCB`/`SBCA`.
+* **The flags:** when a program uses them, every `+`, `-`, `PLUS`, `MINUS`,
+  `SCL`, `SCR` and `DEC` is followed by `ROL RT_CC`, which shifts the carry
+  into bit 0 of that byte without touching A or B (for a BYTE operation in
+  a program that uses `DEC`: `TFR CC,A` / `STA RT_CC`, keeping the half
+  carry in bit 5 too), and, if `ZERO`, `SIGN` or `PARITY` is used, by a
+  store of the result in `RT_RES` (a BYTE twice).
+  * PLUS is `LSR RT_CC` (the carry back into C) and `ADCB`, plus `ADCA` on
+    the high bytes for ADDRESS (the 6809 has no 16-bit add with carry);
+    MINUS uses `SBCB`/`SBCA`.
+  * SCL and SCR are `LSR RT_CC` and then `ROLB`(+`ROLA`) or (`RORA`+)`RORB`
+    per bit, as a loop for a computed count.
+  * DEC puts the kept carry and half carry into CC, leaving I and F alone,
+    and uses `DAA`.
+  * `CARRY` is `LDB RT_CC` / `ANDB #1` / `NEGB`, `ZERO` a `CMPD #1` of
+    `RT_RES`, `SIGN` a `SEX` of its high byte, and `PARITY` a call of
+    `RT_PARITY`.
+* **Other built-ins:** `INPUT(n)` is `LDB RT_PORTS+n`, `OUTPUT(n) = v` is
+  `STB RT_PORTS+n`, `STACKPTR` is `TFR S,D` / `TFR D,S`, `MOVE` calls
+  `RT_COPY` (D bytes from X to Y; Y is saved around it if the program has
+  REENTRANT procedures), and `TIME` calls `RT_TIME`. `RT_COPY`, `RT_TIME`
+  and `RT_PARITY` are assembled only when used (`RT_NEED_COPY`, ...).
 * **Multiplication and division:** BYTE × BYTE uses the 6809's `MUL`. All
   other multiplications and all divisions call `RT_MUL16` or `RT_DIV16`
   (left operand in X, right in D).
@@ -1580,10 +1700,10 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 181 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; carry statements with random chains of `+ - PLUS MINUS`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
-| `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
+| `err` | 196 programs that must fail, each with the expected message and position |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, INPUT and OUTPUT on the simulator's ports, labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |

@@ -1,0 +1,1 @@
+1:13: error: built-in CARRY returns a value and must be used in an expression, not CALLed

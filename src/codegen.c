@@ -487,13 +487,36 @@ static void gen_addr(const Expr *e)
 
 static void gen_call(const Expr *e);
 
-/* PLUS and MINUS use the carry (or borrow) out of the last + - PLUS MINUS
-   executed, which is kept in bit 0 of RT_CARRY: ROL puts C there, and LSR
-   gets it back, without touching A, B or the operands */
-static void save_carry(void)
+/* The "flags" of PL/M-80 chapter 12, made well defined: after each + -
+   PLUS MINUS SCL SCR and DEC, and only as far as the program needs them,
+   RT_CC keeps the carry in bit 0 (ROL puts C there without touching any
+   register; LSR gets it back) or, for a BYTE operation when DEC needs the
+   half carry too, the whole CC (TFR CC,A: A is free in BYTE code); and
+   RT_RES keeps the result (a BYTE twice, so its sign is bit 7 of either). */
+static void save_flags(int w)
 {
-    if (sema_carry)
-        emit("ROL\t%s\t\t; keep the carry for PLUS/MINUS", var_ref("RT_CARRY", 0));
+    if (sema_carry || sema_half) {
+        if (w == 8 && sema_half) {
+            emit("TFR\tCC,A");
+            emit("STA\t%s\t\t; keep C and H", var_ref("RT_CC", 0));
+        } else {
+            emit("ROL\t%s\t\t; keep the carry", var_ref("RT_CC", 0));
+        }
+    }
+    if (sema_result) {
+        if (w == 8) {
+            emit("STB\t%s\t\t; keep the result", var_ref("RT_RES", 0));
+            emit("STB\t%s", var_ref("RT_RES", 1));
+        } else {
+            emit("STD\t%s\t\t; keep the result", var_ref("RT_RES", 0));
+        }
+    }
+}
+
+/* C = the kept carry */
+static void load_carry(void)
+{
+    emit("LSR\t%s\t\t; C = the last carry", var_ref("RT_CC", 0));
 }
 
 static void gen_binary(const Expr *e)
@@ -548,16 +571,16 @@ static void gen_binary(const Expr *e)
     switch (e->op) {
     case OP_ADD:
         emit("%s\t%s", w == 8 ? "ADDB" : "ADDD", opnd_text(&o, w, WHOLE));
-        save_carry();
+        save_flags(w);
         break;
     case OP_SUB:
         emit("%s\t%s", w == 8 ? "SUBB" : "SUBD", opnd_text(&o, w, WHOLE));
-        save_carry();
+        save_flags(w);
         break;
     case OP_PLUS:
     case OP_MINUS: {
         const char *mn = e->op == OP_PLUS ? "ADC" : "SBC";
-        emit("LSR\t%s\t\t; C = the last carry", var_ref("RT_CARRY", 0));
+        load_carry();
         if (w == 8)
             emit("%sB\t%s", mn, opnd_text(&o, 8, WHOLE));
         else if (o.kind == OPND_STACK) {    /* low byte first: 1,S then ,S */
@@ -567,7 +590,7 @@ static void gen_binary(const Expr *e)
             emit("%sB\t%s", mn, opnd_text(&o, 16, LOW));
             emit("%sA\t%s", mn, opnd_text(&o, 16, HIGH));
         }
-        save_carry();
+        save_flags(w);
         break;
     }
     default: {
@@ -605,6 +628,52 @@ static void shift_step(Builtin b, int w)
     }
 }
 
+/* one bit of SCL or SCR on B or D, through C */
+static void carry_step(Builtin b, int w)
+{
+    if (b == BI_SCL) {
+        emit("ROLB");
+        if (w == 16)
+            emit("ROLA");
+    } else {
+        if (w == 16)
+            emit("RORA");
+        emit("RORB");
+    }
+}
+
+/* SCL, SCR (manual 12.3): rotations through the carry, 9 or 17 bits.
+   The kept carry goes in and the last bit out is kept; the loop's TST and
+   DEC leave C alone. */
+static void gen_carry_rotate(const Expr *e)
+{
+    int w = width(e->type);
+
+    if (e->rhs->kind == E_NUM) {
+        unsigned n = (e->rhs->value & 0xff) % (unsigned)(w + 1);
+        gen_expr(e->lhs);
+        load_carry();
+        while (n--)
+            carry_step(e->builtin, w);
+        save_flags(w);
+        return;
+    }
+    int top = new_label(), end = new_label();
+    gen_as(e->rhs, 8);
+    push(8);
+    gen_expr(e->lhs);
+    load_carry();
+    emit("TST\t,S");
+    emit("BEQ\tL%d", end);
+    emit_label(top);
+    carry_step(e->builtin, w);
+    emit("DEC\t,S");
+    emit("BNE\tL%d", top);
+    emit_label(end);
+    emit("LEAS\t1,S");                 /* LEAS leaves C alone */
+    save_flags(w);
+}
+
 /* HIGH, LOW, DOUBLE, SHL, SHR, ROL, ROR (PL/M-80 manual 11.1.3, 11.1.4).
    A count of 0 (undefined in PL/M-80) leaves the pattern unchanged. */
 static void gen_builtin(const Expr *e)
@@ -623,6 +692,77 @@ static void gen_builtin(const Expr *e)
         return;
     case BI_DOUBLE:
         gen_as(e->lhs, 16);
+        return;
+    case BI_INPUT:                      /* port n is at RT_PORTS + n */
+        emit("LDB\tRT_PORTS+%u", e->lhs->value);
+        return;
+    case BI_STACKPTR:
+        emit("TFR\tS,D");
+        return;
+    case BI_CARRY:                      /* 0FFH if bit 0 is set */
+        emit("LDB\t%s", var_ref("RT_CC", 0));
+        emit("ANDB\t#1");
+        emit("NEGB");
+        return;
+    case BI_ZERO:                       /* CMPD #1 borrows only for 0 */
+        emit("LDD\t%s", var_ref("RT_RES", 0));
+        emit("CMPD\t#1");
+        emit("TFR\tCC,B");
+        emit("ANDB\t#1");
+        emit("NEGB");
+        return;
+    case BI_SIGN:                       /* the top bit, everywhere */
+        emit("LDB\t%s", var_ref("RT_RES", 0));
+        emit("SEX");
+        emit("TFR\tA,B");
+        return;
+    case BI_PARITY:
+        emit("LDB\t%s", var_ref("RT_RES", 1));
+        emit_call("RT_PARITY");
+        return;
+    case BI_DEC:
+        /* DAA with the kept carry and half carry; I and F stay as they are */
+        gen_as(e->lhs, 8);
+        emit("TFR\tCC,A");
+        emit("ANDA\t#$DE");
+        emit("PSHS\tA");
+        emit("LDA\t%s", var_ref("RT_CC", 0));
+        emit("ANDA\t#$21");
+        emit("ORA\t,S+");
+        emit("TFR\tA,CC");
+        emit("TFR\tB,A");
+        emit("DAA");
+        emit("TFR\tA,B");
+        save_flags(8);
+        return;
+    case BI_TIME:
+        gen_as(e->lhs, 8);
+        emit_call("RT_TIME");
+        return;
+    case BI_MOVE: {
+        /* RT_COPY: D bytes from X to Y.  Y may be a frame pointer. */
+        int skip = new_label();
+        if (sema_reentrant)
+            emit("PSHS\tY");
+        gen_as(e->args.items[0], 16);
+        push(16);
+        gen_as(e->args.items[1], 16);
+        push(16);
+        gen_as(e->args.items[2], 16);
+        emit("TFR\tD,Y");
+        emit("PULS\tX");
+        pull(16);
+        emit("CMPD\t#0");
+        emit("BEQ\tL%d", skip);
+        emit_call("RT_COPY");
+        emit_label(skip);
+        if (sema_reentrant)
+            emit("PULS\tY");
+        return;
+    }
+    case BI_SCL:
+    case BI_SCR:
+        gen_carry_rotate(e);
         return;
     default:
         break;
@@ -932,6 +1072,10 @@ static void gen_stmt(const Stmt *s)
             const Expr *t = s->targets.items[i];
             const char *st = t->type == TY_BYTE ? "STB" : "STD";
             unsigned off;
+            if (t->sym->predef == PRE_STACKPTR) {
+                emit("TFR\tD,S");
+                continue;
+            }
             if (fixed_location(t, &off)) {
                 emit("%s\t%s", st, var_ref(t->sym->asm_name, off));
             } else if (based_location(t, &off)) {
@@ -949,6 +1093,10 @@ static void gen_stmt(const Stmt *s)
         break;
     }
     case S_CALL:
+        if (s->expr->kind == E_BUILTIN) {   /* CALL TIME(n), CALL MOVE(...) */
+            gen_builtin(s->expr);
+            break;
+        }
         gen_call(s->expr);
         if (s->expr->sym->proc->interrupt)
             emit("ANDCC\t#$AF\t\t; a CALLed INTERRUPT procedure enables interrupts");
@@ -1168,8 +1316,10 @@ static void emit_variables(void)
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
     if (sema_goto_out)
         fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
-    if (sema_carry)
-        fprintf(out, "RT_CARRY\tRMB\t1\t\t; bit 0: the carry for PLUS/MINUS\n");
+    if (sema_carry || sema_half)
+        fprintf(out, "RT_CC\tRMB\t1\t\t; carry (bit 0) and half carry of the last + - ...\n");
+    if (sema_result)
+        fprintf(out, "RT_RES\tRMB\t2\t\t; and its result, for ZERO SIGN PARITY\n");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
         if (v->init == INIT_DATA || in_frame(v))
@@ -1235,8 +1385,12 @@ static void emit_code(const Program *prog)
     fprintf(out, "\n; program %s\nPLM_MAIN\n", prog->name);
     if (sema_goto_out)
         emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
-    if (sema_carry)
-        emit("CLR\t%s\t\t; no carry yet", var_ref("RT_CARRY", 0));
+    if (sema_carry || sema_half)
+        emit("CLR\t%s\t\t; no carry yet", var_ref("RT_CC", 0));
+    if (sema_result) {
+        emit("CLR\t%s\t\t; and a result of 0", var_ref("RT_RES", 0));
+        emit("CLR\t%s", var_ref("RT_RES", 1));
+    }
     if (pic)
         emit_initial_prologue();
     for (int n = 0; n < INTERRUPTS; n++) {
@@ -1287,14 +1441,22 @@ static void emit_code(const Program *prog)
             emit("PSHS\tU,Y,X,DP,D");
         emit("CLRA");
         emit("TFR\tA,DP");
-        if (sema_carry) {               /* the interrupted code's carry, too */
-            emit("LDA\tRT_CARRY");
+        if (sema_carry || sema_half) {  /* the interrupted code's flags, too */
+            emit("LDA\tRT_CC");
             emit("PSHS\tA");
         }
+        if (sema_result) {
+            emit("LDX\tRT_RES");
+            emit("PSHS\tX");
+        }
         emit_call(p->sym->asm_name);
-        if (sema_carry) {
+        if (sema_result) {
+            emit("PULS\tX");
+            emit("STX\tRT_RES");
+        }
+        if (sema_carry || sema_half) {
             emit("PULS\tA");
-            emit("STA\tRT_CARRY");
+            emit("STA\tRT_CC");
         }
         if (n == 1)
             emit("PULS\tD,DP,X,Y,U");
@@ -1306,8 +1468,12 @@ static void emit_code(const Program *prog)
     for (int i = 0; i < sema_vars.len; i++)
         copies |= needs_template(sema_vars.items[i]);
     fputc('\n', out);
-    if (copies)
+    if (copies || sema_uses_copy)
         fprintf(out, "RT_NEED_COPY\tEQU\t1\n");
+    if (sema_uses_time)
+        fprintf(out, "RT_NEED_TIME\tEQU\t1\n");
+    if (sema_uses_parity)
+        fprintf(out, "RT_NEED_PARITY\tEQU\t1\n");
     emit("INCLUDE\t\"plm_rt.asm\"");
     emit("INCLUDE\t\"plm_hooks.asm\"");
 }
@@ -1338,7 +1504,8 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
         emit("INCLUDE\t\"plm_crt0_os9.asm\"");
         emit_code(prog);
         emit_pools();
-        fprintf(out, "\nRT_STACK\tRMB\t%u\t\t; stack space (--stack)\n", opt->stack);
+        fprintf(out, "\nRT_MEMORY\tRMB\t%u\t\t; MEMORY (--memory)\n", opt->memory);
+        fprintf(out, "RT_STACK\tRMB\t%u\t\t; stack space (--stack)\n", opt->stack);
         fprintf(out, "RT_SIZE\tEQU\t.\t\t; data area size\n");
         emit("EMOD");
         fprintf(out, "RT_EOM\tEQU\t*\n");
@@ -1353,6 +1520,7 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
     emit_code(prog);
     emit_variables();
     emit_pools();
+    fprintf(out, "\nRT_MEMORY\tEQU\t*\t\t; MEMORY: the memory after the program\n");
     if (opt->vectors) {
         for (int n = 0; n < INTERRUPTS; n++) {
             if (!sema_interrupt[n])

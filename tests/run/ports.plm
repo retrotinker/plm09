@@ -1,0 +1,24 @@
+/* PLMCARGS: --org 0100H */
+/* NOT-OS9: the ports are absolute addresses, outside an OS-9 process */
+/* INPUT and OUTPUT (PL/M-80 manual 11.1.1, 11.2.1): port n is the byte at
+   RT_PORTS + n, which the simulator's hooks put at its I/O block:
+   OUTPUT(0) prints a character, INPUT(1) reads one, OUTPUT(4) and
+   OUTPUT(5) print a number, OUTPUT(2) exits.  Expected values in comments. */
+PORTS: DO;
+DECLARE C BYTE, N ADDRESS;
+DECLARE NL LITERALLY '10';
+OUTPUT(0) = 'O'; OUTPUT(0) = 'K'; OUTPUT(0) = NL;      /* OK */
+C = INPUT(1);                                           /* 'A' from the .in file */
+DO WHILE C <> 0 AND C <> NL;
+    OUTPUT(0) = C + 1;                                  /* B C D */
+    C = INPUT(1);
+END;
+OUTPUT(0) = NL;
+N = 1234;
+OUTPUT(4) = HIGH(N);
+OUTPUT(5) = LOW(N);                                     /* 1234 */
+C, OUTPUT(0) = 'Z';                                     /* Z, and C */
+OUTPUT(0) = NL;
+OUTPUT(2) = C - 'Z' + 7;                                /* exit status 7 */
+OUTPUT(0) = '?';                                        /* not reached */
+END PORTS;

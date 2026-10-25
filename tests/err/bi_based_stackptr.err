@@ -1,0 +1,1 @@
+1:24: error: the base of a BASED variable must be an ADDRESS scalar that is not itself BASED

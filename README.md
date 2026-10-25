@@ -58,6 +58,7 @@ format, such as `-f decb` or `-f raw`.
 | `--os9` | generate a position-independent OS-9 program module |
 | `--stack N` | with `--os9`: stack bytes in the data area (default 256) |
 | `--name NAME` | with `--os9`: module name (default: the program's name) |
+| `--memory N` | with `--os9`: bytes of the data area for `MEMORY` (default 0) |
 | `--tokens` | print the tokens and stop |
 | `--ast` | print the syntax tree and stop |
 
@@ -114,7 +115,12 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - Subscripts are any expression and aren't range-checked, as in PL/M-80.
   - A plain `BUF` means `BUF(0)`.
   - `LENGTH(BUF)` and `LAST(BUF)` give the number of elements and the highest subscript (BYTE if 255 or less, as in PL/M-80), and `SIZE(X)` the number of bytes.
-- **Built-ins:** `HIGH(W)`, `LOW(W)` and `DOUBLE(B)` convert between BYTE and ADDRESS; `SHL(P, N)`/`SHR(P, N)` shift a BYTE or ADDRESS, and `ROL(P, N)`/`ROR(P, N)` rotate a BYTE. They compile to inline code, so they work on every target. Like `LENGTH`, they are built-ins only where the name isn't declared.
+- **Built-ins:** all of PL/M-80's, as built-ins only where the name isn't declared:
+  - `HIGH(W)`, `LOW(W)` and `DOUBLE(B)` convert between BYTE and ADDRESS; `SHL(P, N)`/`SHR(P, N)` shift a BYTE or ADDRESS, and `ROL(P, N)`/`ROR(P, N)` rotate a BYTE. They compile to inline code, so they work on every target.
+  - `CARRY`, `ZERO`, `SIGN` and `PARITY` read the flags of the last `+ - PLUS MINUS SCL SCR DEC` executed; `SCL`/`SCR` rotate through the carry, and `DEC(A + B)` adjusts a BCD addition. Unlike on the 8080, these flags are exact: plmc keeps them in memory.
+  - `INPUT(n)` and `OUTPUT(n) = v` read and write port n, the byte at `RT_PORTS + n` (the hooks set it: `$FF00` for the simulator's I/O block and the CoCo's I/O page).
+  - `CALL MOVE(count, from, to)` copies bytes; `CALL TIME(n)` waits n × 100 µs, timed by the hooks' `RT_CYCLES100`.
+  - `MEMORY` is the memory after the program (`--memory N` bytes under OS-9), and `STACKPTR` is the S register.
   - Arrays can't be parameters.
 - **Statements:**
   - assignment, including several targets (`A, B = 0;`)
@@ -141,7 +147,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Result types:**
   - `+ - MOD AND OR XOR` give BYTE when both operands are BYTE, and ADDRESS otherwise. BYTE results wrap at 8 bits: with BYTE `B = 200`, `B + 100` is 44, even when it is assigned to an ADDRESS.
   - `*` and `/` always give an ADDRESS.
-  - `PLUS` and `MINUS` add and subtract with the carry (borrow) of the last `+`, `-`, `PLUS` or `MINUS` executed, for numbers wider than 16 bits: `SL = AL + BL; SH = AH PLUS BH;`. Unlike the 8080 compiler's flag, this carry is well defined (nothing else changes it).
+  - `PLUS` and `MINUS` add and subtract with the carry (borrow) of the last `+`, `-`, `PLUS`, `MINUS`, `SCL`, `SCR` or `DEC` executed, for numbers wider than 16 bits: `SL = AL + BL; SH = AH PLUS BH;`. Unlike the 8080 compiler's flag, this carry is well defined (nothing else changes it).
   - Relational operators give a BYTE: `0FFH` for true and `0` for false.
   - Unary `-` and `NOT` keep the type of their operand.
   - A constant is a BYTE if it is 255 or less.
@@ -155,7 +161,6 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 **Not supported yet:**
 - `PUBLIC`
 - embedded assignment `:=`
-- the built-in procedures other than `LENGTH`, `LAST`, `SIZE`, `HIGH`, `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL` and `ROR` (such as `MOVE`, `TIME`, `SCL`/`SCR` and `CARRY`)
 
 The compiler reports these with an error ("... is not supported") rather than
 misreading them.
