@@ -1,0 +1,144 @@
+/* REENTRANT procedures (PL/M-80 manual 8.1.7): parameters and locals on
+   the stack, so procedures can be recursive.  Expected values in comments. */
+REENT: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE ITEMS (5) BYTE INITIAL (1, 2, 3, 4, 5);
+DECLARE COUNT ADDRESS, I BYTE;
+
+/* the manual's example of direct recursion */
+SUM$ARRAY: PROCEDURE (PTR, N) BYTE REENTRANT;
+    DECLARE PTR ADDRESS,
+        ARRAY BASED PTR (1) BYTE,
+        N BYTE;
+    IF N=0 THEN RETURN ARRAY(0);
+    ELSE RETURN ARRAY(N) + SUM$ARRAY(PTR, N-1);
+END SUM$ARRAY;
+
+FACT: PROCEDURE (N) ADDRESS REENTRANT;
+    DECLARE N BYTE;
+    IF N <= 1 THEN RETURN 1;
+    RETURN N * FACT(N - 1);
+END FACT;
+
+FIB: PROCEDURE (N) ADDRESS REENTRANT;
+    DECLARE N BYTE;
+    IF N < 2 THEN RETURN N;
+    RETURN FIB(N - 1) + FIB(N - 2);
+END FIB;
+
+/* indirect recursion: IS$EVEN calls IS$ODD before it is declared */
+IS$EVEN: PROCEDURE (N) BYTE REENTRANT;
+    DECLARE N ADDRESS;
+    IF N = 0 THEN RETURN 1;
+    RETURN IS$ODD(N - 1);
+END IS$EVEN;
+
+IS$ODD: PROCEDURE (N) BYTE REENTRANT;
+    DECLARE N ADDRESS;
+    IF N = 0 THEN RETURN 0;
+    RETURN IS$EVEN(N - 1);
+END IS$ODD;
+
+/* static procedures called from a reentrant one */
+STORE: PROCEDURE (P, V);
+    DECLARE P ADDRESS, V BYTE, B BASED P BYTE;
+    B = V;
+END STORE;
+
+/* print N in base RADIX, most significant digit first */
+PRINTN: PROCEDURE (N, RADIX) REENTRANT;
+    DECLARE N ADDRESS, RADIX BYTE;
+    DECLARE DIGITS (*) BYTE DATA ('0123456789ABCDEF');
+    IF N >= RADIX THEN CALL PRINTN(N / RADIX, RADIX);
+    CALL PUTCH(DIGITS(N MOD RADIX));
+END PRINTN;
+
+/* all permutations of the first N letters, in a local array per level */
+PERMUTE: PROCEDURE (PREFIX, PLEN, REST, RLEN) REENTRANT;
+    DECLARE (PREFIX, REST) ADDRESS, (PLEN, RLEN) BYTE;
+    DECLARE P BASED PREFIX (1) BYTE, R BASED REST (1) BYTE;
+    DECLARE (BUF, LEFT) (8) BYTE, (K, J, M) BYTE;
+    IF RLEN = 0 THEN DO;
+        DO K = 0 TO PLEN - 1;
+            CALL PUTCH(P(K));
+        END;
+        CALL PUTCH(' ');
+        COUNT = COUNT + 1;
+        RETURN;
+    END;
+    DO K = 0 TO RLEN - 1;
+        DO J = 1 TO PLEN;
+            BUF(J - 1) = P(J - 1);
+        END;
+        BUF(PLEN) = R(K);
+        M = 0;
+        DO J = 0 TO RLEN - 1;
+            IF J <> K THEN DO;
+                CALL STORE(.LEFT(M), R(J));     /* the address of a local */
+                M = M + 1;
+            END;
+        END;
+        CALL PERMUTE(.BUF, PLEN + 1, .LEFT, RLEN - 1);
+    END;
+END PERMUTE;
+
+/* locals of every kind: structure, alias, inner block, loop index */
+LOCALS: PROCEDURE (A, B, C) ADDRESS REENTRANT;
+    DECLARE (A, C) BYTE, B ADDRESS;
+    DECLARE REC STRUCTURE (KEY BYTE, VAL (3) ADDRESS);
+    DECLARE W ADDRESS, (HI, LO) BYTE AT (.W);
+    DECLARE (K, S) ADDRESS;
+    REC.KEY = A;
+    DO K = 0 TO 2;
+        REC.VAL(K) = B + K;
+    END;
+    W = 1234H;
+    S = HI + LO;                                /* 12H + 34H = 70 */
+    DO;
+        DECLARE INNER (4) BYTE;
+        DO K = 0 TO 3;
+            INNER(K) = C;
+        END;
+        S = S + INNER(3) + REC.KEY + REC.VAL(2) + SIZE(REC);
+    END;
+    RETURN S;
+END LOCALS;
+
+/* Ackermann's function, deep recursion */
+ACK: PROCEDURE (M, N) ADDRESS REENTRANT;
+    DECLARE (M, N) ADDRESS;
+    IF M = 0 THEN RETURN N + 1;
+    IF N = 0 THEN RETURN ACK(M - 1, 1);
+    RETURN ACK(M - 1, ACK(M, N - 1));
+END ACK;
+
+DEPTH: PROCEDURE (N) REENTRANT;
+    DECLARE N BYTE;
+    IF N = 0 THEN GOTO OUT;                     /* leaves 20 activations */
+    CALL DEPTH(N - 1);
+END DEPTH;
+
+CALL PUTDEC(SUM$ARRAY(.ITEMS, 4));              /* 15 */
+CALL PUTDEC(FACT(8));                           /* 40320 */
+CALL PUTDEC(FIB(15));                           /* 610 */
+CALL PUTDEC(IS$EVEN(10));                       /* 1 */
+CALL PUTDEC(IS$ODD(7));                         /* 1 */
+CALL PUTDEC(IS$EVEN(25));                       /* 0 */
+CALL PRINTN(65535, 16); CALL PUTCH(10);         /* FFFF */
+CALL PRINTN(1000, 2); CALL PUTCH(10);           /* 1111101000 */
+CALL PRINTN(0, 10); CALL PUTCH(10);             /* 0 */
+COUNT = 0;
+CALL PERMUTE(0, 0, .('ABC'), 3); CALL PUTCH(10); /* ABC ACB BAC BCA CAB CBA */
+CALL PUTDEC(COUNT);                             /* 6 */
+CALL PUTDEC(LOCALS(5, 100, 7));                 /* 70 + 7 + 5 + 102 + 7 = 191 */
+CALL PUTDEC(ACK(2, 3));                         /* 9 */
+CALL PUTDEC(FACT(FACT(3)));                     /* 720 */
+DO I = 0 TO 4;
+    CALL PUTDEC(SUM$ARRAY(.ITEMS, I));          /* 1 3 6 10 15 */
+END;
+CALL DEPTH(20);
+CALL PUTDEC(999);                               /* not reached */
+OUT:
+CALL PUTDEC(FIB(10));                           /* 55 */
+END REENT;

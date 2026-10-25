@@ -4,8 +4,9 @@
  * Binary operators evaluate the right operand first and push it, unless it
  * is a constant or a variable of the operation's width, in which case it
  * is used directly as the instruction operand.
- * Procedures use static parameter/local slots; nothing is kept in
- * registers across a call.  See docs/DESIGN.md.
+ * Procedures use static parameter/local slots, except REENTRANT ones, whose
+ * frame Y points at; nothing else is kept in registers across a call.
+ * See docs/DESIGN.md.
  */
 #include "codegen.h"
 #include "lexer.h"
@@ -56,8 +57,6 @@ static void emit_source(Loc loc)
     fprintf(out, "; %d: %s\n", loc.line, text);
 }
 
-/* operand naming a variable, or the byte `offset` bytes into it: absolute,
-   or relative to U (the data area) in position-independent mode */
 static const Symbol *find_var(const char *name)
 {
     for (int i = 0; i < sema_vars.len; i++) {
@@ -79,6 +78,14 @@ static const char *pic_suffix(const char *name)
     return v && v->in_code ? ",PCR" : ",U";
 }
 
+static int in_frame(const Symbol *v)
+{
+    return v && v->storage == ST_FRAME;
+}
+
+/* operand naming a variable, or the byte `offset` bytes into it: absolute,
+   or relative to U (the data area) in position-independent mode, or to Y
+   (the frame) for a REENTRANT procedure's variable */
 static const char *var_ref(const char *name, unsigned offset)
 {
     static char bufs[4][80];
@@ -88,7 +95,9 @@ static const char *var_ref(const char *name, unsigned offset)
 
     if (offset)
         snprintf(off, sizeof off, "+%u", offset & 0xffff);
-    snprintf(b, sizeof bufs[0], "%s%s%s", name, off, pic ? pic_suffix(name) : "");
+    const Symbol *v = find_var(name);
+    snprintf(b, sizeof bufs[0], "%s%s%s", name, off,
+             in_frame(v) ? ",Y" : pic ? pic_suffix(name) : "");
     return b;
 }
 
@@ -220,7 +229,7 @@ static void gen_base_x(const Symbol *sym)
 {
     if (sym->base)
         emit("LDX\t%s", var_ref(sym->base->asm_name, 0));
-    else if (pic && !sym->absolute)
+    else if ((pic && !sym->absolute) || in_frame(sym))
         emit("LEAX\t%s", var_ref(sym->asm_name, 0));
     else
         emit("LDX\t#%s", sym->asm_name);
@@ -454,7 +463,7 @@ static void gen_addr(const Expr *e)
         return;
     }
     if (fixed_location(v, &off)) {
-        if (pic && !v->sym->absolute) {
+        if ((pic && !v->sym->absolute) || in_frame(v->sym)) {
             emit("LEAX\t%s", var_ref(v->sym->asm_name, off));
             emit("TFR\tX,D");
         } else if (off) {
@@ -614,7 +623,10 @@ static void gen_call(const Expr *e)
     int n = e->args.len;
 
     if (p->external) {
-        /* hook ABI: every argument pushed as a word, last one also in D */
+        /* hook ABI: every argument pushed as a word, last one also in D.
+           Hooks may change Y, a REENTRANT procedure's frame pointer. */
+        if (sema_reentrant)
+            emit("PSHS\tY");
         for (int i = 0; i < n; i++) {
             gen_as(e->args.items[i], 16);
             push(16);
@@ -622,6 +634,21 @@ static void gen_call(const Expr *e)
         emit_call(p->sym->asm_name);
         if (n)
             emit("LEAS\t%d,S", 2 * n);
+        if (sema_reentrant)
+            emit("PULS\tY");               /* leaves B/D (the result) alone */
+        return;
+    }
+
+    if (p->reentrant) {
+        /* arguments on the stack, first one deepest; see layout_frame */
+        for (int i = 0; i < n; i++) {
+            const Symbol *param = ((VarDecl *)p->params.items[i])->sym;
+            gen_as(e->args.items[i], width(param->type));
+            push(width(param->type));
+        }
+        emit_call(p->sym->asm_name);
+        if (p->arg_size)
+            emit("LEAS\t%u,S", p->arg_size);
         return;
     }
 
@@ -670,6 +697,17 @@ static void gen_cond_false(const Expr *e, int false_label)
 
 static void gen_block(const Block *b);
 static void gen_stmt(const Stmt *s);
+
+/* return from a procedure; B/D (the result) are left alone */
+static void gen_epilogue(const Proc *p)
+{
+    if (p->reentrant) {
+        emit("LEAS\t%u,Y", p->frame_size);  /* S = Y + locals: the caller's Y */
+        emit("PULS\tY,PC");
+    } else {
+        emit("RTS");
+    }
+}
 
 /* DO var = from TO to [BY by]; body END  (PL/M-80 manual 5.1.4):
    from is evaluated once; to is evaluated and compared before every pass
@@ -820,7 +858,7 @@ static void gen_stmt(const Stmt *s)
     case S_RETURN:
         if (s->expr)
             gen_as(s->expr, width(s->proc->ret));
-        emit("RTS");
+        gen_epilogue(s->proc);
         break;
     case S_GOTO:
         /* Statements leave the stack balanced, so a jump within a procedure
@@ -972,6 +1010,20 @@ static const char *at_text(const Symbol *v)
     return buf;
 }
 
+/* a REENTRANT procedure's variables: offsets from Y (see layout_frame) */
+static void emit_frame(const Proc *p)
+{
+    for (int i = 0; i < sema_vars.len; i++) {
+        const Symbol *v = sema_vars.items[i];
+        if (!in_frame(v) || v->owner != p)
+            continue;
+        if (v->at)
+            fprintf(out, "%s\tEQU\t%s\n", v->asm_name, at_text(v));
+        else
+            fprintf(out, "%s\tEQU\t%u\n", v->asm_name, v->frame_off);
+    }
+}
+
 static void emit_variables(void)
 {
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
@@ -979,8 +1031,8 @@ static void emit_variables(void)
         fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
-        if (v->init == INIT_DATA)
-            continue;                       /* stored with the code */
+        if (v->init == INIT_DATA || in_frame(v))
+            continue;                       /* stored with the code, or on the stack */
         if (v->at) {                        /* no storage of its own */
             fprintf(out, "%s\tEQU\t%s\n", v->asm_name, at_text(v));
             if (v->init == INIT_INITIAL && !pic) {
@@ -1051,9 +1103,18 @@ static void emit_code(const Program *prog)
         const Proc *p = sema_procs.items[i];
         if (p->external)
             continue;
-        fprintf(out, "\n; procedure %s\n%s\n", p->name, p->sym->asm_name);
+        fprintf(out, "\n; procedure %s%s\n", p->name, p->reentrant ? " (REENTRANT)" : "");
+        if (p->reentrant)
+            emit_frame(p);
+        fprintf(out, "%s\n", p->sym->asm_name);
+        if (p->reentrant) {
+            emit("PSHS\tY");
+            if (p->frame_size)
+                emit("LEAS\t-%u,S", p->frame_size);
+            emit("TFR\tS,Y");
+        }
         gen_block(p->body);
-        emit("RTS");
+        gen_epilogue(p);
     }
 
     emit_code_data();

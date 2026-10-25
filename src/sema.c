@@ -25,6 +25,7 @@
 Vec sema_vars;      /* Symbol*: every variable, for the data section */
 Vec sema_procs;     /* Proc*: every procedure, in declaration order */
 int sema_goto_out;  /* some GOTO leaves a procedure */
+int sema_reentrant; /* some procedure is REENTRANT (Y is a frame pointer) */
 int sema_pic;       /* compiling an --os9 module */
 
 static const char *const register_names[] = {
@@ -58,6 +59,11 @@ static void add_call_edge(Scope *scope, Proc *callee)
 static Symbol *lookup(Scope *scope, const char *name, Loc loc)
 {
     Symbol *sym = scope_lookup(scope, name);
+    /* a REENTRANT procedure may be used before its declaration, but only
+       inside a REENTRANT procedure (PL/M-80 manual 8.1.7) */
+    if (sym && sym->pending && !(scope->proc && scope->proc->reentrant))
+        error_at(loc, "%s is not declared (only a REENTRANT procedure can use a "
+                 "REENTRANT procedure declared after it)", name);
     if (!sym)
         error_at(loc, "%s is not declared", name);
     return sym;
@@ -427,6 +433,7 @@ static void place_at(Symbol *sym, VarDecl *v, Scope *scope)
         const Symbol *target = a->val.addr->lhs->sym;
         sym->absolute = target->absolute;
         sym->in_code = target->in_code;
+        sym->storage = target->storage;
     } else {
         sym->absolute = 1;
     }
@@ -508,6 +515,13 @@ static void declare_var(VarDecl *v, Scope *scope)
     }
     if (v->at)                  /* after INITIAL, which may set a (*) dimension */
         place_at(sym, v, scope);
+    /* a REENTRANT procedure's variables are in its stack frame, except DATA
+       (read-only) and variables AT a fixed address or AT a static variable */
+    if (scope->proc && scope->proc->reentrant && !sym->in_code
+        && (v->at ? sym->storage == ST_FRAME : !sym->absolute)) {
+        sym->storage = ST_FRAME;
+        sym->owner = scope->proc;
+    }
     if (!base)                  /* a BASED variable has no storage of its own */
         vec_push(&sema_vars, sym);
 }
@@ -520,10 +534,77 @@ static int is_register_name(const char *name)
     return 0;
 }
 
+/* REENTRANT: lay out the stack frame once the body has been checked.
+   Y points at the locals; above them are the saved Y, the return address
+   and the arguments, the last one nearest:
+       0,Y ... frame_size-1,Y   locals, in declaration order
+       frame_size,Y             caller's Y
+       frame_size+2,Y           return address
+       frame_size+4,Y ...       arguments, last to first  */
+static void layout_frame(Proc *p)
+{
+    unsigned long off = 0;
+
+    for (int i = 0; i < sema_vars.len; i++) {
+        Symbol *v = sema_vars.items[i];
+        if (v->storage != ST_FRAME || v->owner != p || v->is_param || v->at)
+            continue;
+        v->frame_off = (unsigned)off;
+        off += (unsigned long)(v->dim ? v->dim : 1) * elem_bytes(v);
+    }
+    if (off > 0x7fff)
+        error_at(p->loc, "the variables of REENTRANT procedure %s take more than 32767 bytes",
+                 p->name);
+    p->frame_size = (unsigned)off;
+    off += 4;
+    for (int i = p->params.len - 1; i >= 0; i--) {
+        Symbol *v = ((VarDecl *)p->params.items[i])->sym;
+        v->frame_off = (unsigned)off;
+        off += type_size(v->type);
+    }
+    p->arg_size = (unsigned)off - p->frame_size - 4;
+}
+
+/* does s always end with RETURN, HALT or GOTO?  (for the warning about
+   a typed procedure reaching its END) */
+static int never_falls_through(const Stmt *s)
+{
+    switch (s->kind) {
+    case S_RETURN:
+    case S_HALT:
+    case S_GOTO:
+        return 1;
+    case S_IF:
+        return s->else_s && never_falls_through(s->then_s) && never_falls_through(s->else_s);
+    case S_DO: {
+        const Vec *st = &s->block->stmts;
+        return st->len && never_falls_through(st->items[st->len - 1]);
+    }
+    default:
+        return 0;
+    }
+}
+
 static void declare_proc(Proc *p, Scope *scope)
 {
-    Symbol *sym = scope_define(scope, p->name, SYM_PROC, p->loc);
+    Symbol *sym = scope_lookup_local(scope, p->name);
     Scope *inner = scope_new(scope, p);
+
+    if (p->reentrant) {
+        if (p->external)
+            error_at(p->reentrant_loc, "an EXTERNAL procedure cannot be REENTRANT");
+        if (scope->id != 0)
+            error_at(p->reentrant_loc, "a REENTRANT procedure must be declared at the outer "
+                     "level of the main program");
+        sema_reentrant = 1;
+    }
+    if (scope->proc && scope->proc->reentrant)
+        error_at(p->loc, "REENTRANT procedure %s cannot contain procedure declarations",
+                 scope->proc->name);
+    if (sym && sym->pending && sym->proc == p)
+        sym->pending = 0;               /* declared in advance by check_block */
+    else
+        sym = scope_define(scope, p->name, SYM_PROC, p->loc);
 
     sym->type = p->ret;
     sym->proc = p;
@@ -540,6 +621,10 @@ static void declare_proc(Proc *p, Scope *scope)
         VarDecl *v = p->params.items[i];
         Symbol *ps = scope_define(inner, v->name, SYM_VAR, v->loc);
         ps->is_param = 1;
+        if (p->reentrant) {
+            ps->storage = ST_FRAME;
+            ps->owner = p;
+        }
         v->sym = ps;
         if (!p->external)
             vec_push(&sema_vars, ps);
@@ -572,12 +657,14 @@ static void declare_proc(Proc *p, Scope *scope)
         }
     } else {
         check_block(p->body, inner);
+        if (p->reentrant)
+            layout_frame(p);
     }
 
     if (!p->external && p->ret != TY_NONE) {
         Vec *st = &p->body->stmts;
         Stmt *last = st->len ? st->items[st->len - 1] : NULL;
-        if (!last || (last->kind != S_RETURN && last->kind != S_HALT))
+        if (!last || !never_falls_through(last))
             warning_at(p->loc, "typed procedure %s may reach its END without RETURN", p->name);
     }
 }
@@ -624,6 +711,19 @@ static void check_goto(Stmt *s, Scope *scope)
 static void check_block(Block *b, Scope *scope)
 {
     b->scope = scope;
+    /* REENTRANT procedures may be called before they are declared (from
+       REENTRANT procedures; see lookup) */
+    if (scope->id == 0) {
+        for (int i = 0; i < b->decls.len; i++) {
+            Decl *d = b->decls.items[i];
+            if (d->kind != D_PROC || !d->proc->reentrant || d->proc->external)
+                continue;
+            Symbol *sym = scope_define(scope, d->proc->name, SYM_PROC, d->proc->loc);
+            sym->type = d->proc->ret;
+            sym->proc = d->proc;
+            sym->pending = 1;
+        }
+    }
     /* labels first: procedures declared in this block may GOTO them */
     for (int i = 0; i < b->stmts.len; i++)
         collect_labels(b->stmts.items[i], scope);
@@ -746,34 +846,40 @@ static void check_stmt(Stmt *s, Scope *scope)
 
 /* ----------------------------------------------------------- recursion */
 
-enum { UNVISITED, ACTIVE, DONE };
+/* Static storage can't hold two activations of a procedure, so only
+   REENTRANT procedures may be on a cycle of calls (PL/M-80 manual 8.1.7). */
 
 static Vec path;
+static int search_no;
 
-static void find_cycle(Proc *p)
+/* is there a path of calls from p to target?  If so it is left in path */
+static int reaches(Proc *p, Proc *target)
 {
-    p->visit = ACTIVE;
+    p->visit = search_no;
     vec_push(&path, p);
     for (int i = 0; i < p->callees.len; i++) {
         Proc *q = p->callees.items[i];
-        if (q->visit == ACTIVE) {
-            char chain[512] = "";
-            int start = 0;
-            while (path.items[start] != q)
-                start++;
-            for (int k = start; k < path.len; k++) {
-                strncat(chain, ((Proc *)path.items[k])->name, sizeof chain - strlen(chain) - 1);
-                strncat(chain, " -> ", sizeof chain - strlen(chain) - 1);
-            }
-            strncat(chain, q->name, sizeof chain - strlen(chain) - 1);
-            error_at(q->loc, "procedure %s is recursive (%s); recursion needs REENTRANT, "
-                     "which is not supported", q->name, chain);
-        }
-        if (q->visit == UNVISITED)
-            find_cycle(q);
+        if (q == target || (q->visit != search_no && reaches(q, target)))
+            return 1;
     }
     path.len--;
-    p->visit = DONE;
+    return 0;
+}
+
+static void check_recursion(Proc *p)
+{
+    char chain[512] = "";
+
+    path.len = 0;
+    search_no++;
+    if (!reaches(p, p))
+        return;
+    for (int k = 0; k < path.len; k++) {
+        strncat(chain, ((Proc *)path.items[k])->name, sizeof chain - strlen(chain) - 1);
+        strncat(chain, " -> ", sizeof chain - strlen(chain) - 1);
+    }
+    strncat(chain, p->name, sizeof chain - strlen(chain) - 1);
+    error_at(p->loc, "procedure %s is recursive (%s) but not REENTRANT", p->name, chain);
 }
 
 void sema_program(Program *prog)
@@ -783,7 +889,7 @@ void sema_program(Program *prog)
     check_block(prog->body, global);
     for (int i = 0; i < sema_procs.len; i++) {
         Proc *p = sema_procs.items[i];
-        if (p->visit == UNVISITED)
-            find_cycle(p);
+        if (!p->reentrant && !p->external)
+            check_recursion(p);
     }
 }

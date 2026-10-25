@@ -1,0 +1,1 @@
+1:25: error: a REENTRANT procedure must be declared at the outer level of the main program

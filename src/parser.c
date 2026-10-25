@@ -692,7 +692,8 @@ static void parse_end_labels(const Vec *labels)
     expect(T_SEMI);
 }
 
-/* name: PROCEDURE [(params)] [type] [EXTERNAL] ; block END [name] ; */
+/* name: PROCEDURE [(params)] [type] [EXTERNAL|REENTRANT|INTERRUPT n] ;
+   block END [name] ; */
 static Proc *parse_procedure(void)
 {
     Token name = next_raw_ident();
@@ -723,8 +724,10 @@ static Proc *parse_procedure(void)
         Token *t = peek();
         if (accept(K_EXTERNAL))
             p->external = 1;
-        else if (t->type == K_REENTRANT)
-            unsupported(t->loc, "REENTRANT");
+        else if (t->type == K_REENTRANT) {
+            p->reentrant = 1;
+            p->reentrant_loc = next().loc;
+        }
         else if (t->type == K_INTERRUPT)
             unsupported(t->loc, "INTERRUPT");
         else if (t->type == K_PUBLIC)

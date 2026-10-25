@@ -124,7 +124,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - `DO CASE expr; case-0; case-1; ... END;`; an out-of-range selector runs no case
   - `CALL`, `RETURN [expr]`, `HALT`, and the empty statement `;`
 - **Procedures:**
-  - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL]; ... END P;`
+  - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL|REENTRANT]; ... END P;`
   - Each parameter must be declared in the procedure body.
   - Procedures may be nested, and a nested procedure can see the variables of the procedures around it.
   - A typed procedure with no parameters is called just by naming it in an expression.
@@ -145,11 +145,11 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Conversions:** assigning an ADDRESS to a BYTE keeps the low byte, and a BYTE is zero-extended when it becomes an ADDRESS. Arguments and `RETURN` values are converted to the declared parameter or result type in the same way.
 - **Division by zero** gives a quotient of `0FFFFH` and a remainder equal to the dividend. Programs should not rely on this.
 - **Declaration order:** a name must be declared before it is used.
-- **No recursion:** as in classic PL/M, parameters and locals are stored in fixed RAM locations, so procedures are not reentrant. The compiler reports direct and indirect recursion as errors.
+- **Recursion needs REENTRANT:** as in classic PL/M, an ordinary procedure's parameters and locals are stored in fixed RAM locations, and the compiler reports direct and indirect recursion through such a procedure as an error. A `REENTRANT` procedure keeps them on the stack (Y-relative frame) and may be recursive; inside a REENTRANT procedure, REENTRANT procedures may be called before they are declared.
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- `REENTRANT`, `INTERRUPT`, `PUBLIC`
+- `INTERRUPT`, `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)
 - embedded assignment `:=`
 - built-in procedures other than `LENGTH`, `LAST` and `SIZE`, such as `HIGH`, `LOW` and `SHL`

@@ -8,6 +8,7 @@
 extern Vec sema_vars;   /* Symbol*: every variable, for the data section */
 extern Vec sema_procs;  /* Proc*: every procedure, in declaration order */
 extern int sema_goto_out;   /* some GOTO leaves a procedure (needs RT_MAINS) */
+extern int sema_reentrant;  /* some procedure is REENTRANT (Y is a frame pointer) */
 extern int sema_pic;        /* compiling an --os9 module (set before sema) */
 
 /* check the program and annotate it; errors are fatal */

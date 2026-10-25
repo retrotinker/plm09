@@ -165,12 +165,17 @@ Operators group left to right.
 - Division by zero gives a quotient of 0FFFFH and a remainder equal to the dividend. This is documented as something not to rely on.
 - The order in which operands are evaluated is unspecified. The code generator evaluates the right operand first, except when it can be used directly as an instruction operand.
 
-**Procedures** use static storage, as in classic PL/M:
+**Procedures** use static storage, as in classic PL/M, unless they are REENTRANT:
 - Parameters and locals get fixed RAM slots, so every access is a plain extended-address access.
 - Nested procedures can reach outer variables directly.
-- Sema rejects recursion (it finds cycles in the call graph and reports the cycle).
-- A typed procedure whose last statement isn't RETURN or HALT gets a warning.
-- `Symbol.dim` holds array sizes. `Symbol.storage` is reserved for REENTRANT (frame-relative variables).
+- Sema rejects recursion through procedures that aren't REENTRANT: for each one, `check_recursion` searches the call graph for a path back to it and reports the cycle.
+- A typed procedure whose last statement can fall through (not RETURN, HALT, GOTO, or an IF/ELSE or DO block ending in them) gets a warning.
+- **REENTRANT** procedures (outer level only, no nested procedures, not EXTERNAL) keep parameters and locals in a stack frame addressed through Y:
+  - Prologue `PSHS Y`, `LEAS -n,S`, `TFR S,Y`; epilogue `LEAS n,Y`, `PULS Y,PC`. Callers push the arguments in their declared widths and remove them with `LEAS`.
+  - Sema's `layout_frame()` assigns the offsets after the body is checked (variables from 0, arguments above the saved Y and return address); codegen emits them as `EQU`s before the procedure, and `var_ref()` adds `,Y`.
+  - Y must survive calls: ordinary procedures and the runtime don't use it, and EXTERNAL calls save it when the program has any REENTRANT procedure.
+  - `check_block` predeclares the main program's REENTRANT procedures (`Symbol.pending`) so REENTRANT procedures can call them before their declaration, as the manual allows.
+- `Symbol.dim` holds array sizes. `Symbol.storage` is `ST_FRAME` for the variables of REENTRANT procedures (Y-relative).
 
 **LITERALLY in the parser.** Substitution happens in the parser's token buffer, so sema and codegen never see literals.
 - **Lexer:** strings are `T_STRING` tokens. The parser turns one- and two-character strings into constants, and `lex_tokens()` tokenizes a literal's text, located at the place it is used.
@@ -181,7 +186,7 @@ Operators group left to right.
 
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
 - LABEL declarations
-- REENTRANT, INTERRUPT, PUBLIC
+- INTERRUPT, PUBLIC
 - PLUS/MINUS, `:=`, ENABLE/DISABLE
 
 The full list of messages is in `plmc.md`.
@@ -478,9 +483,11 @@ How the nitros9 suite works:
 - INITIAL and DATA, `(*)`, and strings of any length in value lists: the run test `initial`, INITIAL set-up in the fuzz generator, a parse golden and error tests
 - structures and `SIZE`, and BYTE/ADDRESS typing for `LENGTH`/`LAST`: the run test `structs`, structure members in the fuzz generator, a parse golden and error tests
 - labels and GOTO: the run test `goto` (including 10000 GOTOs out of three nested calls, which crashes if the stack isn't reset), a parse golden and error tests
+- AT: the run tests `at` (aliases) and `atabs` (fixed addresses, sim6809's I/O ports), a parse golden and error tests
+- REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
 
 ## Known gaps
-- **Language:** LABEL declarations (and so PUBLIC/EXTERNAL labels), REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** LABEL declarations (and so PUBLIC/EXTERNAL labels), INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

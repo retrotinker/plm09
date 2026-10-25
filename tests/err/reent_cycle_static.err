@@ -1,0 +1,1 @@
+3:1: error: procedure B is recursive (B -> A -> C -> B) but not REENTRANT

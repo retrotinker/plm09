@@ -1,1 +1,1 @@
-procedure A is recursive (A -> B -> A)
+2:1: error: procedure A is recursive (A -> B -> A) but not REENTRANT

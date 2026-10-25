@@ -43,7 +43,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
   - The image copy is padded to `DD.TOT` sectors, because truncated images make XRoar see too few cylinders and later files get corrupted.
   - `tests/nitros9/done.asm` reads `$FF6A`, which XRoar traps on to quit.
   - `-timeout` counts emulated seconds.
-- **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
+- **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program (half of them inside a REENTRANT procedure, so the scalars are Y-relative) and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
 
 **sim6809 options:**
 
@@ -114,17 +114,17 @@ The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` node
   - A name being *defined* must be read with `next_raw_ident()`, and tested with `raw_type()`, never with an expanding peek. Otherwise an outer literal would be substituted for it.
   - The parser has its own scope stack (`lit_push`/`lit_pop`/`declare_name`) for literals and the names that hide them.
   - Strings are `T_STRING` tokens: one or two characters make a constant, and longer ones are only valid as LITERALLY text.
-- **Unsupported features** (REENTRANT, LABEL declarations, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (INTERRUPT, LABEL declarations, and so on) are rejected in the parser with "X is not supported".
 - **Labels:** any statement can carry labels (`Stmt.labels`). Every DO body is its own scope, and `collect_labels()` must run before a block's declarations and statements are checked, because labels may be used before they are defined, even from procedures.
 - **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST`/`SIZE` into constants (`LENGTH`/`LAST` are BYTE if 255 or less). Assignment targets are parsed as `E_INDEX` directly.
 - **Structures:** `NAME[(i)].M[(j)]` becomes `E_MEMBER` (`member_suffix()`). A whole structure is only allowed under `.` and the built-ins, which sema tracks with `whole_ok`/`shorthand_ok`; always check subscripts with `check_sub()`, which clears them.
-- **Declaration order:** sema processes declarations in source order (declare before use), which is also how recursion stays detectable. A procedure's name is visible inside its own body.
+- **Declaration order:** sema processes declarations in source order (declare before use). A procedure's name is visible inside its own body. The one exception: `check_block` predeclares the outer level's REENTRANT procedures (`Symbol.pending`), and `lookup()` lets only REENTRANT procedures see a pending one.
 - **Output of sema:** it gives every `Expr` a `type`, resolves `sym`, sets `Stmt.proc` for RETURN, and fills `sema_vars` (the data section) and `sema_procs` (the order procedures are emitted in).
 
 What sema does:
 - annotates every expression with BYTE or ADDRESS
 - checks argument counts and typed/untyped procedure use
-- builds a call graph and rejects recursion, because procedures use static storage as in classic PL/M-80
+- builds a call graph and rejects any cycle through a procedure that isn't REENTRANT (`check_recursion`), because those use static storage as in classic PL/M-80
 
 Debug output: `plmc --tokens` and `plmc --ast`.
 
@@ -196,7 +196,9 @@ The hooks are selected only through the include path: `-I runtime/sim` for the s
 
 **Iterative DO / DO CASE:** these follow the PL/M-80 manual's rules exactly (limit and step re-evaluated, exit on wrap-around), and the fuzz model in `exprgen.c` mirrors them. Change both together. DO CASE tables hold offsets (`FDB Lk-Ltab`), so they stay position-independent.
 
-**Planned extensions** (STRUCTURE, REENTRANT): `Symbol.storage` is reserved for REENTRANT. Keep the future words reserved in the lexer.
+**REENTRANT in codegen:** a REENTRANT procedure's parameters and variables are `Symbol.storage == ST_FRAME` (still in `sema_vars`, with `owner` = the procedure, skipped by `emit_variables`). `layout_frame()` in sema gives offsets from Y; `emit_frame()` emits them as `EQU`s before the procedure, and `var_ref()` adds `,Y`. Y must survive everything a REENTRANT procedure calls: EXTERNAL calls are wrapped in `PSHS Y`/`PULS Y` whenever `sema_reentrant`, and nothing else may use Y (only the `--os9` INITIAL prologue does, before any procedure runs). Callers push arguments in their declared widths and pop them with `LEAS`.
+
+Keep the PL/M-80 reserved words of unimplemented features reserved in the lexer.
 
 ## lwasm pitfalls
 

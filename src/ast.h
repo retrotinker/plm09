@@ -135,10 +135,14 @@ typedef struct Proc {
     Vec params;             /* VarDecl*: name and loc; type from the body */
     Type ret;               /* TY_NONE for untyped */
     int external;
+    int reentrant;          /* REENTRANT: parameters and locals in a stack frame */
+    Loc reentrant_loc;
     struct Block *body;
     struct Symbol *sym;
     Vec callees;            /* Proc*: set by sema */
-    int visit;              /* recursion check state */
+    int visit;              /* recursion check: last search that visited it */
+    unsigned frame_size;    /* REENTRANT: bytes of locals below the saved Y */
+    unsigned arg_size;      /* REENTRANT: bytes of arguments the caller pushes */
 } Proc;
 
 typedef enum DeclKind { D_VAR, D_PROC } DeclKind;

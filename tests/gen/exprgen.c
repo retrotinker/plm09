@@ -364,16 +364,21 @@ int main(int argc, char **argv)
         sv[i][0] = rnd(65536);
         sv[i][1] = rnd(65536);
     }
-    fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
+    /* half the programs run in a REENTRANT procedure, so that the scalars
+       are in its stack frame (the INITIAL arrays must stay global) */
+    int reent = rnd(2);
     fprintf(plm, "DECLARE BA(4) BYTE INITIAL (%u, %u, %u, %u);\n", barr[0], barr[1], barr[2], barr[3]);
     fprintf(plm, "DECLARE WA(4) ADDRESS INITIAL (%u, %u, %u, %u);\n", warr[0], warr[1], warr[2], warr[3]);
-    fprintf(plm, "DECLARE IB BYTE, (IW, SUM) ADDRESS;\n");
-    fprintf(plm, "DECLARE P ADDRESS, PB BASED P BYTE, PW BASED P ADDRESS;\n");
-    fprintf(plm, "DECLARE (PBA BASED P) (4) BYTE, (PWA BASED P) (4) ADDRESS;\n");
     fprintf(plm, "DECLARE SA (3) STRUCTURE (K BYTE, V (2) ADDRESS) INITIAL (");
     for (int i = 0; i < 3; i++)
         fprintf(plm, "%s%u, %u, %u", i ? ", " : "", sk[i], sv[i][0], sv[i][1]);
     fprintf(plm, ");\n");
+    if (reent)
+        fprintf(plm, "BODY: PROCEDURE REENTRANT;\n");
+    fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
+    fprintf(plm, "DECLARE IB BYTE, (IW, SUM) ADDRESS;\n");
+    fprintf(plm, "DECLARE P ADDRESS, PB BASED P BYTE, PW BASED P ADDRESS;\n");
+    fprintf(plm, "DECLARE (PBA BASED P) (4) BYTE, (PWA BASED P) (4) ADDRESS;\n");
     for (int i = 0; i < NVARS; i++) {
         bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
         wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
@@ -451,6 +456,8 @@ int main(int argc, char **argv)
             break;
         }
     }
+    if (reent)
+        fprintf(plm, "END BODY;\nCALL BODY;\n");
     fprintf(plm, "END FUZZ;\n");
     fclose(plm);
     fclose(exp);

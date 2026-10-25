@@ -1,0 +1,7 @@
+PROGRAM T
+  PROCEDURE F (N) ADDRESS REENTRANT
+    DECLARE N BYTE
+    IF (= N 0)
+    THEN
+      RETURN 1
+    RETURN (* N (CALL F (- N 1)))

@@ -6,8 +6,8 @@
 
 typedef enum SymKind { SYM_VAR, SYM_PROC, SYM_LABEL } SymKind;
 
-/* where a variable lives; only ST_STATIC is generated today.  ST_FRAME is
-   reserved for REENTRANT procedures (U-relative slots). */
+/* where a variable lives: at a fixed place (in memory, or in an --os9
+   data area), or in the stack frame of a REENTRANT procedure (Y-relative) */
 typedef enum Storage { ST_STATIC, ST_FRAME } Storage;
 
 typedef struct Symbol {
@@ -29,7 +29,10 @@ typedef struct Symbol {
     int absolute;           /* at a fixed numeric address (AT n): never U/PC-relative */
     int in_code;            /* stored with the code (DATA, or AT one) */
     Proc *proc;             /* SYM_PROC */
-    Proc *owner;            /* SYM_LABEL: enclosing procedure, NULL in main */
+    Proc *owner;            /* SYM_LABEL: enclosing procedure, NULL in main;
+                               ST_FRAME variable: its procedure */
+    unsigned frame_off;     /* ST_FRAME: offset from Y */
+    int pending;            /* REENTRANT procedure not declared yet */
     struct Symbol *next;    /* next symbol in the same scope */
 } Symbol;
 

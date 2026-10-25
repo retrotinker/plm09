@@ -498,7 +498,7 @@ giving it storage of its own (PL/M-80 manual 6.2.8).
 ## Procedures
 
 ```
-NAME: PROCEDURE [(PARAM, ...)] [BYTE | ADDRESS] [EXTERNAL];
+NAME: PROCEDURE [(PARAM, ...)] [BYTE | ADDRESS] [EXTERNAL | REENTRANT];
     declarations
     statements
 END [NAME];
@@ -521,14 +521,51 @@ END [NAME];
 * **Reaching `END`:** an untyped procedure just returns. A typed procedure
   that might reach its `END` without a `RETURN` gets a warning, and the value
   it returns is then undefined.
-* **No recursion:** as in classic PL/M-80, parameters and local variables
-  live at fixed memory locations, not on the stack. A procedure must not call
-  itself, directly or through other procedures. plmc reports both cases:
+* **Static storage:** as in classic PL/M-80, the parameters and local
+  variables of an ordinary procedure live at fixed memory locations, not on
+  the stack. Such a procedure must not call itself, directly or through
+  other procedures, unless it is `REENTRANT`. plmc reports both cases:
 
   ```
-  error: procedure A is recursive (A -> B -> A); recursion needs
-         REENTRANT, which is not supported
+  error: procedure A is recursive (A -> B -> A) but not REENTRANT
   ```
+
+### REENTRANT procedures
+
+```
+SUM$ARRAY: PROCEDURE (PTR, N) BYTE REENTRANT;
+    DECLARE PTR ADDRESS,
+        ARRAY BASED PTR (1) BYTE,
+        N BYTE;
+    IF N=0 THEN RETURN ARRAY(0);
+    ELSE RETURN ARRAY(N) + SUM$ARRAY(PTR, N-1);
+END SUM$ARRAY;
+```
+
+A `REENTRANT` procedure keeps its parameters and variables on the stack, so
+every activation has its own (PL/M-80 manual 8.1.7). It may call itself,
+directly or through other procedures, and it may be called from an
+interrupt procedure while it is running.
+
+* **Calling ahead:** inside a REENTRANT procedure, a REENTRANT procedure may
+  be called (or have its address taken) before it is declared. That allows
+  indirect recursion: `IS$EVEN` can call `IS$ODD`, declared after it, which
+  calls `IS$EVEN`. Anywhere else, names must be declared first.
+* **Cycles:** every procedure on a cycle of calls must be REENTRANT.
+* **What is on the stack:** the parameters, and the variables declared in
+  the procedure and in its `DO` blocks, including arrays and structures.
+  Exceptions: `DATA` (read-only, kept with the code), and variables `AT` a
+  number or `AT` a variable that is not on the stack.
+* **Rules:**
+  * only at the outer level of the main program;
+  * no procedure declarations inside it;
+  * not `EXTERNAL`;
+  * its variables take at most 32767 bytes.
+* **Stack use:** each activation needs its variables, its arguments and
+  4 bytes, plus room for intermediate results. Deep recursion needs a big
+  enough stack; with `--os9`, raise `--stack` (default 256 bytes).
+* **Pointers:** `.X` of a variable on the stack is its address in the
+  current activation, valid until the procedure returns.
 
 ### EXTERNAL procedures
 
@@ -758,7 +795,7 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | Feature | Error message |
 |---|---|
 | `LABEL` declarations | `... is not supported` |
-| `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
+| `INTERRUPT`, `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | `ENABLE`, `DISABLE` | `ENABLE/DISABLE is not supported` |
@@ -838,7 +875,10 @@ next multiple of 8 plus 1.
 | `cannot assign to procedure P` | procedure name on the left of `=` |
 | `RETURN outside a procedure` | `RETURN` in the main program |
 | `untyped procedure P cannot return a value` / `RETURN in typed procedure F needs a value` | `RETURN` does not match the procedure's type |
-| `procedure P is recursive (...)` | direct or indirect recursion |
+| `procedure P is recursive (...) but not REENTRANT` | direct or indirect recursion through a procedure that is not REENTRANT |
+| `X is not declared (only a REENTRANT procedure can use a REENTRANT procedure declared after it)` | a REENTRANT procedure used before its declaration outside a REENTRANT procedure |
+| `a REENTRANT procedure must be declared at the outer level of the main program`, `REENTRANT procedure P cannot contain procedure declarations`, `an EXTERNAL procedure cannot be REENTRANT` | REENTRANT in the wrong place |
+| `the variables of REENTRANT procedure P take more than 32767 bytes` | too big a stack frame |
 | `END X does not match ...` | label after `END` differs from the block or procedure |
 | `declarations must come before statements` | `DECLARE` or procedure after the first statement |
 | `declarations are only allowed in procedures and simple DO blocks` | `DECLARE` inside `DO WHILE` |
@@ -899,7 +939,9 @@ started the program (BASIC, a monitor or an operating system) with
 * **Results:** a BYTE result is returned in **B** and an ADDRESS result in
   **D**.
 * **Registers:** a hook may change A, B, X, Y, U, DP and CC. Only S must be
-  preserved. Keep DP at 0 if the hook calls code that relies on it.
+  preserved. (Y is the frame pointer of REENTRANT procedures, so in a
+  program that has any, every call of an EXTERNAL procedure is wrapped in
+  `PSHS Y` / `PULS Y`. The arguments are still at `2,S` and up.) Keep DP at 0 if the hook calls code that relies on it.
   **In `--os9` modules, U must be preserved too**, because it points at the
   data area, and hooks must themselves be position-independent (see
   [OS-9 modules]).
@@ -1254,6 +1296,26 @@ listing and simulator traces easy to follow.
 * **Multiplication and division:** BYTE × BYTE uses the 6809's `MUL`. All
   other multiplications and all divisions call `RT_MUL16` or `RT_DIV16`
   (left operand in X, right in D).
+* **REENTRANT procedures:**
+  * The caller pushes the arguments, first to last, each in its declared
+    width (BYTE 1 byte, ADDRESS 2), calls the procedure, and removes them
+    with `LEAS n,S`.
+  * The procedure starts with `PSHS Y`, `LEAS -n,S` for its variables and
+    `TFR S,Y`, and returns with `LEAS n,Y` and `PULS Y,PC` (B and D, the
+    result, are untouched).
+  * Its parameters and variables are then at fixed offsets from Y, emitted
+    as `EQU`s before the procedure (`V2_N EQU 4`) and used as `V2_N,Y`:
+
+    | Offset from Y | Contents |
+    |---|---|
+    | 0 and up | variables, in declaration order |
+    | n | the caller's Y |
+    | n+2 | return address |
+    | n+4 and up | arguments, the last one first |
+
+  * Y belongs to the running REENTRANT procedure. Ordinary procedures and
+    the runtime don't use it, REENTRANT procedures restore it, and EXTERNAL
+    calls save it.
 * **Procedure calls:** arguments are stored in the procedure's fixed
   parameter locations and the procedure is called with `JSR`. If an argument
   itself contains a call, all arguments are evaluated and pushed first, then
@@ -1321,7 +1383,7 @@ group of instructions.
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
 | `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

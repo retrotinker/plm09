@@ -1,0 +1,1 @@
+1:27: error: P is not declared (only a REENTRANT procedure can use a REENTRANT procedure declared after it)

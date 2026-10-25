@@ -267,6 +267,8 @@ static void dump_block(const Block *b, int depth)
             printf(" %s", type_name(p->ret));
         if (p->external)
             printf(" EXTERNAL");
+        if (p->reentrant)
+            printf(" REENTRANT");
         putchar('\n');
         dump_block(p->body, depth + 1);
     }
