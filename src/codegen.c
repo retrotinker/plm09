@@ -58,6 +58,18 @@ static void emit_source(Loc loc)
 
 /* operand naming a variable, or the byte `offset` bytes into it: absolute,
    or relative to U (the data area) in position-independent mode */
+/* a DATA variable: stored with the code, so in an --os9 module it is
+   reached PC-relative (,PCR) instead of through U */
+static int in_code(const char *name)
+{
+    for (int i = 0; i < sema_vars.len; i++) {
+        const Symbol *v = sema_vars.items[i];
+        if (v->init == INIT_DATA && !strcmp(v->asm_name, name))
+            return 1;
+    }
+    return 0;
+}
+
 static const char *var_ref(const char *name, unsigned offset)
 {
     static char bufs[4][80];
@@ -67,7 +79,8 @@ static const char *var_ref(const char *name, unsigned offset)
 
     if (offset)
         snprintf(off, sizeof off, "+%u", offset & 0xffff);
-    snprintf(b, sizeof bufs[0], "%s%s%s", name, off, pic ? ",U" : "");
+    snprintf(b, sizeof bufs[0], "%s%s%s", name, off,
+             !pic ? "" : in_code(name) ? ",PCR" : ",U");
     return b;
 }
 
@@ -398,6 +411,15 @@ typedef struct Pool {
 static Pool *pools;
 static int npools;
 
+/* label of the data for a .(constant list), emitted with the code */
+static int pool_label(const Expr *e)
+{
+    pools = xrealloc(pools, (npools + 1) * sizeof *pools);
+    pools[npools].label = new_label();
+    pools[npools].e = e;
+    return pools[npools++].label;
+}
+
 /* D = the address given by a dot operator */
 static void gen_addr(const Expr *e)
 {
@@ -405,16 +427,13 @@ static void gen_addr(const Expr *e)
     unsigned off;
 
     if (!v) {                                   /* .(constant list) */
-        pools = xrealloc(pools, (npools + 1) * sizeof *pools);
-        pools[npools].label = new_label();
-        pools[npools].e = e;
+        int l = pool_label(e);
         if (pic) {
-            emit("LEAX\tL%d,PCR", pools[npools].label);
+            emit("LEAX\tL%d,PCR", l);
             emit("TFR\tX,D");
         } else {
-            emit("LDD\t#L%d", pools[npools].label);
+            emit("LDD\t#L%d", l);
         }
-        npools++;
         return;
     }
     if (v->sym->kind == SYM_PROC) {             /* entry point */
@@ -817,6 +836,108 @@ static void gen_block(const Block *b)
         gen_stmt(b->stmts.items[i]);
 }
 
+/* ------------------------------------------------ INITIAL and DATA */
+
+static unsigned var_bytes(const Symbol *v)
+{
+    return (v->dim ? (unsigned)v->dim : 1) * (v->st ? v->st->size : type_size(v->type));
+}
+
+/* an initial address as an assembler expression (absolute programs) */
+static const char *addr_text(const InitVal *iv)
+{
+    static char buf[96];
+    const Expr *e = iv->addr, *v = e->lhs;
+    char base[80];
+    unsigned off = 0;
+
+    if (!v)
+        snprintf(base, sizeof base, "L%d", pool_label(e));
+    else if (v->sym->kind == SYM_PROC)
+        snprintf(base, sizeof base, "%s", v->sym->asm_name);
+    else {
+        const_offset(v, &off);
+        snprintf(base, sizeof base, "%s", v->sym->asm_name);
+    }
+    unsigned add = (off + iv->value) & 0xffff;
+    if (!add)
+        snprintf(buf, sizeof buf, "%s", base);
+    else if (add < 0x8000)
+        snprintf(buf, sizeof buf, "%s+%u", base, add);
+    else
+        snprintf(buf, sizeof buf, "%s-%u", base, 0x10000 - add);
+    return buf;
+}
+
+/* the initialized bytes of v, as FCB/FDB lines after `label`.  A template
+   (for copying into an --os9 data area) has 0 for addresses, which the
+   startup code fills in, and stops after the last initialized byte. */
+static void emit_init(const Symbol *v, const char *label, int is_template)
+{
+    unsigned used = 0, run = 0;
+    unsigned last = 0;
+
+    fprintf(out, "%s", label);
+    for (int i = 0; i < v->init_vals.len; i++) {
+        const InitVal *iv = v->init_vals.items[i];
+        char val[100];
+        if (iv->addr)
+            snprintf(val, sizeof val, "%s", is_template ? "0" : addr_text(iv));
+        else
+            snprintf(val, sizeof val, iv->size == 1 ? "$%02X" : "$%04X", iv->value);
+        if (iv->size != last || run == 8) {
+            fprintf(out, "%s\t%s\t%s", i ? "\n" : "", iv->size == 1 ? "FCB" : "FDB", val);
+            run = 1;
+        } else {
+            fprintf(out, ",%s", val);
+            run++;
+        }
+        last = iv->size;
+        used += iv->size;
+    }
+    fputc('\n', out);
+    unsigned rest = var_bytes(v) - used;
+    if (!is_template && rest)       /* the uninitialized remainder */
+        emit("%s\t%u", pic && v->init == INIT_DATA ? "ZMB" : "RMB", rest);
+}
+
+static int *tpl;                    /* --os9: template label per sema_vars entry */
+
+static int needs_template(const Symbol *v)
+{
+    return pic && v->init == INIT_INITIAL && v->init_vals.len;
+}
+
+/* --os9: copy each INITIAL variable's template into the data area, then
+   store the initial addresses, which depend on where things were loaded */
+static void emit_initial_prologue(void)
+{
+    for (int i = 0; i < sema_vars.len; i++) {
+        const Symbol *v = sema_vars.items[i];
+        if (!needs_template(v))
+            continue;
+        unsigned n = 0;
+        for (int k = 0; k < v->init_vals.len; k++)
+            n += ((InitVal *)v->init_vals.items[k])->size;
+        fprintf(out, "; INITIAL %s\n", v->name);
+        emit("LEAX\tL%d,PCR", tpl[i]);
+        emit("LEAY\t%s", var_ref(v->asm_name, 0));
+        emit("LDD\t#%u", n);
+        emit_call("RT_COPY");
+        unsigned off = 0;
+        for (int k = 0; k < v->init_vals.len; k++) {
+            const InitVal *iv = v->init_vals.items[k];
+            if (iv->addr) {
+                gen_addr(iv->addr);
+                if (iv->value)
+                    emit("ADDD\t#%u", iv->value);
+                emit("STD\t%s", var_ref(v->asm_name, off));
+            }
+            off += iv->size;
+        }
+    }
+}
+
 static void emit_variables(void)
 {
     fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
@@ -824,29 +945,34 @@ static void emit_variables(void)
         fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
-        unsigned n = (v->dim ? (unsigned)v->dim : 1)
-                   * (v->st ? v->st->size : type_size(v->type));
-        fprintf(out, "%s\tRMB\t%u\n", v->asm_name, n);
+        if (v->init == INIT_DATA)
+            continue;                       /* stored with the code */
+        if (v->init == INIT_INITIAL && !pic)
+            emit_init(v, v->asm_name, 0);   /* loaded with the program */
+        else
+            fprintf(out, "%s\tRMB\t%u\n", v->asm_name, var_bytes(v));
     }
 }
 
-static void emit_code(const Program *prog)
+/* DATA variables, and (--os9) INITIAL templates: part of the code */
+static void emit_code_data(void)
 {
-    fprintf(out, "\n; program %s\nPLM_MAIN\n", prog->name);
-    if (sema_goto_out)
-        emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
-    gen_block(prog->body);
-    emit("RTS");
-
-    for (int i = 0; i < sema_procs.len; i++) {
-        const Proc *p = sema_procs.items[i];
-        if (p->external)
-            continue;
-        fprintf(out, "\n; procedure %s\n%s\n", p->name, p->sym->asm_name);
-        gen_block(p->body);
-        emit("RTS");
+    for (int i = 0; i < sema_vars.len; i++) {
+        const Symbol *v = sema_vars.items[i];
+        char label[32];
+        if (v->init == INIT_DATA) {
+            fprintf(out, "\n; DATA %s\n", v->name);
+            emit_init(v, v->asm_name, 0);
+        } else if (needs_template(v)) {
+            fprintf(out, "\n; INITIAL values of %s\n", v->name);
+            snprintf(label, sizeof label, "L%d", tpl[i]);
+            emit_init(v, label, 1);
+        }
     }
+}
 
+static void emit_pools(void)
+{
     if (npools)
         fprintf(out, "\n; constant lists\n");
     for (int i = 0; i < npools; i++) {
@@ -861,8 +987,36 @@ static void emit_code(const Program *prog)
         }
         fputc('\n', out);
     }
+}
 
+static void emit_code(const Program *prog)
+{
+    int copies = 0;
+
+    fprintf(out, "\n; program %s\nPLM_MAIN\n", prog->name);
+    if (sema_goto_out)
+        emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
+    if (pic)
+        emit_initial_prologue();
+    gen_block(prog->body);
+    emit("RTS");
+
+    for (int i = 0; i < sema_procs.len; i++) {
+        const Proc *p = sema_procs.items[i];
+        if (p->external)
+            continue;
+        fprintf(out, "\n; procedure %s\n%s\n", p->name, p->sym->asm_name);
+        gen_block(p->body);
+        emit("RTS");
+    }
+
+    emit_code_data();
+
+    for (int i = 0; i < sema_vars.len; i++)
+        copies |= needs_template(sema_vars.items[i]);
     fputc('\n', out);
+    if (copies)
+        fprintf(out, "RT_NEED_COPY\tEQU\t1\n");
     emit("INCLUDE\t\"plm_rt.asm\"");
     emit("INCLUDE\t\"plm_hooks.asm\"");
 }
@@ -874,6 +1028,10 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
     npools = 0;
     last_comment_line = 0;
     pic = opt->os9;
+    tpl = xcalloc(sema_vars.len ? (size_t)sema_vars.len : 1, sizeof *tpl);
+    for (int i = 0; i < sema_vars.len; i++)
+        if (needs_template(sema_vars.items[i]))
+            tpl[i] = new_label();
 
     if (opt->os9) {
         /* OS-9 program module: inside MOD ... EMOD, RMB reserves space in
@@ -888,6 +1046,7 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
         emit("FCB\t1\t\t; edition");
         emit("INCLUDE\t\"plm_crt0_os9.asm\"");
         emit_code(prog);
+        emit_pools();
         fprintf(out, "\nRT_STACK\tRMB\t%u\t\t; stack space (--stack)\n", opt->stack);
         fprintf(out, "RT_SIZE\tEQU\t.\t\t; data area size\n");
         emit("EMOD");
@@ -902,6 +1061,7 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
     emit("INCLUDE\t\"plm_crt0.asm\"");
     emit_code(prog);
     emit_variables();
+    emit_pools();
     if (opt->vectors) {
         emit("ORG\t$FFFE");
         emit("FDB\tRT_START");

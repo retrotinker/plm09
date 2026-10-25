@@ -1,0 +1,1 @@
+3:33: error: DATA in an --os9 module cannot hold addresses (use INITIAL)

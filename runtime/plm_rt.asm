@@ -43,3 +43,16 @@ RT_DIV3	DEC	,S
 	LDD	3,S
 	LEAS	5,S
 	RTS
+
+; RT_COPY: copy D bytes (D > 0) from X to Y.  Used by --os9 programs to
+; load INITIAL values into the data area; assembled only when needed.
+	IFDEF	RT_NEED_COPY
+RT_COPY	PSHS	D
+RT_COPY1	LDA	,X+
+	STA	,Y+
+	LDD	,S
+	SUBD	#1
+	STD	,S
+	BNE	RT_COPY1
+	PULS	D,PC
+	ENDC

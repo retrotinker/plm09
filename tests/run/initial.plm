@@ -1,0 +1,76 @@
+/* INITIAL and DATA (PL/M-80 manual 6.2.9), with strings of any length.
+   Expected values in comments. */
+INITS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE THRESHOLD BYTE INITIAL (48);
+DECLARE (COUNTER, LIMIT, INCR) ADDRESS INITIAL (0, 1024, 2);
+DECLARE EVEN (5) BYTE INITIAL (2, 4, 6, 8, 10);
+DECLARE COORD STRUCTURE (
+    HIGH$BOUND ADDRESS,
+    VALUE (3) BYTE,
+    LOW$BOUND BYTE)
+        INITIAL (302, 3, 6, 12, 0);
+DECLARE GREETING (5) BYTE INITIAL ('HELLO');
+DECLARE DATUM (100) BYTE INITIAL (3, 5, 7, 8);
+DECLARE FAREWELL (*) BYTE INITIAL ('GOODBYE, NOW');
+DECLARE WORDS (*) ADDRESS INITIAL ('ABCDE');        /* 'AB', 'CD', 'E' */
+DECLARE NOTE (*) BYTE INITIAL ('IT''S', 10);
+DECLARE SQUARES (*) BYTE DATA (0, 1, 4, 9, 16, 25, 36, 49);
+DECLARE MSG1 (*) BYTE DATA ('FIRST MESSAGE', 0), MSG2 (*) BYTE DATA ('SECOND', 0);
+DECLARE MESSAGES (*) ADDRESS INITIAL (.MSG1, .MSG2, .('THIRD', 0));
+DECLARE TABLE (10) ADDRESS INITIAL (100, 200, 300);
+DECLARE TP ADDRESS INITIAL (.TABLE(2) - 2);         /* the address of TABLE(1) */
+DECLARE TV BASED TP ADDRESS;
+DECLARE I BYTE;
+
+PRINT: PROCEDURE (Q);               /* print a 0-terminated string */
+    DECLARE Q ADDRESS, C BASED Q BYTE;
+    DO WHILE C <> 0;
+        CALL PUTCH(C);
+        Q = Q + 1;
+    END;
+    CALL PUTCH(10);
+END PRINT;
+
+DAYS: PROCEDURE (N) BYTE;           /* DATA inside a procedure */
+    DECLARE N BYTE;
+    DECLARE LEN (7) BYTE DATA (6, 6, 7, 9, 8, 6, 8);
+    RETURN LEN(N);
+END DAYS;
+
+CALL PUTDEC(THRESHOLD);                         /* 48 */
+CALL PUTDEC(COUNTER + LIMIT + INCR);            /* 0 + 1024 + 2 = 1026 */
+CALL PUTDEC(EVEN(4));                           /* 10 */
+CALL PUTDEC(COORD.HIGH$BOUND);                  /* 302 */
+CALL PUTDEC(COORD.VALUE(2));                    /* 12 */
+CALL PUTDEC(COORD.LOW$BOUND);                   /* 0 */
+DO I = 0 TO 4;
+    CALL PUTCH(GREETING(I));
+END;
+CALL PUTCH(10);                                 /* HELLO */
+CALL PUTDEC(DATUM(3));                          /* 8 */
+CALL PUTDEC(LENGTH(FAREWELL));                  /* 12 */
+DO I = 0 TO LAST(FAREWELL);
+    CALL PUTCH(FAREWELL(I));
+END;
+CALL PUTCH(10);                                 /* GOODBYE, NOW */
+CALL PUTDEC(LENGTH(WORDS));                     /* 3 */
+CALL PUTDEC(WORDS(0));                          /* 4142H = 16706 */
+CALL PUTDEC(WORDS(1));                          /* 4344H = 17220 */
+CALL PUTDEC(WORDS(2));                          /* 45H = 69 */
+DO I = 0 TO LAST(NOTE);
+    CALL PUTCH(NOTE(I));                        /* IT'S */
+END;
+CALL PUTDEC(SQUARES(7));                        /* 49 */
+CALL PUTDEC(SIZE(SQUARES));                     /* 8 */
+DO I = 0 TO 2;
+    CALL PRINT(MESSAGES(I));                    /* FIRST MESSAGE, SECOND, THIRD */
+END;
+CALL PUTDEC(TV);                                /* TABLE(1) = 200 */
+TP = TP + 2;
+CALL PUTDEC(TV);                                /* TABLE(2) = 300 */
+THRESHOLD = THRESHOLD + 1;                      /* INITIAL variables can change */
+CALL PUTDEC(THRESHOLD);                         /* 49 */
+CALL PUTDEC(DAYS(3));                           /* WEDNESDAY: 9 */
+END INITS;

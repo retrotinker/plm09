@@ -1,0 +1,5 @@
+T: DO;
+DO;
+DECLARE X BYTE INITIAL (1);
+END;
+END T;

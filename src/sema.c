@@ -25,6 +25,7 @@
 Vec sema_vars;      /* Symbol*: every variable, for the data section */
 Vec sema_procs;     /* Proc*: every procedure, in declaration order */
 int sema_goto_out;  /* some GOTO leaves a procedure */
+int sema_pic;       /* compiling an --os9 module */
 
 static const char *const register_names[] = {
     "A", "B", "D", "X", "Y", "U", "S", "PC", "CC", "DP", "PCR",
@@ -275,6 +276,125 @@ static void check_expr(Expr *e, Scope *scope)
 
 /* ------------------------------------------------------------ declarations */
 
+/* ------------------------------------------------- INITIAL and DATA */
+
+static _Noreturn void bad_initial(Loc loc)
+{
+    error_at(loc, "an initial value must be a number, a string, or a location "
+             "reference plus or minus numbers");
+}
+
+/* is this the operand of a location reference with constant subscripts? */
+static int constant_ref(const Expr *v)
+{
+    if (v->kind == E_INDEX)
+        return v->lhs->kind == E_NUM;
+    if (v->kind == E_MEMBER)
+        return (!v->lhs || v->lhs->kind == E_NUM) && (!v->rhs || v->rhs->kind == E_NUM);
+    return 1;
+}
+
+/* a restricted expression (PL/M-80 manual 6.2.8): a numeric constant or
+   a location reference, followed by + or - numeric constants */
+static void restricted(Expr *e, Scope *scope, InitVal *iv)
+{
+    switch (e->kind) {
+    case E_NUM:
+        iv->value = e->value;
+        return;
+    case E_UNARY:
+        if (e->op != OP_NEG || e->lhs->kind != E_NUM)
+            bad_initial(e->loc);
+        iv->value = (0u - e->lhs->value) & 0xffff;
+        return;
+    case E_ADDR:
+        check_expr(e, scope);
+        if (e->lhs && e->lhs->sym->kind == SYM_VAR) {
+            if (e->lhs->sym->base)
+                error_at(e->loc, "an initial value cannot use the address of a BASED variable");
+            if (!constant_ref(e->lhs))
+                error_at(e->loc, "subscripts in an initial value must be constants");
+        }
+        iv->addr = e;
+        iv->value = 0;
+        return;
+    case E_BINARY: {
+        InitVal r = { 0, 0, NULL };
+        if (e->op != OP_ADD && e->op != OP_SUB)
+            bad_initial(e->loc);
+        restricted(e->lhs, scope, iv);
+        restricted(e->rhs, scope, &r);
+        if (r.addr)
+            bad_initial(e->rhs->loc);
+        iv->value = (e->op == OP_ADD ? iv->value + r.value : iv->value - r.value) & 0xffff;
+        return;
+    }
+    default:
+        bad_initial(e->loc);
+    }
+}
+
+/* take the value for the next scalar of type t from l; 0 when l is used up */
+static int take_value(Symbol *sym, InitList *l, Type t, Scope *scope)
+{
+    if (l->item >= l->items.len)
+        return 0;
+    InitItem *it = l->items.items[l->item];
+    InitVal *iv = xcalloc(1, sizeof *iv);
+    iv->size = t == TY_BYTE ? 1 : 2;
+    if (it->str) {                      /* one character per BYTE, two per ADDRESS */
+        iv->value = (unsigned char)it->str[l->chr++];
+        if (t == TY_ADDRESS && l->chr < it->len)
+            iv->value = iv->value << 8 | (unsigned char)it->str[l->chr++];
+        if (l->chr >= it->len) {
+            l->item++;
+            l->chr = 0;
+        }
+    } else {
+        restricted(it->expr, scope, iv);
+        l->item++;
+        if (t == TY_BYTE && iv->addr)
+            error_at(it->loc, "an address can only initialize an ADDRESS");
+        if (t == TY_BYTE && iv->value > 0xff)
+            error_at(it->loc, "an initial value for a BYTE must be from 0 to 255");
+    }
+    if (iv->addr && sym->init == INIT_DATA && sema_pic)
+        error_at(it->loc, "DATA in an --os9 module cannot hold addresses (use INITIAL)");
+    vec_push(&sym->init_vals, iv);
+    return 1;
+}
+
+/* fill sym's scalars, in storage order, from its value list */
+static void take_values(Symbol *sym, InitList *l, Scope *scope)
+{
+    unsigned n = sym->dim ? (unsigned)sym->dim : 1;
+
+    for (unsigned e = 0; e < n; e++) {
+        if (!sym->st) {
+            if (!take_value(sym, l, sym->type, scope))
+                return;
+            continue;
+        }
+        for (int i = 0; i < sym->st->members.len; i++) {
+            const Member *m = sym->st->members.items[i];
+            for (unsigned k = 0; k < (m->dim ? m->dim : 1); k++)
+                if (!take_value(sym, l, m->type, scope))
+                    return;
+        }
+    }
+}
+
+/* number of scalars of type t that a value list fills, for (*) */
+static unsigned count_values(const InitList *l, Type t)
+{
+    unsigned n = 0;
+    for (int i = 0; i < l->items.len; i++) {
+        const InitItem *it = l->items.items[i];
+        n += it->str ? (t == TY_BYTE ? (unsigned)it->len : (unsigned)(it->len + 1) / 2) : 1;
+    }
+    return n;
+}
+
 /* the base of a BASED variable: a declared ADDRESS scalar, not itself
    based (PL/M-80 manual 3.6.3) */
 static Symbol *resolve_base(VarDecl *v, Scope *scope)
@@ -292,6 +412,18 @@ static Symbol *resolve_base(VarDecl *v, Scope *scope)
 static void declare_var(VarDecl *v, Scope *scope)
 {
     Symbol *sym = scope_lookup_local(scope, v->name);
+
+    if (v->init) {
+        if (v->base)
+            error_at(v->loc, "a BASED variable cannot be initialized");
+        if (sym && sym->is_param)
+            error_at(v->loc, "parameter %s cannot be initialized", v->name);
+        if (v->init->kind == INIT_INITIAL && scope->id != 0)
+            error_at(v->init->loc, "INITIAL is only allowed at the outer level of the main "
+                     "program (use DATA)");
+        if (v->implicit_dim)
+            v->dim = count_values(v->init, v->type);
+    }
 
     if (v->st && !v->st->size) {        /* lay out the members (once if factored) */
         unsigned long off = 0;
@@ -328,6 +460,10 @@ static void declare_var(VarDecl *v, Scope *scope)
     sym->base = base;
     sym->st = v->st;
     v->sym = sym;
+    if (v->init) {
+        sym->init = v->init->kind;
+        take_values(sym, v->init, scope);
+    }
     if (!base)                  /* a BASED variable has no storage of its own */
         vec_push(&sema_vars, sym);
 }
@@ -453,6 +589,12 @@ static void check_block(Block *b, Scope *scope)
             declare_var(d->var, scope);
         else
             declare_proc(d->proc, scope);
+        /* the last name sharing a value list: every value must be used */
+        InitList *l = d->kind == D_VAR ? d->var->init : NULL;
+        Decl *next = i + 1 < b->decls.len ? b->decls.items[i + 1] : NULL;
+        if (l && !(next && next->kind == D_VAR && next->var->init == l) && l->item < l->items.len)
+            error_at(((InitItem *)l->items.items[l->item])->loc,
+                     "more initial values than scalars to initialize");
     }
     /* parameters must be declared before the procedure's statements */
     if (scope->proc && scope->proc->body == b) {
@@ -478,6 +620,8 @@ static void check_stmt(Stmt *s, Scope *scope)
             Expr *t = s->targets.items[i];
             if (t->kind == E_INDEX || t->kind == E_MEMBER) {
                 check_expr(t, scope);
+                if (t->sym->init == INIT_DATA)
+                    error_at(t->loc, "%s is DATA and cannot be assigned", t->name);
                 continue;
             }
             Symbol *sym = t->sym = lookup(scope, t->name, t->loc);
@@ -487,6 +631,8 @@ static void check_stmt(Stmt *s, Scope *scope)
             t->type = sym->type;
             if (t->type == TY_STRUCT)
                 whole_structure(t);
+            if (sym->init == INIT_DATA)
+                error_at(t->loc, "%s is DATA and cannot be assigned", t->name);
         }
         break;
     case S_CALL: {
@@ -516,6 +662,8 @@ static void check_stmt(Stmt *s, Scope *scope)
     case S_ITER: {
         Expr *v = s->var;
         Symbol *sym = v->sym = scope_lookup(scope, v->name);
+        if (sym && sym->init == INIT_DATA)
+            error_at(v->loc, "%s is DATA and cannot be assigned", v->name);
         if (!sym || sym->kind != SYM_VAR || sym->dim || sym->base || sym->st)
             error_at(v->loc, "the index of an iterative DO must be a scalar variable%s",
                      sym ? "" : " (not declared)");

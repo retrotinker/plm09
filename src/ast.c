@@ -200,8 +200,25 @@ static void dump_stmt(const Stmt *s, int depth)
     }
 }
 
+static void dump_init(const InitList *l)
+{
+    printf(" %s (", l->kind == INIT_INITIAL ? "INITIAL" : "DATA");
+    for (int i = 0; i < l->items.len; i++) {
+        const InitItem *it = l->items.items[i];
+        if (i)
+            printf(", ");
+        if (it->str)
+            printf("'%s'", it->str);
+        else
+            dump_expr(it->expr);
+    }
+    putchar(')');
+}
+
 static void dump_block(const Block *b, int depth)
 {
+    const InitList *shown = NULL;   /* a factored list is printed once */
+
     for (int i = 0; i < b->decls.len; i++) {
         const Decl *d = b->decls.items[i];
         indent(depth);
@@ -209,7 +226,9 @@ static void dump_block(const Block *b, int depth)
             printf("DECLARE %s", d->var->name);
             if (d->var->base)
                 printf(" BASED %s", d->var->base);
-            if (d->var->dim)
+            if (d->var->implicit_dim)
+                printf("(*)");
+            else if (d->var->dim)
                 printf("(%u)", d->var->dim);
             printf(" %s", type_name(d->var->type));
             if (d->var->st) {
@@ -223,6 +242,10 @@ static void dump_block(const Block *b, int depth)
                     printf(" %s", type_name(mb->type));
                 }
                 putchar(')');
+            }
+            if (d->var->init && d->var->init != shown) {
+                dump_init(d->var->init);
+                shown = d->var->init;
             }
             putchar('\n');
             continue;

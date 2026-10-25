@@ -79,6 +79,31 @@ typedef struct Stmt {
     struct Proc *proc;      /* S_RETURN: enclosing procedure, set by sema */
 } Stmt;
 
+/* INITIAL (...) / DATA (...) value list, shared by the names of one
+   declaration (the values fill them in order) */
+typedef enum InitKind { INIT_NONE, INIT_INITIAL, INIT_DATA } InitKind;
+
+typedef struct InitItem {
+    Loc loc;
+    char *str;              /* a string item (any length), or NULL */
+    int len;
+    struct Expr *expr;      /* otherwise a restricted expression */
+} InitItem;
+
+typedef struct InitList {
+    InitKind kind;
+    Loc loc;
+    Vec items;              /* InitItem* */
+    int item, chr;          /* sema: next item, and next character of it */
+} InitList;
+
+/* one initialized scalar: a number, or an address (an E_ADDR) + value */
+typedef struct InitVal {
+    unsigned size;          /* 1 (BYTE) or 2 (ADDRESS) */
+    unsigned value;
+    struct Expr *addr;      /* a location reference, or NULL */
+} InitVal;
+
 typedef struct VarDecl {
     char *name;
     Loc loc;
@@ -86,6 +111,8 @@ typedef struct VarDecl {
     unsigned dim;           /* number of elements; 0 for a scalar */
     Loc dim_loc;
     StructType *st;         /* STRUCTURE variable (type TY_STRUCT) */
+    int implicit_dim;       /* (*): dim comes from the INITIAL/DATA list */
+    InitList *init;         /* INITIAL/DATA values, or NULL */
     char *base;             /* BASED variable: name of its base, else NULL */
     Loc base_loc;
     struct Symbol *sym;

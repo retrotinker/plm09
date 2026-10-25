@@ -146,6 +146,7 @@ int main(int argc, char **argv)
         ast_dump(prog);
         return 0;
     }
+    sema_pic = os9;
     sema_program(prog);
 
     CodegenOptions opt = { (unsigned)org, vectors, os9, (unsigned)stack, mod_name };

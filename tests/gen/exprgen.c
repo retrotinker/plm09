@@ -2,8 +2,8 @@
  *
  * usage: exprgen SEED out.plm out.expected
  *
- * Writes a program that sets some BYTE and ADDRESS variables and the arrays
- * BA(4) BYTE and WA(4) ADDRESS, then evaluates random fully parenthesized
+ * Writes a program that sets some BYTE and ADDRESS variables and (with
+ * INITIAL) the arrays BA(4) BYTE and WA(4) ADDRESS and the structures SA, then evaluates random fully parenthesized
  * expressions and prints each result with PUTDEC: assigned to an ADDRESS,
  * assigned to a BYTE, assigned to an array element (printed back with a
  * constant subscript), or as an IF condition (prints 1 or 0).  Array
@@ -354,27 +354,30 @@ int main(int argc, char **argv)
 
     fprintf(plm, "/* exprgen seed %s */\nFUZZ: DO;\n", argv[1]);
     fprintf(plm, "PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;\n");
-    fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
-    fprintf(plm, "DECLARE BA(4) BYTE, WA(4) ADDRESS, IB BYTE, (IW, SUM) ADDRESS;\n");
-    fprintf(plm, "DECLARE P ADDRESS, PB BASED P BYTE, PW BASED P ADDRESS;\n");
-    fprintf(plm, "DECLARE (PBA BASED P) (4) BYTE, (PWA BASED P) (4) ADDRESS;\n");
-    fprintf(plm, "DECLARE SA (3) STRUCTURE (K BYTE, V (2) ADDRESS);\n");
-    for (int i = 0; i < NVARS; i++) {
-        bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
-        wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
-        fprintf(plm, "B%d = %u; W%d = %u;\n", i, bvals[i], i, wvals[i]);
-    }
+    /* the arrays and structures start with INITIAL values */
     for (int i = 0; i < 4; i++) {
         barr[i] = rnd(256);
         warr[i] = rnd(65536);
-        fprintf(plm, "BA(%d) = %u; WA(%d) = %u;\n", i, barr[i], i, warr[i]);
     }
     for (int i = 0; i < 3; i++) {
         sk[i] = rnd(256);
         sv[i][0] = rnd(65536);
         sv[i][1] = rnd(65536);
-        fprintf(plm, "SA(%d).K = %u; SA(%d).V(0) = %u; SA(%d).V(1) = %u;\n",
-                i, sk[i], i, sv[i][0], i, sv[i][1]);
+    }
+    fprintf(plm, "DECLARE (B0, B1, B2, B3, RB) BYTE, (W0, W1, W2, W3, RW) ADDRESS;\n");
+    fprintf(plm, "DECLARE BA(4) BYTE INITIAL (%u, %u, %u, %u);\n", barr[0], barr[1], barr[2], barr[3]);
+    fprintf(plm, "DECLARE WA(4) ADDRESS INITIAL (%u, %u, %u, %u);\n", warr[0], warr[1], warr[2], warr[3]);
+    fprintf(plm, "DECLARE IB BYTE, (IW, SUM) ADDRESS;\n");
+    fprintf(plm, "DECLARE P ADDRESS, PB BASED P BYTE, PW BASED P ADDRESS;\n");
+    fprintf(plm, "DECLARE (PBA BASED P) (4) BYTE, (PWA BASED P) (4) ADDRESS;\n");
+    fprintf(plm, "DECLARE SA (3) STRUCTURE (K BYTE, V (2) ADDRESS) INITIAL (");
+    for (int i = 0; i < 3; i++)
+        fprintf(plm, "%s%u, %u, %u", i ? ", " : "", sk[i], sv[i][0], sv[i][1]);
+    fprintf(plm, ");\n");
+    for (int i = 0; i < NVARS; i++) {
+        bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
+        wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
+        fprintf(plm, "B%d = %u; W%d = %u;\n", i, bvals[i], i, wvals[i]);
     }
     for (int s = 0; s < NSTMTS; s++) {
         Val v;

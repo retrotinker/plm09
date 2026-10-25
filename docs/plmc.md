@@ -38,6 +38,8 @@ include path. Four hooks files come with plmc:
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
 * `LITERALLY` macros, scoped like other declarations.
 * Pointers: `BASED` variables and the address-of (dot) operator `.X`.
+* `INITIAL` and `DATA` initializations, including strings of any length up to
+  255 characters, and `(*)` dimensions.
 * `IF`/`THEN`/`ELSE`, `DO` blocks with their own declarations, `DO WHILE`
   and iterative `DO I = ... TO ... BY ...` loops, `DO CASE`, labels and
   `GOTO`, `HALT`.
@@ -148,9 +150,13 @@ compiles means what PL/M-80 says it means.
 * **Strings:** a one-character string such as `'A'` is a BYTE constant (65).
   A two-character string such as `'AB'` is an ADDRESS constant
   (`'A'`$\times$ 256 + `'B'`). Write a quote character as `''`, as in `''''`.
-  Strings of up to 255 characters are allowed as the body of a `LITERALLY`
-  declaration. Anywhere else, a string longer than two characters is an
-  error.
+  A longer string, up to 255 characters, can't be a number. As in PL/M-80
+  it can be used in three places:
+  * an `INITIAL` or `DATA` list, as in `DECLARE MSG (*) BYTE DATA ('HELLO')`
+  * a constant list, `.('HELLO', 0)`, which gives its address
+  * the text of a `LITERALLY`
+
+  Used as a value anywhere else, it is an error.
 * **Reserved words:** all PL/M-80 reserved words, including ones for features
   plmc doesn't implement, so they can't be used as names: `ADDRESS AND BASED
   BY BYTE CALL CASE DATA DECLARE DISABLE DO ELSE ENABLE END EOF EXTERNAL GO
@@ -185,8 +191,10 @@ DECLARE FLAG BYTE, LIMIT ADDRESS, (LO, HI) BYTE;
 * **Order and scope:** names must be declared before they are used. A name
   declared in an inner block or procedure hides the same name from an outer
   one. Declaring a name twice in the same block is an error.
-* **Initial values:** variables have no initial value. They start with whatever
-  is in memory, which is `$A5` in the simulator so that the mistake shows up.
+* **Initial values:** a variable has no initial value unless it is declared
+  with `INITIAL` or `DATA` (see [INITIAL and DATA]). Otherwise it starts with
+  whatever is in memory, which is `$A5` in the simulator so that the mistake
+  shows up.
 
 ## LITERALLY
 
@@ -278,6 +286,54 @@ DO WHILE I < LENGTH(BUF);
     I = I + 1;
 END;
 ```
+
+## INITIAL and DATA
+
+```
+DECLARE THRESHOLD BYTE INITIAL (48);
+DECLARE (COUNTER, LIMIT, INCR) ADDRESS INITIAL (0, 1024, 2);
+DECLARE GREETING (*) BYTE INITIAL ('HELLO, WORLD', 0);
+DECLARE DAYS (*) BYTE DATA (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31);
+DECLARE MESSAGES (*) ADDRESS INITIAL (.GREETING, .('BYE', 0));
+```
+
+An `INITIAL (...)` or `DATA (...)` list after the type gives a declaration
+initial values (PL/M-80 manual 6.2.9).
+
+**Values.** The list fills the declaration's **scalars in storage order**:
+
+* array elements from 0 up
+* a structure's members in order, including member arrays, and each
+  structure of an array of structures in turn
+* across all the names of a factored declaration: `INITIAL (0, 1024, 2)`
+  above sets COUNTER, LIMIT and INCR
+
+Each value is one of these:
+
+| Value | Fills |
+|---|---|
+| a number, as in `48`, `0FFH` or `'A'` | one scalar; a BYTE needs 0 to 255 |
+| a string, `'HELLO'` | one character per BYTE, two per ADDRESS (`'ABC'` fills two ADDRESS scalars with `'AB'` and `'C'`) |
+| a location reference plus or minus numbers, as in `.BUF`, `.TABLE(2) - 2`, `.('TEXT', 0)` or `.PROC` | one ADDRESS scalar with that address. Subscripts must be constants, the variable must be declared earlier and not BASED |
+
+**Length of the list.** The list may be shorter than the declaration, and
+the remaining scalars are then left uninitialized. It may not be longer.
+
+**Implicit dimensions.** `(*)` in place of a dimension makes the array
+exactly as long as its list. `FAREWELL (*) BYTE INITIAL ('GOODBYE, NOW')` has
+12 elements, and `LENGTH(FAREWELL)` is 12. `(*)` can't be used in a factored
+declaration, for an array of structures, or for a member.
+
+**INITIAL or DATA:**
+
+* **`INITIAL`** gives a variable its value when the program is **loaded**.
+  The program can change it afterwards; it isn't reset on a restart.
+  `INITIAL` is allowed only at the **outer level of the main program**.
+* **`DATA`** stores the values **with the program code**, so they could be
+  in ROM. A DATA variable is a constant table, and the compiler rejects
+  assignments to it. `DATA` is allowed at any level, including inside
+  procedures.
+* **Not allowed:** a BASED variable or a parameter can't be initialized.
 
 ## Structures
 
@@ -661,14 +717,12 @@ These parts of PL/M-80 are recognized and rejected with an error:
 
 | Feature | Error message |
 |---|---|
-| an implicit dimension, `DECLARE X(*) BYTE` (only meaningful with `INITIAL`/`DATA`) | `an implicit dimension '(*)' is not supported` |
 | `LABEL` declarations | `... is not supported` |
-| `INITIAL` and `DATA` | `initialized data is not supported` |
 | `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | `ENABLE`, `DISABLE` | `ENABLE/DISABLE is not supported` |
-| strings of three or more characters | `strings longer than 2 characters are not supported` |
+| a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
 
 Of the PL/M-80 built-in procedures, only `LENGTH`, `LAST` and `SIZE` are
 provided.
@@ -715,7 +769,16 @@ next multiple of 8 plus 1.
 | `a LITERALLY declaration cannot be factored`, `... cannot have a dimension` | `DECLARE (A, B) LITERALLY ...`, `DECLARE A(3) LITERALLY ...` |
 | `expected a string, found ...` | `LITERALLY` not followed by a string |
 | `strings are limited to 255 characters` | a string over 255 characters |
-| `strings longer than 2 characters are not supported` | a long string used as a value |
+| `strings longer than 2 characters are not supported` | a long string used as a value (it can be used in `INITIAL`/`DATA`, `.(...)` and `LITERALLY`) |
+| `INITIAL is only allowed at the outer level of the main program (use DATA)` | `INITIAL` in a procedure or a `DO` block |
+| `more initial values than scalars to initialize` | the list is longer than the declaration |
+| `an initial value for a BYTE must be from 0 to 255`, `an address can only initialize an ADDRESS` | value doesn't fit its scalar |
+| `an initial value must be a number, a string, or a location reference plus or minus numbers` | e.g. `INITIAL (X + 1)` or `INITIAL (2 * 3)` |
+| `subscripts in an initial value must be constants`, `an initial value cannot use the address of a BASED variable` | bad location reference |
+| `an implicit dimension (*) needs INITIAL or DATA`, `(*) cannot be used ...` | `(*)` without a list, factored, for a structure array or member |
+| `X is DATA and cannot be assigned` | assignment to a DATA variable |
+| `a BASED variable cannot be initialized`, `parameter X cannot be initialized` | initialization not allowed there |
+| `DATA in an --os9 module cannot hold addresses (use INITIAL)` | see [OS-9 modules] |
 | `the index of an iterative DO must be a scalar variable` | `DO A = ...` where A is an array, a procedure, BASED, or undeclared |
 | `L is not a label` | `GOTO X` where X is a variable or procedure |
 | `a GOTO out of a procedure must go to a label at the outer level of the main program` | the target is in an enclosing procedure, or in a block of the main program |
@@ -961,6 +1024,18 @@ They use these system calls:
 * **Redirection:** standard input and output can be redirected as usual, for
   example `sum <data >/d0/out`.
 
+**INITIAL and DATA in modules.**
+
+* **DATA** is stored in the module, which is read-only and shared, and is
+  read PC-relative (`V_X,PCR`). Its values can't include addresses, because
+  those depend on where each process's data area is: use `INITIAL` for
+  pointer tables.
+* **INITIAL** variables live in the process's data area, which OS-9 creates
+  fresh for every run. plmc stores their values in the module as a template.
+  At start-up the program copies the template into the data area (the
+  `RT_COPY` runtime routine) and then computes and stores any initial
+  addresses, so they are right wherever the module and data area are.
+
 **Rules for your own OS-9 hooks:**
 
 * **Calls and jumps:** use only relative ones (`BSR`/`LBSR`/`BRA`/`LBRA`, or
@@ -1105,6 +1180,13 @@ listing and simulator traces easy to follow.
     for a variable, and `LEAX P_X,PCR` / `TFR X,D` for a procedure, so the
     code stays position-independent.
   * Constant lists become `FCB` data after the procedures.
+* **INITIAL and DATA:**
+  * In a normal program, INITIAL variables are emitted as `FCB`/`FDB` in
+    the data section, so the values are part of the load image. The rest of
+    a partly initialized variable is `RMB`.
+  * DATA variables are emitted the same way, among the code.
+  * Addresses become label expressions such as `FDB V_TABLE+2`.
+  * In `--os9` modules, see [OS-9 modules].
 * **Structures:**
   * A member reference whose subscripts are all constants is a fixed
     location, `V_X+offset` (structure subscript × structure size + member
@@ -1191,8 +1273,8 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

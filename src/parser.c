@@ -473,6 +473,8 @@ static StructType *parse_members(void)
             error_at(peek()->loc, "a structure member cannot be BASED");
         if (accept(T_LPAREN)) {
             Loc dl = peek()->loc;
+            if (peek_type(0) == T_STAR)
+                error_at(dl, "(*) cannot be used for a structure member");
             if (peek_type(0) != T_NUMBER)
                 unexpected("an array dimension (a number)");
             m->dim = next().value;
@@ -510,10 +512,41 @@ static Type parse_type(StructType **st)
     }
     switch (t->type) {
     case K_LABEL: unsupported(t->loc, "LABEL declarations");
-    case K_DATA:
-    case K_INITIAL: unsupported(t->loc, "initialized data");
     default: unexpected("BYTE, ADDRESS or STRUCTURE");
     }
+}
+
+/* [INITIAL | DATA] '(' value {, value} ')'
+   value := string | restricted expression (checked by sema).  A string that
+   stands alone between commas is taken whole, whatever its length. */
+static InitList *parse_init(void)
+{
+    InitList *l;
+    InitKind kind;
+
+    if (peek_type(0) == K_INITIAL)
+        kind = INIT_INITIAL;
+    else if (peek_type(0) == K_DATA)
+        kind = INIT_DATA;
+    else
+        return NULL;
+    l = xcalloc(1, sizeof *l);
+    l->kind = kind;
+    l->loc = next().loc;
+    expect(T_LPAREN);
+    do {
+        InitItem *it = xcalloc(1, sizeof *it);
+        it->loc = peek()->loc;
+        if (peek_type(0) == T_STRING && (peek_type(1) == T_COMMA || peek_type(1) == T_RPAREN)) {
+            it->str = next().text;
+            it->len = (int)strlen(it->str);
+        } else {
+            it->expr = parse_expr();
+        }
+        vec_push(&l->items, it);
+    } while (accept(T_COMMA));
+    expect(T_RPAREN);
+    return l;
 }
 
 /* a declared name, read raw, and an optional "BASED base" right after it */
@@ -551,10 +584,9 @@ static void parse_declare(Block *b)
         }
         Token *first = names.items[0];
         unsigned dim = 0;
+        int implicit = 0;
         Loc dim_loc = peek()->loc;
-        if (accept(T_LPAREN)) {
-            if (peek_type(0) == T_STAR)
-                unsupported(peek()->loc, "an implicit dimension '(*)'");
+        if (accept(T_LPAREN) && !(implicit = peek_type(0) == T_STAR)) {
             dim_loc = peek()->loc;
             if (peek_type(0) != T_NUMBER)
                 unexpected("an array dimension (a number)");
@@ -562,12 +594,15 @@ static void parse_declare(Block *b)
             if (dim == 0)
                 error_at(dim_loc, "array dimension must be from 1 to 65535");
             expect(T_RPAREN);
+        } else if (implicit) {
+            dim_loc = next().loc;           /* the '*' */
+            expect(T_RPAREN);
         }
         if (peek_type(0) == K_LITERALLY) {
             Loc lit_loc = next().loc;
             if (names.len > 1)
                 error_at(lit_loc, "a LITERALLY declaration cannot be factored");
-            if (dim)
+            if (dim || implicit)
                 error_at(dim_loc, "a LITERALLY declaration cannot have a dimension");
             if (bases.items[0])
                 error_at(lit_loc, "a LITERALLY declaration cannot be BASED");
@@ -578,6 +613,15 @@ static void parse_declare(Block *b)
         }
         StructType *st;
         Type type = parse_type(&st);
+        InitList *init = parse_init();
+        if (implicit) {
+            if (names.len > 1)
+                error_at(dim_loc, "(*) cannot be used in a factored declaration");
+            if (st)
+                error_at(dim_loc, "(*) cannot be used for an array of structures");
+            if (!init)
+                error_at(dim_loc, "an implicit dimension (*) needs INITIAL or DATA");
+        }
         for (int i = 0; i < names.len; i++) {
             Token *id = names.items[i];
             VarDecl *v = xcalloc(1, sizeof *v);
@@ -589,6 +633,8 @@ static void parse_declare(Block *b)
             v->st = st;                 /* factored names share the layout */
             v->dim = dim;
             v->dim_loc = dim_loc;
+            v->implicit_dim = implicit;
+            v->init = init;
             if (bases.items[i]) {
                 Token *base = bases.items[i];
                 v->base = base->text;

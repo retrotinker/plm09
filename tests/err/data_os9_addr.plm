@@ -1,0 +1,4 @@
+/* PLMCARGS: --os9 */
+T: DO;
+DECLARE B BYTE, A ADDRESS DATA (.B);
+END T;

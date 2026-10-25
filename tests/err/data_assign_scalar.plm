@@ -1,0 +1,4 @@
+T: DO;
+DECLARE A BYTE DATA (1);
+A = 3;
+END T;

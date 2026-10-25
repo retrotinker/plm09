@@ -1,0 +1,3 @@
+T: DO;
+DECLARE A(3) BYTE DATA ('ABCD');
+END T;

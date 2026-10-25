@@ -108,6 +108,11 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
   - An unsubscripted `A` means `A(0)`.
   - Arrays can't be parameters.
   - `LENGTH(A)`/`LAST(A)` are folded to constants, BYTE if 255 or less and ADDRESS otherwise (manual 11.1.2), unless the name is declared by the user. `SIZE(X)` is folded to an ADDRESS constant. Until the structures change they were always ADDRESS, which deviated from the manual.
+- INITIAL and DATA (manual 6.2.9):
+  - Value lists (numbers, strings of any length, location reference ± numbers) fill a declaration's scalars in storage order, across factored names. They may be shorter than the declaration but not longer.
+  - `(*)` takes the dimension from the list.
+  - INITIAL is allowed only at the outer level of the main program; DATA anywhere, and it can't be assigned.
+  - BASED variables and parameters can't be initialized.
 - Structures (manual 3.5, 6.2.7):
   - `STRUCTURE (m [(dim)] BYTE|ADDRESS, ...)` is a type, usable with dimensions, factoring and BASED.
   - Members can't be factored, BASED or structures, and are laid out contiguously in order.
@@ -175,8 +180,7 @@ Operators group left to right.
 - **Mixed lookahead:** `NAME: PROC` works with `PROC LITERALLY 'PROCEDURE'`, because the name and ':' are checked raw and only the third token is expanded.
 
 **Rejected features.** Every unimplemented PL/M feature produces "... is not supported" rather than being misparsed:
-- `(*)` dimensions, LABEL declarations
-- INITIAL/DATA
+- LABEL declarations
 - REENTRANT, INTERRUPT, PUBLIC
 - PLUS/MINUS, `:=`, ENABLE/DISABLE
 
@@ -211,6 +215,15 @@ The full list of messages is in `plmc.md`.
   - `check_goto()` resolves the target through normal scope lookup, so labels in nested blocks are invisible. If the label's owner differs from the current procedure, it must be in scope 0 (the main program's outer level). Such a jump sets `Stmt.goto_out` and `sema_goto_out`.
   - A label/declaration clash is reported at the label.
 - **Codegen:** labels are emitted before their statement's code, and a GOTO is `LBRA`. With `sema_goto_out`, `PLM_MAIN` starts with `STS RT_MAINS`, and a `goto_out` GOTO does `LDS RT_MAINS` first.
+
+**INITIAL and DATA:**
+- The parser attaches one `InitList` (items, plus a cursor) to all names of a declaration.
+- Sema's `take_values()` walks each variable's scalars in storage order and builds `Symbol.init_vals`: numbers, or an `E_ADDR` plus an addend. A string supplies one character per BYTE and two per ADDRESS; `restricted()` checks the manual's restricted expressions. Leftover items are an error after the last name of the list.
+- Codegen in absolute mode: INITIAL becomes `FCB`/`FDB` in the data section and DATA the same among the code, with addresses as label expressions (`addr_text`).
+- Codegen with `--os9`:
+  - DATA is in the module, padded with `ZMB`, and reached as `,PCR` (`var_ref` checks `in_code()`). It may not contain addresses.
+  - INITIAL gets a module template, which a `PLM_MAIN` prologue copies with `RT_COPY` (assembled only when `RT_NEED_COPY` is defined). The prologue then computes each address with `gen_addr` and stores it.
+- Constant lists are emitted last, because initial values can register them.
 
 **Structures:**
 - The parser builds `StructType`/`Member` (`parse_members`); `member_suffix()` turns `NAME[(i)].M[(j)]` into `E_MEMBER`.
@@ -455,11 +468,12 @@ How the nitros9 suite works:
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
 - LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
 - BASED variables and the dot operator: the run test `based`, pointer statements in the fuzz generator, a parse golden and error tests
+- INITIAL and DATA, `(*)`, and strings of any length in value lists: the run test `initial`, INITIAL set-up in the fuzz generator, a parse golden and error tests
 - structures and `SIZE`, and BYTE/ADDRESS typing for `LENGTH`/`LAST`: the run test `structs`, structure members in the fuzz generator, a parse golden and error tests
 - labels and GOTO: the run test `goto` (including 10000 GOTOs out of three nested calls, which crashes if the stack isn't reset), a parse golden and error tests
 
 ## Known gaps
-- **Language:** INITIAL/DATA (and so `(*)` dimensions), LABEL declarations (and so PUBLIC/EXTERNAL labels), REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** LABEL declarations (and so PUBLIC/EXTERNAL labels), REENTRANT, INTERRUPT, PUBLIC, PLUS/MINUS, `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).
