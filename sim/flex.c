@@ -14,7 +14,10 @@
 
 enum {
     FLEX_STACK = 0xc07f,        /* FLEX's stack pointer for commands */
-    FLEX_LO = 0xc080,           /* FLEX itself: no writes, no code */
+    FLEX_LO = 0xc700,           /* FLEX itself: no writes, no code (below it
+                                   are FLEX's stack and line buffer, and the
+                                   utility command area, which belongs to
+                                   the running command) */
     FLEX_HI = 0xe000,
     MEMEND = 0xcc2b,            /* end of user memory */
     LASTTRM = 0xcc11,           /* Last Terminator */
@@ -66,6 +69,7 @@ int flex_load(Cpu *c, const char *path)
     if (!have_xfer)
         return fail(path, "no transfer address: not a FLEX command");
 
+    memset(c->mem + 0xcc00, 0, 0x100);         /* DOS variables: no files open */
     c->mem[MEMEND] = 0xbf;
     c->mem[MEMEND + 1] = 0xff;
     c->pc = xfer;

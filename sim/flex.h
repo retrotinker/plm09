@@ -7,9 +7,10 @@
 /* Load the FLEX binary (.CMD) file `path`: $02 records (address, count,
    data) and a $16 transfer address record, which is required.  Set up
    the machine as FLEX runs a command: S = $C07F, PC = transfer address,
-   memory end ($CC2B) = $BFFF; emulate the DOS entry points at $CD00-$CD4E
-   (flex_call); and stop the program with an error if it writes to FLEX's
-   memory above its stack ($C080-$DFFF) or runs code there.  Returns 0, or
+   DOS variables ($CC00-$CCFF) zero (no files open) but memory end ($CC2B)
+   = $BFFF; emulate the DOS entry points at $CD00-$CD4E (flex_call); and
+   stop the program with an error if it writes to FLEX's memory above the
+   utility command area ($C700-$DFFF) or runs code there.  Returns 0, or
    -1 after printing an error. */
 int flex_load(Cpu *c, const char *path);
 

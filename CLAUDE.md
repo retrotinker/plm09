@@ -14,8 +14,8 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
 - `make` also builds `build/srec2flex` (from `tools/srec2flex.c`), which turns S-records into a FLEX `.CMD` binary.
-- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, fuzz.
-- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, or `make fuzz-test N=500`.
+- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, fuzz.
+- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
 - `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
@@ -38,7 +38,8 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
   - `-load` doesn't put a `.BIN` in RAM, and `-run` starts it without going through BASIC's `EXEC`. That's why the suite builds a disk image with `decb` and types `LOADM`.
   - `tools/coco_screen.py` finds RAM in the snapshot by the program's first bytes (last occurrence, because Disk BASIC's buffer holds a copy) instead of parsing the format.
 - **os9:** reuses `tests/run/*.plm` (except those with a `/* NOT-OS9: ... */` line, such as `interrupt`) plus fuzz seeds, built with `--os9 --memory 128` and run by `sim6809 --os9` at two placements (`PLMCARGS` tests are only built and checked, not run). It also fails on `JSR`/`JMP`, a variable operand without `,U`, or an `M_X` (AT a number) operand with an index in the generated `.asm`. Sim tests named `os9_*.asm` are assembled with `-f os9` and run with `--os9`.
-- **flex:** `tests/run/*.plm` (without PLMCARGS) plus fuzz seeds, built with `runtime/flex`, converted by `srec2flex` and run by `sim6809 --flex` (which emulates FLEX's `$CD00` entry points, takes WARMS's B as exit status, and stops on writes to `$C080`–`$DFFF`). Sim tests named `flex_*.asm` are converted the same way and run with `--flex`.
+- **flex:** `tests/run/*.plm` (without PLMCARGS) plus fuzz seeds, built with `runtime/flex`, converted by `srec2flex` and run by `sim6809 --flex` (which emulates FLEX's `$CD00` entry points, takes WARMS's B as exit status, and stops on writes to `$C700`–`$DFFF`).
+- **dragonflex:** the run programs (without PLMCARGS or `.in`) on real FLEX: Compusense FLEX for the Dragon 64 (`$FLEX_DISK`, default `~/coco/flex/FLEX_1.3.2.VDK`; skipped if missing) under XRoar `dragon64`. `tools/flexdisk.py` puts `Tnn.CMD` and command files on a copy; STARTUP `EXEC`s `P,MARK` / `P,Tnn` lines (printer output, XRoar `-lp-file`) and `DONE` (`tests/flex/done.asm` at $C600, `-trap pc=0xC600`). Pitfalls, all in DESIGN.md: `-type` doesn't reach FLEX's keyboard driver, so the boot chain (track 1 sector 1) is patched to skip the date prompt; `O` can't run from EXEC and `I` cancels `P`; EXEC parks itself at the top of user RAM (hence the FLEX hooks' stack at $C700); snapshot RAM offsets vary. Sim tests named `flex_*.asm` are converted the same way and run with `--flex`.
 - **nitros9:** the same programs on NitrOS-9 Level 2 under XRoar (`coco3`). It needs `$NITROS9_DISK` (default `~/coco/nitros9.os9`) and `$COCO3_ROM` (default `/usr/share/mame/roms/coco3.rom`), and skips if they're missing.
   - Each module is named after its file (`--name t<name>`), because a module named like an existing command (ECHO) runs that command instead.
   - The startup script needs `-x` to survive non-zero exit statuses.

@@ -1464,12 +1464,12 @@ Copy `HELLO.CMD` to a FLEX disk and type `HELLO` at the `+++` prompt.
   | Hook | FLEX routine |
   |---|---|
   | `PUTCH` | `PUTCHR` (`$CD18`); LF (10) as `PCRLF` (`$CD24`), which also honors TTYSET's nulls and paging |
-  | `GETCH` | `GETCHR` (`$CD15`): waits for a key, RETURN gives 13; most terminals echo it |
+  | `GETCH` | `GETCHR` (`$CD15`): waits for a key, RETURN gives 13; most terminals echo it. When input is redirected to a file (FLEX's `I` command), the next byte is read with FMS (`$D406`) instead, so the end of the file gives 0 rather than FLEX's `READ PAST END OF FILE` error, which would end the program |
   | `PUTDEC` | `OUTDEC` (`$CD39`) and `PCRLF` |
   | `EXIT`, end of program, `HALT` | `WARMS` (`$CD03`), back to the `+++` prompt; FLEX has no exit status |
   | `RT_PORTS` (`INPUT`/`OUTPUT`) | `$E000`, the I/O area of SWTPC and Gimix machines |
   | `RT_CYCLES100` (`TIME`) | 100, a 1 MHz CPU |
-  | stack | `RT_STACKTOP` = `$C000`, the top of user RAM, just below FLEX's own stack |
+  | stack | `RT_STACKTOP` = `$C700`, the top of FLEX's utility command area (`$C100`--`$C6FF`), which belongs to the running command. Not the top of user RAM: `EXEC`, print spoolers and other resident tools put themselves there (lowering the memory end at `$CC2B`), and a stack there would overwrite them |
 
   `RT_PORTS`, `RT_CYCLES100` and `RT_STACKTOP` depend on the machine; give
   yours to lwasm with `-D`, for example `-DRT_CYCLES100=200` for 2 MHz.
@@ -1478,17 +1478,38 @@ Copy `HELLO.CMD` to a FLEX disk and type `HELLO` at the `+++` prompt.
   `$16` transfer address record from the S9 entry address, which makes it
   a command. lwasm has no FLEX output format of its own.
 * **Load address:** FLEX's user RAM is `$0000`--`$BFFF`, so the default
-  `--org` (`$0100`) is fine. With `--org C100H` a small program runs in the
-  utility command area instead, as FLEX's own commands do (it must end
-  below `$C700`). The program's variables and `MEMORY` follow the code, and
-  must stay below the stack.
+  `--org` (`$0100`) is fine. The program, its variables and `MEMORY` must
+  stay below the memory end at `$CC2B` (`$BFFF` with nothing resident).
+  FLEX's own commands run in the utility command area (`--org C100H`); a
+  PL/M program can too, but then move the stack (`-DRT_STACKTOP=...`).
 * **Not provided:** `PLM_SETINT`, since where a FLEX machine's interrupt
   vectors are, and what its drivers use them for, depends on the machine.
   A program with INTERRUPT procedures fails to assemble until you add one.
 
-The `flex` test suite runs every `run` program and 25 fuzz programs as
-commands in `sim6809 --flex`, which emulates FLEX's entry points and stops
-a program that writes into FLEX's memory.
+Two test suites check these hooks:
+
+* **`flex`** runs every `run` program and 25 fuzz programs as commands in
+  `sim6809 --flex`, which emulates FLEX's entry points and stops a program
+  that writes into FLEX's memory.
+* **`dragonflex`** runs the `run` programs on real FLEX: Compusense FLEX
+  for the Dragon 64 (System v1.3.2, whose `FLEX_1.3.2.VDK` matches MAME's
+  `dragon_flex` software list), booted from DragonDOS under XRoar.
+  * The disk image comes from `$FLEX_DISK` (default
+    `~/coco/flex/FLEX_1.3.2.VDK`); the suite is skipped without it or
+    XRoar. `tools/flexdisk.py` lists, reads and writes files on FLEX disk
+    images.
+  * On a copy of the disk, each program becomes `Tnn.CMD`, and STARTUP
+    `EXEC`s a command file that runs `P,MARK` (a separator line) and
+    `P,Tnn` for each, then `DONE`. `P` sends a command's output to the
+    printer, which XRoar appends to a file (`-lp-file`); `DONE`, at
+    `$C600`, is where XRoar traps and quits.
+  * This FLEX asks for the date when it boots, and XRoar's `-type` only
+    reaches BASIC's keyboard routine, not FLEX's driver. So the copy's boot
+    image (the FLEX that DragonDOS loads, from track 1 sector 1) is patched
+    not to ask: its `JSR` to the prompt becomes `NOP`s.
+  * Programs that read input are skipped: FLEX's `I` command resets the
+    printer output that `P` set up. FLEX has no exit status, so statuses
+    aren't compared.
 
 # Generated code
 
@@ -1751,6 +1772,7 @@ group of instructions.
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
+| `dragonflex` | the `run` programs (except those needing compiler options or input) as commands on real FLEX: Compusense FLEX for the Dragon 64, booted under XRoar, with each program's printer output compared. Uses `$FLEX_DISK`; skipped if it or XRoar is missing. See [FLEX] |
 | `flex` | every `run` program (except those needing compiler options) plus 25 fuzz programs as FLEX commands (`srec2flex`), run by `sim6809 --flex`, which emulates the FLEX DOS entry points and protects FLEX's memory |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |

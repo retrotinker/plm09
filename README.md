@@ -256,8 +256,9 @@ build/srec2flex sum.s19 SUM.CMD
 
 * **Running it:** copy `SUM.CMD` to a FLEX disk and type `SUM`. `build/sim6809 --flex SUM.CMD` runs it in the simulator, which emulates FLEX's DOS entry points.
 * **Any FLEX 9 system:** the hooks only use FLEX's jump table at `$CD00` (PUTCHR, PCRLF, GETCHR, OUTDEC, WARMS). The program returns to FLEX when it ends.
-* **Machine-dependent values:** the stack top (`RT_STACKTOP`, default `$C000`), the I/O ports (`RT_PORTS`, `$E000`) and the clock for `TIME` (`RT_CYCLES100`, 1 MHz) can be set with lwasm's `-D`.
+* **Machine-dependent values:** the stack top (`RT_STACKTOP`, default `$C700`, the top of FLEX's utility command area), the I/O ports (`RT_PORTS`, `$E000`) and the clock for `TIME` (`RT_CYCLES100`, 1 MHz) can be set with lwasm's `-D`.
 * **`srec2flex`** converts lwasm's S-records to a FLEX binary (`.CMD`), using the S9 entry address as the transfer address.
+* **Tested on real FLEX:** the `dragonflex` suite runs the test programs on Compusense FLEX for the Dragon 64 under XRoar (`$FLEX_DISK`, default `~/coco/flex/FLEX_1.3.2.VDK`).
 
 ## Generated code
 

@@ -3,6 +3,7 @@
 #   run_tests.sh sim|lex|parse|err|run|coco|xroar   run one suite
 #   run_tests.sh os9 [N]                   run tests + N fuzz seeds as OS-9 modules
 #   run_tests.sh flex [N]                  run tests + N fuzz seeds as FLEX commands
+#   run_tests.sh dragonflex                run tests on real FLEX (Dragon 64, XRoar)
 #   run_tests.sh fuzz [N]                  random expression tests
 #   run_tests.sh one FILE.plm              compile, assemble, simulate one program
 set -u
@@ -353,6 +354,73 @@ suite_flex() {
     done
 }
 
+# The run tests as commands on real FLEX: Compusense FLEX for the Dragon 64
+# ($FLEX_DISK), booted from DragonDOS under XRoar.  The programs are put on
+# a copy of the disk with tools/flexdisk.py, and the STARTUP file EXECs a
+# command file that runs each one as "P,Tnn" (output to the printer, which
+# XRoar appends to a file), after "P,MARK" (a separator line), then DONE
+# (tests/flex/done.asm at $C600, where XRoar traps and quits).  The copy's
+# boot image (the FLEX that DragonDOS loads, at track 1 sector 1) is
+# patched not to ask for the date: XRoar's -type only reaches BASIC, not
+# FLEX's keyboard driver.  Tests with PLMCARGS or an input file are skipped
+# (FLEX's I command resets P's printer output), and FLEX has no exit status.
+suite_dragonflex() {
+    local disk=${FLEX_DISK:-$HOME/coco/flex/FLEX_1.3.2.VDK}
+    local img=$OUT/dragonflex.vdk lp=$OUT/dragonflex.lp list=$OUT/dragonflex.exec
+    local fd=(python3 -I "$ROOT/tools/flexdisk.py" "$img") f name base n=0 names=()
+    command -v xroar >/dev/null || { echo "dragonflex: xroar not found (skipped)"; exit 0; }
+    [ -r "$disk" ] || { echo "dragonflex: no Dragon FLEX disk image at $disk (set FLEX_DISK; skipped)"; exit 0; }
+    cp "$disk" "$img"
+    # FLEX's cold start calls its date prompt at $CA02 (JSR $CAAC): skip it
+    if ! "${fd[@]}" patch @1/1 CA02 BDCAAC 121212; then
+        bad dragonflex "this FLEX boot image can't be patched (Compusense FLEX 1.2/1.3 expected)"; return
+    fi
+    for prog in done mark; do
+        if ! lwasm -9 -f srec -o "$OUT/dragonflex-$prog.s19" "$ROOT/tests/flex/$prog.asm" 2>"$OUT/dragonflex-$prog.err" ||
+           ! "$BUILD/srec2flex" "$OUT/dragonflex-$prog.s19" "$OUT/dragonflex-$prog.cmd" ||
+           ! "${fd[@]}" put "$OUT/dragonflex-$prog.cmd" "${prog^^}.CMD"; then
+            bad dragonflex "cannot build tests/flex/$prog.asm"; return
+        fi
+    done
+    : >"$list"
+    for f in "$ROOT"/tests/run/*.plm; do
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        [ -e "${f%.plm}.in" ] && continue
+        name=$(basename "$f" .plm)
+        base=$OUT/dragonflex-$name
+        n=$((n + 1))
+        flex_build "$f" "$base" || { bad "dragonflex/$name" "build failed"; continue; }
+        "${fd[@]}" put "$base.cmd" "$(printf 'T%02d.CMD' $n)" || { bad "dragonflex/$name" "no room on the disk"; continue; }
+        printf 'P,MARK\nP,T%02d\n' $n >>"$list"
+        names+=("$name")
+    done
+    printf 'DONE\n' >>"$list"
+    printf 'EXEC TESTS\n' >"$OUT/dragonflex.startup"
+    "${fd[@]}" puttext "$list" TESTS.TXT && "${fd[@]}" puttext "$OUT/dragonflex.startup" STARTUP.TXT ||
+        { bad dragonflex "cannot write the command files"; return; }
+
+    # RETURN dismisses the Dragon 64's PRESS ANY KEY; -timeout (emulated
+    # seconds) only guards against a hang
+    rm -f "$lp"
+    timeout 900 xroar -q -machine dragon64 -ui null -ao null -no-ratelimit \
+        -load-fd0 "$img" -type '\rBOOT\r' -lp-file "$lp" \
+        -trap pc=0xC600 -trap-timeout 1 -timeout $((60 + 30 * n)) >/dev/null 2>&1
+    # the printer output, split at the MARK lines; NUL (TTYSET's padding)
+    # and LF dropped, CR made a newline
+    python3 -I - "$lp" "$OUT/dragonflex-" "${names[@]}" <<'PY'
+import sys
+data = open(sys.argv[1], 'rb').read() if __import__('os').path.exists(sys.argv[1]) else b''
+text = data.replace(b'\0', b'').replace(b'\n', b'').replace(b'\r', b'\n').decode('latin-1')
+parts = text.split('=== plm09 ===\n')[1:]
+for i, name in enumerate(sys.argv[3:]):
+    with open(sys.argv[2] + name + '.out', 'w') as f:
+        f.write(parts[i] if i < len(parts) else '')
+PY
+    for name in "${names[@]}"; do
+        check_diff "dragonflex/$name" "$OUT/dragonflex-$name.out" "$ROOT/tests/run/$name.out" && ok
+    done
+}
+
 # The run tests as OS-9 modules on real NitrOS-9: all of them are put in
 # CMDS on a copy of a bootable NitrOS-9 Level 2 disk ($NITROS9_DISK), whose
 # startup script runs each one with output redirected to a file; XRoar boots
@@ -459,6 +527,7 @@ case ${1:-} in
     os9)   suite_os9 "${2:-25}" ;;
     nitros9) suite_nitros9 ;;
     flex)  suite_flex "${2:-25}" ;;
+    dragonflex) suite_dragonflex ;;
     xroar) suite_xroar ;;
     one)
         act=$OUT/one.stdout

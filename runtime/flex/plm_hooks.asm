@@ -10,8 +10,11 @@
 ;
 ; Only FLEX's documented DOS entry points ($CD00 jump table) are used, so
 ; the hooks work on any FLEX 9 system.  User RAM is $0000-$BFFF: the
-; default load address $0100 is fine, and the stack is put just below
-; FLEX's own, at the top of user RAM.  The program returns to FLEX through
+; default load address $0100 is fine.  The stack is in FLEX's utility
+; command area ($C100-$C6FF), which belongs to the command that is running
+; (this program): not at the top of user RAM, where EXEC, print spoolers
+; and other resident tools put themselves (lowering the memory end at
+; $CC2B).  The program returns to FLEX through
 ; WARMS when it ends, on HALT, or on EXIT; FLEX has no exit status (B is
 ; passed on, which sim6809 --flex uses as its exit status).
 ;
@@ -20,7 +23,7 @@
 ; may be changed.  FLEX's routines keep Y and U.
 
 	IFNDEF	RT_STACKTOP
-RT_STACKTOP	EQU	$C000		; below FLEX's stack ($C000-$C07F)
+RT_STACKTOP	EQU	$C700		; the top of the utility command area
 	ENDC
 	IFNDEF	RT_PORTS
 RT_PORTS	EQU	$E000		; INPUT/OUTPUT: the I/O area of SWTPC and
@@ -34,6 +37,8 @@ FLEX_GETCHR	EQU	$CD15		; A = a character from the terminal (or file)
 FLEX_PUTCHR	EQU	$CD18		; output A, honoring TTYSET
 FLEX_PCRLF	EQU	$CD24		; new line, honoring TTYSET (pause, nulls)
 FLEX_OUTDEC	EQU	$CD39		; print the 16-bit number at X in decimal
+FLEX_INFCB	EQU	$CC26		; File Input Address: FCB of redirected input
+FLEX_FMS	EQU	$D406		; File Management System call
 
 ; end of program; back to FLEX
 PLM_EXIT	JMP	FLEX_WARMS
@@ -52,8 +57,20 @@ PUTCH1	TFR	B,A
 	JMP	FLEX_PUTCHR
 
 ; GETCH: PROCEDURE BYTE EXTERNAL;   waits for a key (RETURN gives 13).
-; Most FLEX terminals echo what is typed.
-GETCH	JSR	FLEX_GETCHR
+; Most FLEX terminals echo what is typed.  When input comes from a file
+; (FLEX's I command), the next byte is read through FMS instead, so the
+; end of the file gives 0, as GETCH does elsewhere, rather than FLEX's
+; "READ PAST END OF FILE" error, which would end the program.
+GETCH	LDX	FLEX_INFCB
+	BEQ	GETCH2
+	CLR	,X		; FMS function 0: read the next byte
+	JSR	FLEX_FMS
+	BEQ	GETCH1
+	CLRA			; end of file (or an error)
+GETCH1	TFR	A,B
+	CLRA
+	RTS
+GETCH2	JSR	FLEX_GETCHR
 	TFR	A,B
 	CLRA
 	RTS

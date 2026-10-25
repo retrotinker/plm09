@@ -50,7 +50,7 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 | Target | Effect |
 |---|---|
 | `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra -Werror` |
-| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, fuzz |
+| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, fuzz |
 | `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |
 | `flex-test FLEXN=25` | the flex suite, with FLEXN fuzz seeds |
@@ -401,7 +401,7 @@ All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
   - PUTCH uses PUTCHR ($CD18), sending LF as PCRLF ($CD24); PUTDEC uses OUTDEC ($CD39) on the number pushed on the stack, then PCRLF
   - GETCH uses GETCHR ($CD15)
   - EXIT, end of program and HALT jump to WARMS ($CD03); FLEX has no exit status, B is passed on (sim6809 --flex uses it)
-  - stack at `RT_STACKTOP` = $C000, below FLEX's stack; `RT_PORTS` ($E000) and `RT_CYCLES100` (100) are machine-dependent, all three overridable with `-D`
+  - stack at `RT_STACKTOP` = $C700, the top of the utility command area (the top of user RAM is where EXEC and spoolers park themselves, lowering MEMEND); `RT_PORTS` ($E000) and `RT_CYCLES100` (100) are machine-dependent, all three overridable with `-D`
   - no PLM_SETINT (interrupt vectors depend on the machine)
   - a FLEX binary is made from lwasm's S-records by `srec2flex` ($02 records of up to 252 bytes, $16 transfer address from S9), since lwasm has no FLEX format
 - **example:**
@@ -424,7 +424,7 @@ All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 - `-t` prints a trace with disassembly to stderr.
 - `--io BASE` moves the MMIO block, and `--entry ADDR` overrides the S9 entry address.
 - S-records: S1/S9 are loaded, S0/S5 ignored, checksums verified. If several S9 records are present, the last one wins, which lets two files be combined.
-- `--flex` loads a FLEX binary and emulates the DOS entry points through `Cpu.pc_hook` (`flex_call()`, called before each instruction): the terminal routines, OUTDEC/OUTHEX/OUTADR, CLASS, ADDBX, and WARMS, which stops with B as the exit status. Writes to $C080–$DFFF (`Cpu.ro_lo`/`ro_hi`) and code run there other than at an entry point stop the program.
+- `--flex` loads a FLEX binary and emulates the DOS entry points through `Cpu.pc_hook` (`flex_call()`, called before each instruction): the terminal routines, OUTDEC/OUTHEX/OUTADR, CLASS, ADDBX, and WARMS, which stops with B as the exit status. Writes to $C700–$DFFF (`Cpu.ro_lo`/`ro_hi`) and code run there other than at an entry point stop the program.
 
 **MMIO** (base $FF00, configurable)
 | Address | Access | Meaning |
@@ -456,6 +456,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
+| dragonflex | the run programs without PLMCARGS or input on real FLEX (Compusense FLEX 1.3.2 for the Dragon 64, `$FLEX_DISK`) under XRoar, outputs captured from the printer port; skipped if XRoar or the disk is missing |
 | flex | every run program without PLMCARGS and 25 fuzz programs, built with the FLEX hooks, converted by `srec2flex` and run by `sim6809 --flex`; FLEX's memory is protected |
 | nitros9 | the same run programs on real NitrOS-9 Level 2, booted from `$NITROS9_DISK` on XRoar's `coco3` with `$COCO3_ROM`; outputs compared, exit statuses not checked; skipped if any prerequisite is missing |
 
@@ -474,6 +475,15 @@ How the nitros9 suite works:
 - The `startup` script starts with `-x`, so that `exit.plm`'s status 42 doesn't abort it. It then runs `t<name> </dd/<name>.in >/dd/<name>.out` for each program, with an empty file as stdin for programs that have no `.in`.
 - The script ends with `tdone` (`tests/nitros9/done.asm`), which reads the unused I/O address `$FF6A`. XRoar traps on that read (`-trap read=0xFF6A`) and quits, so no time budget has to be guessed. XRoar's `-timeout` counts emulated seconds and only guards against hangs.
 - XRoar writes the disk back, and `os9 copy -l` extracts each output with its CRs turned into newlines.
+
+How the dragonflex suite works (each point was found the hard way):
+- **The image:** Compusense FLEX System v1.3.2 for the Dragon 64, from the Dragon Archive (worldofdragon.org), SHA-1 `c812587d…`, the same as MAME's `dragon_flex` software list. It is a VDK (40 tracks × 18 sectors of 256 bytes) whose banner says FLEX 1.2.0. `tools/flexdisk.py` reads and writes FLEX file systems: the SIR at track 0 sector 3, the directory from sector 5, sectors linked through their first two bytes, and the free chain.
+- **Booting:** XRoar's `dragon64` with DragonDOS (`-type '\rBOOT\r'`; the RETURN dismisses the Dragon 64's PRESS ANY KEY). DragonDOS runs the "OS" boot code in track 0 sector 3, which loads FLEX from a chain at track 1 sector 1, not from FLEX.SYS.
+- **The date prompt:** FLEX's cold start calls a date routine ($CAAC, from $CA02) that reads a line with FLEX's own keyboard driver. XRoar's `-type` intercepts the BASIC ROM's keyboard routine, so it can't answer; XRoar's GDB target could, but only with rate limiting (with `-no-ratelimit` the emulation thread starves the GDB thread). The suite instead patches the boot chain's `JSR $CAAC` to NOPs (`flexdisk.py patch @1/1 CA02 BDCAAC 121212`, which checks the old bytes).
+- **The screen** is a 256×192 graphics screen at $E600, which isn't practical to read. Output goes to the printer instead: `P,command` (PRINT.SYS drives the parallel port), which XRoar appends to a file with `-lp-file`.
+- **Sequencing:** `O` and `P` pass the rest of the command line to the command they run, so commands can't share a line. STARTUP `EXEC`s a command file instead. `O` (output to a file) can't run from `EXEC` ("THE REQUESTED FILE IS IN USE"); `P` can. EXEC moves itself to the top of user memory and lowers the memory end ($CC2B), which is why the hooks' stack is in the utility command area and MARK and DONE run there ($C100, $C600).
+- **Input:** `I,file,command` works with the hooks' FMS path in GETCH (end of file gives 0), but `I` resets the output vectors, so `P` no longer prints; programs with a `.in` file are skipped.
+- **Debugging:** an XRoar snapshot holds the 64K RAM at a small, varying offset (about 530 bytes); find it from a known byte pattern at a known address, not from the jump table, which also has a copy in low RAM after booting.
 
 ## Milestones
 | # | Milestone | Verification | Status |
@@ -520,7 +530,7 @@ How the nitros9 suite works:
 - **Language:** PUBLIC (other than on labels), `:=`, are not supported. TIME's timing is only checked on an emulated CoCo; sim6809 has no cycle counts. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
-- **FLEX:** the FLEX hooks are only tested in sim6809's emulation of FLEX's entry points, not on a real FLEX system.
+- **FLEX:** real FLEX is only Compusense FLEX for the Dragon 64 (emulated); the FMS path of GETCH (input from a file) was checked by hand with an XRoar trace, not by the suite.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).
 - **OS-9:**
   - Modules are tested on NitrOS-9 Level 2 only (emulated CoCo 3), not on Level 1 or Microware OS-9.
