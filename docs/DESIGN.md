@@ -108,6 +108,7 @@ sim6809 t.s19 < t.in          # /dev/null if there is no .in file
   - An unsubscripted `A` means `A(0)`.
   - Arrays can't be parameters.
   - `LENGTH(A)`/`LAST(A)` are folded to constants, BYTE if 255 or less and ADDRESS otherwise (manual 11.1.2), unless the name is declared by the user. `SIZE(X)` is folded to an ADDRESS constant. Until the structures change they were always ADDRESS, which deviated from the manual.
+  - `HIGH`, `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL`, `ROR` (manual 11.1.3–11.1.4), also only where the name isn't declared, become `E_BUILTIN` (`check_value_builtin`) and are compiled inline by `gen_builtin`, so no hooks or runtime routines are involved. A count of 0 (undefined in PL/M-80) leaves the pattern unchanged.
 - INITIAL and DATA (manual 6.2.9):
   - Value lists (numbers, strings of any length, location reference ± numbers) fill a declaration's scalars in storage order, across factored names. They may be shorter than the declaration but not longer.
   - `(*)` takes the dimension from the list.
@@ -496,10 +497,11 @@ How the nitros9 suite works:
 - INTERRUPT, ENABLE and DISABLE, with IRQ/FIRQ/NMI and a timer in sim6809: the sim test `interrupts`, the run test `interrupt`, the coco tests `interrupt` (CoCo hooks against the fake ROM) and `vsync` (60 Hz IRQs on XRoar), a parse golden and error tests
 - LABEL declarations: the run test `labels` (declared labels in the program, a procedure and a DO block, an inner implicit label hiding a declared one, a PUBLIC label, and an EXTERNAL label naming the hooks' `EXIT`), a parse golden and error tests
 - PLUS and MINUS: the run test `carry` (32- and 24-bit arithmetic, what changes the carry, evaluation order), 32-bit counting under interrupts in `interrupt`, carry statements in the fuzz generator, a parse golden and error tests
+- HIGH, LOW, DOUBLE, SHL, SHR, ROL, ROR: the run test `builtins`, the coco test `builtins` (also on XRoar), built-ins in the fuzz generator's expressions, a parse golden and error tests
 - REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
 
 ## Known gaps
-- **Language:** PUBLIC (other than on labels), `:=`, and built-ins other than LENGTH/LAST/SIZE (HIGH, LOW, SHL, ...) are not supported. Arrays are one-dimensional and can't be parameters.
+- **Language:** PUBLIC (other than on labels), `:=`, and the built-ins other than LENGTH/LAST/SIZE/HIGH/LOW/DOUBLE/SHL/SHR/ROL/ROR (MOVE, TIME, SCL, CARRY, ...) are not supported. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **Example hooks:** the ACIA template is only assembled, never run (except once by hand, with its PUTDEC redirected to the simulator).

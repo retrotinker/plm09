@@ -34,7 +34,8 @@ include path. Four hooks files come with plmc:
 
 * BYTE (8-bit) and ADDRESS (16-bit) unsigned variables, arrays and
   structures, with PL/M-80's rules for mixing the two types, and the
-  built-ins `LENGTH`, `LAST` and `SIZE`.
+  built-ins `LENGTH`, `LAST`, `SIZE`, `HIGH`, `LOW`, `DOUBLE`, `SHL`,
+  `SHR`, `ROL` and `ROR`.
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
 * `LITERALLY` macros, scoped like other declarations.
 * Pointers: `BASED` variables and the address-of (dot) operator `.X`.
@@ -869,6 +870,35 @@ result can't be predicted. plmc defines it instead:
   (`RT_CARRY`) after every `+` and `-` (one `ROL` instruction each).
   Programs that don't use them are unaffected.
 
+### HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR
+
+These PL/M-80 built-in procedures (manual 11.1.3 and 11.1.4) are used in
+expressions:
+
+| Call | Type | Value |
+|---|---|---|
+| `HIGH(x)` | BYTE | the high byte of an ADDRESS; 0 for a BYTE |
+| `LOW(x)` | BYTE | the low byte of an ADDRESS; a BYTE unchanged |
+| `DOUBLE(x)` | ADDRESS | a BYTE zero-extended; an ADDRESS unchanged |
+| `SHL(p, n)`, `SHR(p, n)` | the type of `p` | `p` shifted left or right by `n` bits, zeros shifted in |
+| `ROL(p, n)`, `ROR(p, n)` | BYTE | `p`, converted to BYTE, rotated left or right by `n` bits |
+
+* **Examples** from the manual: `ROR(10011101B, 1)` is `11001110B`, and
+  `ROL(10011101B, 2)` is `01110110B`.
+* **The count** `n` is any expression, converted to BYTE. A count of 0 is
+  undefined in PL/M-80; plmc returns `p` unchanged. Shifting by the width
+  or more gives 0, and rotating by 8 gives `p` back.
+* **Types matter:** `SHL(1, 8)` is 0, because the constant 1 is a BYTE;
+  write `SHL(DOUBLE(1), 8)` for 256. Likewise `HIGH(W) + LOW(W)` is BYTE
+  arithmetic.
+* **Your own names win:** like `LENGTH`, these names are built-ins only
+  where they aren't declared, so a program can still declare its own
+  `HIGH` procedure or a variable called `LOW`.
+* **On every target:** they compile to inline code (shifts, rotates and
+  `TFR`s, with a short loop for a computed count), not to calls, so they
+  need nothing from the hooks and work the same in `--os9` modules. They
+  don't change the carry used by PLUS and MINUS.
+
 ## Types and conversions {#conversions}
 
 The type of every expression is worked out at compile time:
@@ -880,6 +910,9 @@ The type of every expression is worked out at compile time:
 | variable, or array element | its declared type |
 | structure member `X.M`, `X(i).M(j)` | the member's type |
 | `LENGTH(A)`, `LAST(A)` | BYTE if 255 or less, otherwise ADDRESS |
+| `HIGH(x)`, `LOW(x)`, `ROL(p, n)`, `ROR(p, n)` | BYTE |
+| `DOUBLE(x)` | ADDRESS |
+| `SHL(p, n)`, `SHR(p, n)` | the type of `p` |
 | `SIZE(X)` | ADDRESS |
 | typed procedure call | the procedure's type |
 | `a + b`, `a - b`, `a PLUS b`, `a MINUS b`, `a MOD b`, `a AND b`, `a OR b`, `a XOR b` | BYTE if *both* operands are BYTE, otherwise ADDRESS |
@@ -922,11 +955,12 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
 
-Of the PL/M-80 built-in procedures, only `LENGTH`, `LAST` and `SIZE` are
-provided.
-Others such as `HIGH`, `LOW`, `SHL`, `SHR`, `ROL` and `ROR` are not
-predefined. Using one gives `... is not declared`, unless you write it
-yourself as a procedure or an `EXTERNAL`.
+Of the PL/M-80 built-in procedures, plmc provides `LENGTH`, `LAST`,
+`SIZE`, `HIGH`, `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL` and `ROR`. The others
+(`INPUT`, `OUTPUT`, `MOVE`, `TIME`, `SCL`, `SCR`, `DEC`, `CARRY`, `ZERO`,
+`SIGN`, `PARITY`, `MEMORY`, `STACKPTR`) are not predefined. Using one gives
+`... is not declared`, unless you write it yourself as a procedure or an
+`EXTERNAL`.
 
 # Diagnostics
 
@@ -957,6 +991,8 @@ next multiple of 8 plus 1.
 | `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
 | `parameter X cannot be an array` | a parameter declared with a dimension |
 | `LENGTH needs the name of a variable` (or `LAST`, `SIZE`) | argument isn't a declared variable |
+| `HIGH takes one argument` (or `LOW`, `DOUBLE`), `SHL takes two arguments, a pattern and a count` (or `SHR`, `ROL`, `ROR`) | wrong number of arguments to a built-in |
+| `built-in LOW returns a value and must be used in an expression, not CALLed` | `CALL` of a built-in |
 | `structure X cannot be used as a value; select a member, as in X.M` | a whole structure, or a structure array's element, as a value or target |
 | `X is not a structure`, `structure X has no member M` | bad member reference |
 | `X is an array of structures: select one, as in X(i).M` | `X.M` without the array's subscript (outside the built-ins) |
@@ -1437,6 +1473,14 @@ listing and simulator traces easy to follow.
   * *Storing to a computed element:* the value is pushed first, then the
     address is formed with `LEAX D,X`, and the value is pulled and stored
     through X.
+* **HIGH, LOW, DOUBLE:** `LOW` is just its argument (the low byte is in
+  B), `HIGH` is `TFR A,B` (or `CLRB` for a BYTE), `DOUBLE` is `CLRA` for a
+  BYTE.
+* **SHL, SHR, ROL, ROR:** a constant count gives straight-line code: `LSLB`
+  (+`ROLA`) or `LSRB` (`LSRA`+`RORB`) per bit, a whole byte moved with
+  `TFR` when a 16-bit count is 8 or more, and a rotate as `TFR B,A` /
+  `LSLA` / `ROLB` (or `LSRA` / `RORB`), going the shorter way round. A
+  computed count is pushed and counted down with `DEC ,S`.
 * **PLUS and MINUS:** when a program uses them, every `+`, `-`, `PLUS` and
   `MINUS` is followed by `ROL RT_CARRY`, which shifts the carry into bit 0
   of that byte without touching A or B. PLUS is `LSR RT_CARRY` (the carry
@@ -1536,10 +1580,10 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 177 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; carry statements with random chains of `+ - PLUS MINUS`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
-| `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
+| `err` | 181 programs that must fail, each with the expected message and position |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; carry statements with random chains of `+ - PLUS MINUS`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
 | `sim` | the simulator itself (see the sim6809 manual) |

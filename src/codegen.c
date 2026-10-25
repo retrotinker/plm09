@@ -269,6 +269,7 @@ static int contains_call(const Expr *e)
     case E_ADDR:
         return e->lhs && e->lhs->sym->kind == SYM_VAR && contains_call(e->lhs);
     case E_MEMBER:
+    case E_BUILTIN:
         return (e->lhs && contains_call(e->lhs)) || (e->rhs && contains_call(e->rhs));
     }
     return 1;
@@ -579,6 +580,93 @@ static void gen_binary(const Expr *e)
     }
 }
 
+/* one bit of SHL, SHR (8 or 16 bits), ROL or ROR (8 bits) on B or D */
+static void shift_step(Builtin b, int w)
+{
+    switch (b) {
+    case BI_SHL:
+        emit("LSLB");
+        if (w == 16)
+            emit("ROLA");
+        break;
+    case BI_SHR:
+        if (w == 16) {
+            emit("LSRA");
+            emit("RORB");
+        } else {
+            emit("LSRB");
+        }
+        break;
+    default:                            /* the bit that leaves comes back in */
+        emit("TFR\tB,A");
+        emit(b == BI_ROL ? "LSLA" : "LSRA");
+        emit(b == BI_ROL ? "ROLB" : "RORB");
+        break;
+    }
+}
+
+/* HIGH, LOW, DOUBLE, SHL, SHR, ROL, ROR (PL/M-80 manual 11.1.3, 11.1.4).
+   A count of 0 (undefined in PL/M-80) leaves the pattern unchanged. */
+static void gen_builtin(const Expr *e)
+{
+    Builtin b = e->builtin;
+    int shift = b == BI_SHL || b == BI_SHR;
+    int w = shift ? width(e->type) : 8;
+
+    switch (b) {
+    case BI_LOW:                        /* the low byte is in B already */
+        gen_expr(e->lhs);
+        return;
+    case BI_HIGH:
+        gen_expr(e->lhs);
+        emit(e->lhs->type == TY_BYTE ? "CLRB" : "TFR\tA,B");
+        return;
+    case BI_DOUBLE:
+        gen_as(e->lhs, 16);
+        return;
+    default:
+        break;
+    }
+
+    if (e->rhs->kind == E_NUM) {        /* a constant count: straight-line code */
+        unsigned n = e->rhs->value & 0xff;
+        gen_expr(e->lhs);
+        if (shift && n >= (unsigned)w) {
+            emit(w == 8 ? "CLRB" : "LDD\t#0");
+            return;
+        }
+        if (shift && w == 16 && n >= 8) {   /* a whole byte at once */
+            emit(b == BI_SHL ? "TFR\tB,A" : "TFR\tA,B");
+            emit(b == BI_SHL ? "CLRB" : "CLRA");
+            n -= 8;
+        }
+        if (!shift) {
+            n %= 8;
+            if (n > 4) {                    /* the shorter way round */
+                b = b == BI_ROL ? BI_ROR : BI_ROL;
+                n = 8 - n;
+            }
+        }
+        while (n--)
+            shift_step(b, w);
+        return;
+    }
+
+    /* a computed count, on the stack, counted down */
+    int top = new_label(), end = new_label();
+    gen_as(e->rhs, 8);
+    push(8);
+    gen_expr(e->lhs);
+    emit("TST\t,S");
+    emit("BEQ\tL%d", end);
+    emit_label(top);
+    shift_step(b, w);
+    emit("DEC\t,S");
+    emit("BNE\tL%d", top);
+    emit_label(end);
+    emit("LEAS\t1,S");
+}
+
 static void gen_expr(const Expr *e)
 {
     switch (e->kind) {
@@ -639,6 +727,9 @@ static void gen_expr(const Expr *e)
     }
     case E_ADDR:
         gen_addr(e);
+        break;
+    case E_BUILTIN:
+        gen_builtin(e);
         break;
     }
 }

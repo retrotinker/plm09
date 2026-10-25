@@ -1,0 +1,5 @@
+T: DO;
+DECLARE (B, W) ADDRESS;
+B = HIGH(W) + LOW(W) + DOUBLE(B);
+W = SHL(W, 3) OR SHR(W, B) OR ROL(B, 1) OR ROR(B, 7);
+END T;

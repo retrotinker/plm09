@@ -1,0 +1,64 @@
+/* HIGH, LOW, DOUBLE (PL/M-80 manual 11.1.3), SHL, SHR, ROL, ROR (11.1.4).
+   Expected values in comments. */
+BUILTINS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE (I, B) BYTE, (W, V) ADDRESS;
+
+/* the manual's examples */
+CALL PUTDEC(ROR(10011101B, 1));                 /* 11001110B = 206 */
+CALL PUTDEC(ROL(10011101B, 2));                 /* 01110110B = 118 */
+
+W = 1234H; B = 0ABH;
+CALL PUTDEC(HIGH(W));                           /* 12H = 18 */
+CALL PUTDEC(LOW(W));                            /* 34H = 52 */
+CALL PUTDEC(HIGH(B));                           /* 0: a BYTE has no high byte */
+CALL PUTDEC(LOW(B));                            /* 0ABH = 171 */
+CALL PUTDEC(HIGH(W) + LOW(W));                  /* BYTE + BYTE: 46H = 70 */
+CALL PUTDEC(DOUBLE(B) + 100);                   /* ADDRESS: 271 */
+CALL PUTDEC(B + 100);                           /* BYTE: wraps to 15 */
+V = DOUBLE(HIGH(W)) * 256 + LOW(W);             /* put it back together */
+CALL PUTDEC(V = W);                             /* 255 */
+
+/* shifts keep the pattern's type */
+CALL PUTDEC(SHL(W, 4));                         /* 2340H = 9024 */
+CALL PUTDEC(SHR(W, 4));                         /* 0123H = 291 */
+CALL PUTDEC(SHL(W, 8));                         /* 3400H = 13312 */
+CALL PUTDEC(SHR(W, 12));                        /* 1 */
+CALL PUTDEC(SHL(W, 16));                        /* 0 */
+CALL PUTDEC(SHL(B, 1));                         /* BYTE: 56H = 86 */
+CALL PUTDEC(SHR(B, 3));                         /* 15H = 21 */
+CALL PUTDEC(SHL(1, 8));                         /* BYTE 1: 0 */
+CALL PUTDEC(SHL(DOUBLE(1), 8));                 /* 256 */
+CALL PUTDEC(SHL(256, 7));                       /* 32768 */
+
+/* rotations are BYTE; the pattern is converted to BYTE */
+CALL PUTDEC(ROL(B, 4));                         /* 0BAH = 186 */
+CALL PUTDEC(ROR(B, 8));                         /* 0ABH = 171 */
+CALL PUTDEC(ROL(B, 7));                         /* = ROR 1: 0D5H = 213 */
+CALL PUTDEC(ROR(W, 4));                         /* 34H -> 43H = 67 */
+
+/* computed counts */
+DO I = 0 TO 4;
+    CALL PUTDEC(SHL(W, I));                     /* 4660 9320 18640 37280 9024 */
+END;
+V = 0;
+DO I = 1 TO 8;
+    V = V + ROL(1, I);                          /* 2 4 ... 128 1: 255 */
+END;
+CALL PUTDEC(V);
+I = 17;
+CALL PUTDEC(SHR(W, I));                         /* 0 */
+I = 0;
+CALL PUTDEC(SHL(W, I));                         /* count 0: unchanged, 4660 */
+CALL PUTDEC(SHR(0FFFFH, W - 1230H));            /* count 4 (ADDRESS, low byte): 4095 */
+
+/* a declared name is used instead of the built-in */
+DO;
+    HIGH: PROCEDURE (X) BYTE;
+        DECLARE X ADDRESS;
+        RETURN 99;
+    END HIGH;
+    CALL PUTDEC(HIGH(W));                       /* 99 */
+END;
+CALL PUTDEC(HIGH(W));                           /* 18 */
+END BUILTINS;

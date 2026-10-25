@@ -81,6 +81,15 @@ static void dump_expr(const Expr *e)
         dump_expr(e->rhs);
         putchar(')');
         break;
+    case E_BUILTIN:
+        printf("(%s ", e->name);
+        dump_expr(e->lhs);
+        if (e->rhs) {
+            putchar(' ');
+            dump_expr(e->rhs);
+        }
+        putchar(')');
+        break;
     case E_INDEX:
         printf("(INDEX %s ", e->name);
         dump_expr(e->lhs);

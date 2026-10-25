@@ -23,6 +23,9 @@
  *   + - MOD AND OR XOR: BYTE if both operands BYTE (wrapping), else ADDRESS
  *   * /: ADDRESS;  relationals: BYTE 0FFH/0;  NOT, unary -: operand type
  *   IF tests bit 0; ADDRESS -> BYTE assignment keeps the low byte.
+ *   HIGH, LOW: BYTE (HIGH of a BYTE is 0); DOUBLE: ADDRESS;
+ *   SHL, SHR: the pattern's type; ROL, ROR: BYTE; the count is converted
+ *   to BYTE, and a count of 0 leaves the pattern alone (plmc's choice).
  * Expressions that would divide by zero are regenerated.
  *
  * Carry statements test PLUS and MINUS: "RB = x + y;" sets a known carry,
@@ -218,7 +221,39 @@ static Val expr(char *buf, int depth)
         return k < 7 ? leaf(buf) : k < 9 ? element(buf, depth) : member(buf, depth);
     }
 
-    k = rnd(17);
+    k = rnd(19);
+    if (k == 17) {                          /* HIGH LOW DOUBLE */
+        static const char *const f[] = { "HIGH", "LOW", "DOUBLE" };
+        int i = rnd(3);
+        x = expr(a, depth + 1);
+        snprintf(buf, BUFSZ, "%s(%s)", f[i], a);
+        r.v = i == 0 ? (x.w == 8 ? 0 : x.v >> 8) : i == 1 ? x.v & 0xff : x.v;
+        r.w = i == 2 ? 16 : 8;
+        return r;
+    }
+    if (k == 18) {                          /* SHL SHR ROL ROR */
+        static const char *const f[] = { "SHL", "SHR", "ROL", "ROR" };
+        int i = rnd(4);
+        unsigned n;
+        x = expr(a, depth + 1);
+        if (rnd(2)) {
+            n = rnd(18);
+            sprintf(b, "%u", n);
+        } else {
+            n = expr(b, depth + 1).v & 0xff;
+        }
+        snprintf(buf, BUFSZ, "%s(%s, %s)", f[i], a, b);
+        if (i < 2) {
+            r.w = x.w;
+            r.v = n >= 16 ? 0 : i == 0 ? x.v << n : x.v >> n;
+        } else {
+            unsigned v = x.v & 0xff, m = n % 8;
+            r.w = 8;
+            r.v = !m ? v : i == 2 ? v << m | v >> (8 - m) : v >> m | v << (8 - m);
+        }
+        r.v &= mask(r.w);
+        return r;
+    }
     if (k >= 14) {                          /* unary */
         x = expr(a, depth + 1);
         r.w = x.w;

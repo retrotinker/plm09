@@ -159,6 +159,58 @@ static int check_builtin(Expr *e, Scope *scope)
     return 1;
 }
 
+/* PL/M-80 built-in procedures HIGH, LOW, DOUBLE (manual 11.1.3) and SHL,
+   SHR, ROL, ROR (11.1.4), used only when the name isn't declared.  They
+   become E_BUILTIN, with the argument (pattern) in lhs and the count in
+   rhs.  HIGH, LOW, ROL, ROR are BYTE (ROL and ROR rotate the pattern as a
+   BYTE); DOUBLE is ADDRESS; SHL and SHR have the pattern's type. */
+static const char *const builtin_names[] = {
+    [BI_HIGH] = "HIGH", [BI_LOW] = "LOW", [BI_DOUBLE] = "DOUBLE", [BI_SHL] = "SHL",
+    [BI_SHR] = "SHR", [BI_ROL] = "ROL", [BI_ROR] = "ROR",
+};
+
+/* the Builtin named name, or -1 */
+static int value_builtin(const char *name)
+{
+    for (int i = 0; i < (int)(sizeof builtin_names / sizeof *builtin_names); i++)
+        if (!strcmp(name, builtin_names[i]))
+            return i;
+    return -1;
+}
+
+static int check_value_builtin(Expr *e, Scope *scope)
+{
+    int b = value_builtin(e->name);
+
+    if (b < 0)
+        return 0;
+    int nargs = b >= BI_SHL ? 2 : 1;
+    if (e->args.len != nargs)
+        error_at(e->loc, "%s takes %s", e->name,
+                 nargs == 1 ? "one argument" : "two arguments, a pattern and a count");
+    e->kind = E_BUILTIN;
+    e->builtin = (Builtin)b;
+    e->lhs = e->args.items[0];
+    check_expr(e->lhs, scope);
+    if (nargs == 2) {
+        e->rhs = e->args.items[1];
+        check_expr(e->rhs, scope);
+    }
+    switch (e->builtin) {
+    case BI_DOUBLE:
+        e->type = TY_ADDRESS;
+        break;
+    case BI_SHL:
+    case BI_SHR:
+        e->type = e->lhs->type;
+        break;
+    default:
+        e->type = TY_BYTE;
+        break;
+    }
+    return 1;
+}
+
 /* a whole structure where a BYTE or ADDRESS value is needed */
 static _Noreturn void whole_structure(const Expr *e)
 {
@@ -207,8 +259,12 @@ static void check_expr(Expr *e, Scope *scope)
         break;
     case E_NAME:
     case E_CALL:
-        if (!scope_lookup(scope, e->name) && check_builtin(e, scope))
-            break;
+        if (!scope_lookup(scope, e->name)) {
+            if (check_builtin(e, scope))
+                break;
+            if (check_value_builtin(e, scope))
+                break;
+        }
         sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind == SYM_LABEL)
             error_at(e->loc, "%s is a label, not a variable or procedure", e->name);
@@ -236,6 +292,8 @@ static void check_expr(Expr *e, Scope *scope)
     case E_UNARY:
         check_expr(e->lhs, scope);
         e->type = e->lhs->type;
+        break;
+    case E_BUILTIN:                     /* made, and checked, by check_value_builtin */
         break;
     case E_BINARY:
         check_expr(e->lhs, scope);
@@ -861,6 +919,9 @@ static void check_stmt(Stmt *s, Scope *scope)
         break;
     case S_CALL: {
         Expr *e = s->expr;
+        if (!scope_lookup(scope, e->name) && value_builtin(e->name) >= 0)
+            error_at(e->loc, "built-in %s returns a value and must be used in an expression, "
+                     "not CALLed", e->name);
         Symbol *sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind != SYM_PROC)
             error_at(e->loc, "%s is not a procedure", e->name);

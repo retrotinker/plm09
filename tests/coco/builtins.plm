@@ -1,0 +1,15 @@
+/* HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR on the CoCo: the code is the
+   same on every target, this checks it under the real ROM too */
+BI: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+CLS: PROCEDURE EXTERNAL; END CLS;
+DECLARE W ADDRESS, (B, I) BYTE;
+CALL CLS;
+W = 1234H; B = 0ABH; I = 3;
+CALL PUTDEC(HIGH(W) + LOW(W));      /* 70 */
+CALL PUTDEC(DOUBLE(B) + 100);       /* 271 */
+CALL PUTDEC(SHL(W, I));             /* 37280 */
+CALL PUTDEC(SHR(W, 4));             /* 291 */
+CALL PUTDEC(ROL(B, I));             /* 5DH = 93 */
+CALL PUTDEC(ROR(B, 1));             /* 0D5H = 213 */
+END BI;

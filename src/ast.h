@@ -36,7 +36,13 @@ typedef enum ExprKind {
     E_INDEX,    /* array element: name(lhs) */
     E_ADDR,     /* .lhs (a variable, element or procedure), or .(constants) */
     E_MEMBER,   /* name[(lhs)].mname[(rhs)]: a structure member */
+    E_BUILTIN,  /* HIGH LOW DOUBLE (lhs), SHL SHR ROL ROR (lhs, rhs = count);
+                   made from an E_CALL by sema */
 } ExprKind;
+
+typedef enum Builtin {
+    BI_HIGH, BI_LOW, BI_DOUBLE, BI_SHL, BI_SHR, BI_ROL, BI_ROR,
+} Builtin;
 
 struct Symbol;
 struct Scope;
@@ -51,6 +57,7 @@ typedef struct Expr {
     struct Symbol *sym;     /* E_NAME, E_CALL, E_INDEX: set by sema */
     Vec args;               /* E_CALL: Expr* */
     Op op;                  /* E_UNARY, E_BINARY */
+    Builtin builtin;        /* E_BUILTIN */
     struct Expr *lhs, *rhs; /* E_UNARY uses lhs; E_INDEX: lhs = subscript;
                                E_ADDR: lhs = operand, or NULL with data */
     char *mname;            /* E_MEMBER: member name */

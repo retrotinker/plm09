@@ -114,6 +114,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - Subscripts are any expression and aren't range-checked, as in PL/M-80.
   - A plain `BUF` means `BUF(0)`.
   - `LENGTH(BUF)` and `LAST(BUF)` give the number of elements and the highest subscript (BYTE if 255 or less, as in PL/M-80), and `SIZE(X)` the number of bytes.
+- **Built-ins:** `HIGH(W)`, `LOW(W)` and `DOUBLE(B)` convert between BYTE and ADDRESS; `SHL(P, N)`/`SHR(P, N)` shift a BYTE or ADDRESS, and `ROL(P, N)`/`ROR(P, N)` rotate a BYTE. They compile to inline code, so they work on every target. Like `LENGTH`, they are built-ins only where the name isn't declared.
   - Arrays can't be parameters.
 - **Statements:**
   - assignment, including several targets (`A, B = 0;`)
@@ -154,7 +155,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 **Not supported yet:**
 - `PUBLIC`
 - embedded assignment `:=`
-- built-in procedures other than `LENGTH`, `LAST` and `SIZE`, such as `HIGH`, `LOW` and `SHL`
+- the built-in procedures other than `LENGTH`, `LAST`, `SIZE`, `HIGH`, `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL` and `ROR` (such as `MOVE`, `TIME`, `SCL`/`SCR` and `CARRY`)
 
 The compiler reports these with an error ("... is not supported") rather than
 misreading them.

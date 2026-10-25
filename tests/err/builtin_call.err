@@ -1,0 +1,1 @@
+1:32: error: built-in LOW returns a value and must be used in an expression, not CALLed
