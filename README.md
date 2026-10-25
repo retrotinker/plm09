@@ -95,6 +95,9 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - The text, up to 255 characters, is substituted for the name before parsing, so `DCL LITERALLY 'DECLARE'` works too.
   - Literals follow block scope, and inner declarations can hide them.
   - `--ast` shows the result of the substitution.
+- **Structures:**
+  - `DECLARE AIRPLANE (20) STRUCTURE (SPEED BYTE, ALTITUDE ADDRESS);`, with members referenced as `AIRPLANE(I).SPEED`; members may be arrays (`X(i).M(j)`).
+  - Structures can be factored and BASED. Whole structures are used only with `.` and `LENGTH`/`LAST`/`SIZE`.
 - **Pointers:**
   - `DECLARE ITEM BASED PTR BYTE;` makes `ITEM` mean whatever `PTR` points at; BASED arrays work too.
   - `.X`, `.A(i)` and `.P` give the address of a variable, an element or an outer-level procedure.
@@ -104,7 +107,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - Elements can be used anywhere a variable can, including as assignment targets.
   - Subscripts are any expression and aren't range-checked, as in PL/M-80.
   - A plain `BUF` means `BUF(0)`.
-  - `LENGTH(BUF)` and `LAST(BUF)` give the size and the highest subscript.
+  - `LENGTH(BUF)` and `LAST(BUF)` give the number of elements and the highest subscript (BYTE if 255 or less, as in PL/M-80), and `SIZE(X)` the number of bytes.
   - Arrays can't be parameters.
 - **Statements:**
   - assignment, including several targets (`A, B = 0;`)
@@ -140,12 +143,11 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- structures
 - `INITIAL` and `DATA`
 - `REENTRANT`, `INTERRUPT`, `PUBLIC`
 - `PLUS` and `MINUS` (add and subtract with carry)
 - embedded assignment `:=`
-- built-in procedures other than `LENGTH` and `LAST`, such as `HIGH`, `LOW` and `SHL`
+- built-in procedures other than `LENGTH`, `LAST` and `SIZE`, such as `HIGH`, `LOW` and `SHL`
 
 The compiler reports these with an error ("... is not supported") rather than
 misreading them.

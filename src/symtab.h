@@ -21,6 +21,7 @@ typedef struct Symbol {
     Loc loc;
     int is_param;
     struct Symbol *base;    /* BASED variable: its base (an ADDRESS scalar) */
+    StructType *st;         /* STRUCTURE variable: its layout */
     Proc *proc;             /* SYM_PROC */
     Proc *owner;            /* SYM_LABEL: enclosing procedure, NULL in main */
     struct Symbol *next;    /* next symbol in the same scope */

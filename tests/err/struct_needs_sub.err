@@ -1,0 +1,1 @@
+3:5: error: L is an array of structures: select one, as in L(i).K

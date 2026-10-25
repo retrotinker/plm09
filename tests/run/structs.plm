@@ -1,0 +1,146 @@
+/* STRUCTURE types (PL/M-80 manual 3.5, 6.2.7, 11.1.2).
+   Expected values in comments. */
+STRUCTS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE; END PUTCH;
+DECLARE AIRPLANE (20) STRUCTURE (SPEED BYTE, ALTITUDE ADDRESS);    /* 3 bytes */
+DECLARE PAYROLL (10) STRUCTURE (                                    /* 35 bytes */
+    LAST$NAME (15) BYTE,
+    FIRST$NAME (15) BYTE,
+    MI BYTE,
+    DOLLARS ADDRESS,
+    CENTS ADDRESS);
+DECLARE POINT STRUCTURE (A$COORD (3) BYTE, B$COORD (3) BYTE, RANGE ADDRESS);
+DECLARE X (100) STRUCTURE (Y (100) BYTE);                           /* 10000 bytes */
+DECLARE RECORD STRUCTURE (KEY BYTE, INFO (3) ADDRESS);              /* 7 bytes */
+DECLARE LIST (4) STRUCTURE (KEY BYTE, INFO (3) ADDRESS);
+DECLARE NODE (8) STRUCTURE (NEXT ADDRESS, VALUE ADDRESS);           /* 4 bytes */
+DECLARE P ADDRESS, ITEM BASED P STRUCTURE (NEXT ADDRESS, VALUE ADDRESS);
+DECLARE (I, J, K, N) BYTE, S ADDRESS, B (10) BYTE;
+
+PUTNAME: PROCEDURE (Q, N);          /* print N characters stored at Q */
+    DECLARE Q ADDRESS, N BYTE, C BASED Q BYTE, K BYTE;
+    DO K = 1 TO N;
+        CALL PUTCH(C);
+        Q = Q + 1;
+    END;
+END PUTNAME;
+
+SETNAME: PROCEDURE (Q, S);          /* copy the 0-terminated string at S to Q */
+    DECLARE (Q, S) ADDRESS, D BASED Q BYTE, C BASED S BYTE;
+    DO WHILE C <> 0;
+        D = C;
+        Q = Q + 1;
+        S = S + 1;
+    END;
+END SETNAME;
+
+TOTAL: PROCEDURE (Q) ADDRESS;       /* a BASED structure over a parameter */
+    DECLARE Q ADDRESS, R BASED Q STRUCTURE (KEY BYTE, INFO (3) ADDRESS);
+    DECLARE T ADDRESS, K BYTE;
+    T = R.KEY;
+    DO K = 0 TO LAST(R.INFO);
+        T = T + R.INFO(K);
+    END;
+    RETURN T;
+END TOTAL;
+
+DO I = 0 TO 19;                     /* an array of 3-byte structures */
+    AIRPLANE(I).SPEED = I;
+    AIRPLANE(I).ALTITUDE = I * 1000;
+END;
+CALL PUTDEC(AIRPLANE(17).ALTITUDE);                     /* 17000 */
+I = 5;
+CALL PUTDEC(AIRPLANE(I).SPEED + AIRPLANE(I + 1).SPEED); /* 5 + 6 = 11 */
+CALL PUTDEC(.AIRPLANE(1) - .AIRPLANE);                  /* 3 */
+CALL PUTDEC(.AIRPLANE(2).ALTITUDE - .AIRPLANE);         /* 2 * 3 + 1 = 7 */
+
+N = 3;                              /* arrays inside an array of structures */
+CALL SETNAME(.PAYROLL(N).LAST$NAME, .('SMITH', 0));
+CALL SETNAME(.PAYROLL(N).FIRST$NAME, .('JO', 0));
+PAYROLL(N).MI = 'Q';
+PAYROLL(N).DOLLARS, PAYROLL(N).CENTS = 99;
+PAYROLL(N).CENTS = PAYROLL(N).CENTS - 50;
+CALL PUTNAME(.PAYROLL(N).FIRST$NAME, 2);
+CALL PUTCH(' ');
+CALL PUTCH(PAYROLL(N).MI);
+CALL PUTCH(' ');
+CALL PUTNAME(.PAYROLL(3).LAST$NAME, 5);
+CALL PUTCH(10);                                         /* JO Q SMITH */
+K = 2;
+CALL PUTCH(PAYROLL(N).FIRST$NAME(K - 1));
+CALL PUTCH(10);                                         /* O */
+CALL PUTDEC(PAYROLL(N).DOLLARS);                        /* 99 */
+CALL PUTDEC(PAYROLL(3).CENTS);                          /* 49 */
+CALL PUTDEC(.PAYROLL(3).CENTS - .PAYROLL);              /* 3 * 35 + 33 = 138 */
+
+DO I = 0 TO 2;                      /* arrays inside a structure */
+    POINT.A$COORD(I) = I + 1;
+    POINT.B$COORD(I) = (I + 1) * 10;
+END;
+POINT.RANGE = 0;
+DO I = 0 TO 2;
+    POINT.RANGE = POINT.RANGE + POINT.A$COORD(I) * POINT.B$COORD(I);
+END;
+CALL PUTDEC(POINT.RANGE);                               /* 10 + 40 + 90 = 140 */
+CALL PUTDEC(POINT.B$COORD);                             /* element 0: 10 */
+
+DO I = 0 TO 99;                     /* a 100 by 100 table */
+    X(I).Y(I) = I;
+END;
+X(35).Y(46) = 77;
+I = 35;
+J = 46;
+CALL PUTDEC(X(I).Y(J));                                 /* 77 */
+CALL PUTDEC(X(99).Y(99) + X(I).Y(I));                   /* 99 + 35 = 134 */
+CALL PUTDEC(.X(I).Y(J) - .X);                           /* 35 * 100 + 46 = 3546 */
+
+CALL PUTDEC(LENGTH(RECORD.INFO));                       /* 3 */
+CALL PUTDEC(LENGTH(LIST(2).INFO));                      /* 3 */
+CALL PUTDEC(LENGTH(LIST.INFO));                         /* the shorthand: 3 */
+CALL PUTDEC(LAST(LIST));                                /* 3 */
+CALL PUTDEC(LENGTH(X));                                 /* 100 */
+CALL PUTDEC(SIZE(RECORD));                              /* 7 */
+CALL PUTDEC(SIZE(LIST));                                /* 28 */
+CALL PUTDEC(SIZE(LIST(1)));                             /* 7 */
+CALL PUTDEC(SIZE(LIST.INFO));                           /* 6 */
+CALL PUTDEC(SIZE(LIST(0).KEY));                         /* 1 */
+CALL PUTDEC(SIZE(X));                                   /* 10000 */
+CALL PUTDEC(SIZE(B));                                   /* 10 */
+CALL PUTDEC(LENGTH(B) + 250);       /* LENGTH is a BYTE here: 260 wraps to 4 */
+CALL PUTDEC(SIZE(B) + 250);         /* SIZE is an ADDRESS: 260 */
+
+RECORD.KEY = 1;                     /* passing a structure's address */
+RECORD.INFO(0) = 10;
+RECORD.INFO(1) = 20;
+RECORD.INFO(2) = 30;
+CALL PUTDEC(TOTAL(.RECORD));                            /* 1 + 60 = 61 */
+LIST(2).KEY = 2;
+DO I = 0 TO 2;
+    LIST(2).INFO(I) = 100;
+END;
+CALL PUTDEC(TOTAL(.LIST(2)));                           /* 302 */
+
+DO I = 0 TO 7;                      /* a linked list, walked with a */
+    NODE(I).VALUE = I * I;          /* BASED structure */
+    NODE(I).NEXT = 0;
+END;
+NODE(1).NEXT = .NODE(4);
+NODE(4).NEXT = .NODE(6);
+NODE(6).NEXT = .NODE(3);
+S = 0;
+P = .NODE(1);
+DO WHILE P <> 0;
+    S = S + ITEM.VALUE;
+    P = ITEM.NEXT;
+END;
+CALL PUTDEC(S);                                         /* 1 + 16 + 36 + 9 = 62 */
+P = .NODE(5);
+ITEM.VALUE = 555;
+CALL PUTDEC(NODE(5).VALUE);                             /* 555 */
+
+I = 1;                              /* member targets, subscripts on both levels */
+J = 2;
+LIST(I).INFO(J), LIST(J).KEY, RECORD.INFO(I) = 7;
+CALL PUTDEC(LIST(1).INFO(2) + LIST(2).KEY + RECORD.INFO(1));   /* 21 */
+END STRUCTS;

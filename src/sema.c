@@ -11,7 +11,9 @@
  *   relationals: BYTE (0FFH true, 0 false)
  *   unary - and NOT: type of the operand
  *   array element A(i): the array's type; an unsubscripted array name
- *   means element 0.  LENGTH(A) and LAST(A) are ADDRESS constants.
+ *   means element 0.  Structure member X.M, X(i).M(j): the member's type;
+ *   a whole structure is not a value.  LENGTH, LAST (BYTE or ADDRESS) and
+ *   SIZE (ADDRESS) are constants.
  *   .X (address of a variable, element or outer-level procedure) and
  *   .(constants): ADDRESS.
  */
@@ -75,25 +77,114 @@ static void check_call(Expr *e, Scope *scope, Symbol *sym)
     add_call_edge(scope, p);
 }
 
-/* PL/M-80 built-ins LENGTH(A) and LAST(A): used only when the name isn't
-   declared.  Folded into an ADDRESS constant. */
+
+/* Contexts where a reference may name a whole structure (the operand of
+   the dot operator, or of LENGTH/LAST/SIZE), and where an array of
+   structures may be followed by a member without a subscript (the
+   LIST.INFO shorthand of the built-ins).  Cleared for subscripts. */
+static int whole_ok, shorthand_ok;
+
+static void check_sub(Expr *x, Scope *scope)
+{
+    int w = whole_ok, sh = shorthand_ok;
+    whole_ok = shorthand_ok = 0;
+    check_expr(x, scope);
+    whole_ok = w;
+    shorthand_ok = sh;
+}
+
+static unsigned type_size(Type t)
+{
+    return t == TY_BYTE ? 1 : 2;
+}
+
+/* bytes in one element of sym (the whole of a scalar) */
+static unsigned elem_bytes(const Symbol *sym)
+{
+    return sym->st ? sym->st->size : type_size(sym->type);
+}
+
+/* PL/M-80 built-ins LENGTH, LAST and SIZE (manual 11.1.2), used only when
+   the name isn't declared.  The argument is a reference that is not
+   evaluated; the result is folded into a constant.  LENGTH and LAST are
+   BYTE when the value fits, else ADDRESS; SIZE is ADDRESS. */
 static int check_builtin(Expr *e, Scope *scope)
 {
-    int is_length = !strcmp(e->name, "LENGTH");
+    int is_length = !strcmp(e->name, "LENGTH"), is_last = !strcmp(e->name, "LAST");
+    int is_size = !strcmp(e->name, "SIZE");
     Expr *arg;
     Symbol *sym;
 
-    if (e->kind != E_CALL || (!is_length && strcmp(e->name, "LAST")))
+    if (e->kind != E_CALL || !(is_length || is_last || is_size))
         return 0;
-    if (e->args.len != 1 || (arg = e->args.items[0])->kind != E_NAME
+    if (e->args.len != 1
+        || ((arg = e->args.items[0])->kind != E_NAME && arg->kind != E_CALL
+            && arg->kind != E_MEMBER)
         || !(sym = scope_lookup(scope, arg->name)) || sym->kind != SYM_VAR)
         error_at(e->loc, "%s needs the name of a variable", e->name);
-    unsigned n = sym->dim ? sym->dim : 1;
+
+    int w = whole_ok, sh = shorthand_ok;
+    whole_ok = shorthand_ok = 1;
+    check_expr(arg, scope);
+    whole_ok = w;
+    shorthand_ok = sh;
+
+    unsigned elems, bytes;              /* of the referenced object */
+    if (arg->kind == E_NAME) {
+        elems = sym->dim ? (unsigned)sym->dim : 1;
+        bytes = elems * elem_bytes(sym);
+    } else if (arg->kind == E_INDEX) {  /* one element, e.g. LIST(5) */
+        elems = 1;
+        bytes = elem_bytes(sym);
+    } else {                            /* a member, possibly an array */
+        const Member *m = arg->member;
+        elems = !arg->rhs && m->dim ? m->dim : 1;
+        bytes = elems * type_size(m->type);
+    }
+    unsigned v = is_size ? bytes : is_length ? elems : elems - 1;
     e->kind = E_NUM;
-    e->value = is_length ? n : n - 1;
-    e->is_address = 1;
-    e->type = TY_ADDRESS;
+    e->value = v;
+    e->is_address = is_size || v > 0xff;
+    e->type = e->is_address ? TY_ADDRESS : TY_BYTE;
     return 1;
+}
+
+/* a whole structure where a BYTE or ADDRESS value is needed */
+static _Noreturn void whole_structure(const Expr *e)
+{
+    const Member *m = e->sym->st->members.items[0];
+    error_at(e->loc, "structure %s cannot be used as a value; select a member, as in %s.%s",
+             e->name, e->name, m->name);
+}
+
+/* E_MEMBER: X[(i)].M[(j)] */
+static void check_member(Expr *e, Scope *scope)
+{
+    Symbol *sym = e->sym = lookup(scope, e->name, e->loc);
+    const Member *m = NULL;
+
+    if (sym->kind != SYM_VAR || !sym->st)
+        error_at(e->loc, "%s is not a structure", e->name);
+    if (e->lhs) {
+        if (!sym->dim)
+            error_at(e->loc, "%s is not an array", e->name);
+        check_sub(e->lhs, scope);
+    } else if (sym->dim && !shorthand_ok) {
+        error_at(e->loc, "%s is an array of structures: select one, as in %s(i).%s",
+                 e->name, e->name, e->mname);
+    }
+    for (int i = 0; i < sym->st->members.len; i++)
+        if (!strcmp(((Member *)sym->st->members.items[i])->name, e->mname))
+            m = sym->st->members.items[i];
+    if (!m)
+        error_at(e->loc, "structure %s has no member %s", e->name, e->mname);
+    if (e->rhs) {
+        if (!m->dim)
+            error_at(e->loc, "%s.%s is not an array", e->name, e->mname);
+        check_sub(e->rhs, scope);
+    }
+    e->member = (Member *)m;
+    e->type = m->type;
 }
 
 static void check_expr(Expr *e, Scope *scope)
@@ -120,9 +211,11 @@ static void check_expr(Expr *e, Scope *scope)
                     error_at(e->loc, "array %s takes exactly one subscript", e->name);
                 e->kind = E_INDEX;
                 e->lhs = e->args.items[0];
-                check_expr(e->lhs, scope);
+                check_sub(e->lhs, scope);
             }
             e->type = sym->type;
+            if (e->type == TY_STRUCT && !whole_ok)
+                whole_structure(e);
             break;
         }
         if (sym->type == TY_NONE)
@@ -153,8 +246,12 @@ static void check_expr(Expr *e, Scope *scope)
             v->type = TY_ADDRESS;
             break;
         }
+        int w = whole_ok;
+        whole_ok = 1;               /* .REC, .LIST(5) are allowed */
         check_expr(v, scope);       /* NAME(i) on an array becomes E_INDEX */
-        if (!((v->kind == E_NAME || v->kind == E_INDEX) && v->sym && v->sym->kind == SYM_VAR))
+        whole_ok = w;
+        if (!((v->kind == E_NAME || v->kind == E_INDEX || v->kind == E_MEMBER)
+              && v->sym && v->sym->kind == SYM_VAR))
             error_at(v->loc, "the dot operator needs a variable, an array element or a procedure");
         break;
     }
@@ -165,8 +262,13 @@ static void check_expr(Expr *e, Scope *scope)
                      sym->kind == SYM_LABEL ? "label" : "procedure", e->name);
         if (!sym->dim)
             error_at(e->loc, "%s is not an array", e->name);
-        check_expr(e->lhs, scope);
+        check_sub(e->lhs, scope);
         e->type = sym->type;
+        if (e->type == TY_STRUCT && !whole_ok)
+            whole_structure(e);
+        break;
+    case E_MEMBER:
+        check_member(e, scope);
         break;
     }
 }
@@ -191,8 +293,21 @@ static void declare_var(VarDecl *v, Scope *scope)
 {
     Symbol *sym = scope_lookup_local(scope, v->name);
 
-    if ((unsigned long)v->dim * (v->type == TY_BYTE ? 1 : 2) > 0xffff)
-        error_at(v->dim_loc, "array %s is too large (more than 65535 bytes)", v->name);
+    if (v->st && !v->st->size) {        /* lay out the members (once if factored) */
+        unsigned long off = 0;
+        for (int i = 0; i < v->st->members.len; i++) {
+            Member *m = v->st->members.items[i];
+            m->offset = (unsigned)off;
+            off += (unsigned long)(m->dim ? m->dim : 1) * type_size(m->type);
+            if (off > 0xffff)
+                error_at(m->loc, "structure %s is too large (more than 65535 bytes)", v->name);
+        }
+        v->st->size = (unsigned)off;
+    }
+    unsigned long each = v->st ? v->st->size : type_size(v->type);
+    if ((unsigned long)(v->dim ? v->dim : 1) * each > 0xffff)
+        error_at(v->dim ? v->dim_loc : v->loc, "array %s is too large (more than 65535 bytes)",
+                 v->name);
 
     /* a declaration of a parameter gives the parameter its type */
     if (sym && sym->is_param && sym->type == TY_NONE) {
@@ -200,6 +315,8 @@ static void declare_var(VarDecl *v, Scope *scope)
             error_at(v->loc, "parameter %s cannot be an array", v->name);
         if (v->base)
             error_at(v->loc, "parameter %s cannot be BASED", v->name);
+        if (v->st)
+            error_at(v->loc, "parameter %s cannot be a structure", v->name);
         sym->type = v->type;
         v->sym = sym;
         return;
@@ -209,6 +326,7 @@ static void declare_var(VarDecl *v, Scope *scope)
     sym->type = v->type;
     sym->dim = (int)v->dim;
     sym->base = base;
+    sym->st = v->st;
     v->sym = sym;
     if (!base)                  /* a BASED variable has no storage of its own */
         vec_push(&sema_vars, sym);
@@ -258,6 +376,8 @@ static void declare_proc(Proc *p, Scope *scope)
                 error_at(d->var->loc, "parameter %s cannot be an array", d->var->name);
             if (d->var->base)
                 error_at(d->var->loc, "parameter %s cannot be BASED", d->var->name);
+            if (d->var->st)
+                error_at(d->var->loc, "parameter %s cannot be a structure", d->var->name);
             ps->type = d->var->type;
             d->var->sym = ps;
         }
@@ -356,7 +476,7 @@ static void check_stmt(Stmt *s, Scope *scope)
         check_expr(s->expr, scope);
         for (int i = 0; i < s->targets.len; i++) {
             Expr *t = s->targets.items[i];
-            if (t->kind == E_INDEX) {
+            if (t->kind == E_INDEX || t->kind == E_MEMBER) {
                 check_expr(t, scope);
                 continue;
             }
@@ -365,6 +485,8 @@ static void check_stmt(Stmt *s, Scope *scope)
                 error_at(t->loc, "cannot assign to %s %s",
                          sym->kind == SYM_LABEL ? "label" : "procedure", t->name);
             t->type = sym->type;
+            if (t->type == TY_STRUCT)
+                whole_structure(t);
         }
         break;
     case S_CALL: {
@@ -394,7 +516,7 @@ static void check_stmt(Stmt *s, Scope *scope)
     case S_ITER: {
         Expr *v = s->var;
         Symbol *sym = v->sym = scope_lookup(scope, v->name);
-        if (!sym || sym->kind != SYM_VAR || sym->dim || sym->base)
+        if (!sym || sym->kind != SYM_VAR || sym->dim || sym->base || sym->st)
             error_at(v->loc, "the index of an iterative DO must be a scalar variable%s",
                      sym ? "" : " (not declared)");
         v->type = sym->type;

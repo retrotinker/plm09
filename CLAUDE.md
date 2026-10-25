@@ -114,9 +114,10 @@ The pipeline is `lexer.c` → `parser.c` (recursive descent, builds `ast.h` node
   - A name being *defined* must be read with `next_raw_ident()`, and tested with `raw_type()`, never with an expanding peek. Otherwise an outer literal would be substituted for it.
   - The parser has its own scope stack (`lit_push`/`lit_pop`/`declare_name`) for literals and the names that hide them.
   - Strings are `T_STRING` tokens: one or two characters make a constant, and longer ones are only valid as LITERALLY text.
-- **Unsupported features** (STRUCTURE, INITIAL, and so on) are rejected in the parser with "X is not supported".
+- **Unsupported features** (INITIAL/DATA, REENTRANT, and so on) are rejected in the parser with "X is not supported".
 - **Labels:** any statement can carry labels (`Stmt.labels`). Every DO body is its own scope, and `collect_labels()` must run before a block's declarations and statements are checked, because labels may be used before they are defined, even from procedures.
-- **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST` into constants. Assignment targets are parsed as `E_INDEX` directly.
+- **Arrays:** `NAME(args)` in an expression is parsed as `E_CALL`. Sema turns it into `E_INDEX` (`lhs` = subscript) when NAME is an array, and folds the built-ins `LENGTH`/`LAST`/`SIZE` into constants (`LENGTH`/`LAST` are BYTE if 255 or less). Assignment targets are parsed as `E_INDEX` directly.
+- **Structures:** `NAME[(i)].M[(j)]` becomes `E_MEMBER` (`member_suffix()`). A whole structure is only allowed under `.` and the built-ins, which sema tracks with `whole_ok`/`shorthand_ok`; always check subscripts with `check_sub()`, which clears them.
 - **Declaration order:** sema processes declarations in source order (declare before use), which is also how recursion stays detectable. A procedure's name is visible inside its own body.
 - **Output of sema:** it gives every `Expr` a `type`, resolves `sym`, sets `Stmt.proc` for RETURN, and fills `sema_vars` (the data section) and `sema_procs` (the order procedures are emitted in).
 
@@ -180,6 +181,8 @@ The hooks are selected only through the include path: `-I runtime/sim` for the s
 **BASED and `.` in codegen:**
 - BASED variables are never `fixed_location()`. They are reached through `based_location()` / `gen_base_x()`, which loads X with the base's value, or through `gen_elem_offset()`.
 - `gen_addr()` handles every form of the dot operator. In `--os9` mode the address of a variable must come from `LEAX ...,U` and that of a procedure or constant list from `,PCR`, never from an immediate label.
+
+**Structures in codegen:** every reference (`E_NAME`, `E_INDEX`, `E_MEMBER`) goes through `const_offset()` → `fixed_location`/`based_location`, or through `gen_elem_offset()` (computed offset in D, base in X after any `RT_MUL16`). Element sizes come from the symbol (`elem_size`), not from the expression's type.
 
 **Arrays in codegen:**
 - Use `fixed_location()` for variables and constant-subscript elements; it gives a byte offset for `var_ref()`.

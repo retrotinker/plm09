@@ -37,7 +37,8 @@ const char *op_name(Op op)
 
 const char *type_name(Type t)
 {
-    return t == TY_BYTE ? "BYTE" : t == TY_ADDRESS ? "ADDRESS" : "untyped";
+    return t == TY_BYTE ? "BYTE" : t == TY_ADDRESS ? "ADDRESS"
+         : t == TY_STRUCT ? "STRUCTURE" : "untyped";
 }
 
 int op_is_relational(Op op)
@@ -82,6 +83,19 @@ static void dump_expr(const Expr *e)
     case E_INDEX:
         printf("(INDEX %s ", e->name);
         dump_expr(e->lhs);
+        putchar(')');
+        break;
+    case E_MEMBER:
+        printf("(MEMBER %s ", e->name);
+        if (e->lhs) {
+            dump_expr(e->lhs);
+            putchar(' ');
+        }
+        printf("%s", e->mname);
+        if (e->rhs) {
+            putchar(' ');
+            dump_expr(e->rhs);
+        }
         putchar(')');
         break;
     case E_ADDR:
@@ -197,7 +211,20 @@ static void dump_block(const Block *b, int depth)
                 printf(" BASED %s", d->var->base);
             if (d->var->dim)
                 printf("(%u)", d->var->dim);
-            printf(" %s\n", type_name(d->var->type));
+            printf(" %s", type_name(d->var->type));
+            if (d->var->st) {
+                const Vec *m = &d->var->st->members;
+                printf(" (");
+                for (int k = 0; k < m->len; k++) {
+                    const Member *mb = m->items[k];
+                    printf("%s%s", k ? ", " : "", mb->name);
+                    if (mb->dim)
+                        printf("(%u)", mb->dim);
+                    printf(" %s", type_name(mb->type));
+                }
+                putchar(')');
+            }
+            putchar('\n');
             continue;
         }
         const Proc *p = d->proc;

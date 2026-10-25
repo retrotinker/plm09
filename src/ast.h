@@ -4,7 +4,21 @@
 
 #include "util.h"
 
-typedef enum Type { TY_NONE, TY_BYTE, TY_ADDRESS } Type;
+typedef enum Type { TY_NONE, TY_BYTE, TY_ADDRESS, TY_STRUCT } Type;
+
+/* a STRUCTURE type: members in declaration order, contiguous */
+typedef struct Member {
+    char *name;
+    Loc loc;
+    Type type;              /* TY_BYTE or TY_ADDRESS */
+    unsigned dim;           /* 0 for a scalar member */
+    unsigned offset;        /* bytes from the start of the structure */
+} Member;
+
+typedef struct StructType {
+    Vec members;            /* Member* */
+    unsigned size;          /* bytes; set by sema */
+} StructType;
 
 typedef enum Op {
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_MOD, OP_AND, OP_OR, OP_XOR,
@@ -20,6 +34,7 @@ typedef enum ExprKind {
     E_BINARY,
     E_INDEX,    /* array element: name(lhs) */
     E_ADDR,     /* .lhs (a variable, element or procedure), or .(constants) */
+    E_MEMBER,   /* name[(lhs)].mname[(rhs)]: a structure member */
 } ExprKind;
 
 struct Symbol;
@@ -37,6 +52,8 @@ typedef struct Expr {
     Op op;                  /* E_UNARY, E_BINARY */
     struct Expr *lhs, *rhs; /* E_UNARY uses lhs; E_INDEX: lhs = subscript;
                                E_ADDR: lhs = operand, or NULL with data */
+    char *mname;            /* E_MEMBER: member name */
+    struct Member *member;  /* E_MEMBER: set by sema */
     unsigned char *data;    /* E_ADDR of a constant list: the bytes */
     int ndata;
 } Expr;
@@ -68,6 +85,7 @@ typedef struct VarDecl {
     Type type;
     unsigned dim;           /* number of elements; 0 for a scalar */
     Loc dim_loc;
+    StructType *st;         /* STRUCTURE variable (type TY_STRUCT) */
     char *base;             /* BASED variable: name of its base, else NULL */
     Loc base_loc;
     struct Symbol *sym;

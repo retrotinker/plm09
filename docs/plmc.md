@@ -32,9 +32,9 @@ include path. Four hooks files come with plmc:
 
 **Main features**
 
-* BYTE (8-bit) and ADDRESS (16-bit) unsigned variables and arrays, with
-  PL/M-80's rules for mixing the two types, and the built-ins `LENGTH` and
-  `LAST`.
+* BYTE (8-bit) and ADDRESS (16-bit) unsigned variables, arrays and
+  structures, with PL/M-80's rules for mixing the two types, and the
+  built-ins `LENGTH`, `LAST` and `SIZE`.
 * All PL/M arithmetic, logical and relational operators, with PL/M precedence.
 * `LITERALLY` macros, scoped like other declarations.
 * Pointers: `BASED` variables and the address-of (dot) operator `.X`.
@@ -256,13 +256,20 @@ DECLARE COUNT BYTE, TABLE(16) ADDRESS;
 * **Not allowed:** arrays can't be parameters, and procedures can't return
   them. Pass an element (its value), or keep the array global, or in an
   outer procedure that the procedure can see.
-* **Built-ins:** two PL/M-80 functions give the size of an array as an
-  ADDRESS constant:
+* **Built-ins:** three PL/M-80 functions describe a variable, as constants
+  worked out by the compiler:
   * `LENGTH(A)`: the number of elements
   * `LAST(A)`: the highest subscript, `LENGTH(A) - 1`
+  * `SIZE(X)`: the number of bytes
 
-  For a scalar they give 1 and 0. They are only used when you haven't
-  declared a procedure or variable with the same name yourself.
+  `LENGTH` and `LAST` are **BYTE** when the value is 255 or less and ADDRESS
+  otherwise, as in PL/M-80. Arithmetic with them follows the BYTE rules: if
+  `LENGTH(B)` is 10, then `LENGTH(B) + 250` wraps to 4. `SIZE` is always an
+  ADDRESS.
+
+  For a scalar, `LENGTH` and `LAST` give 1 and 0. The built-ins are only
+  used when you haven't declared a procedure or variable with the same name
+  yourself. They also accept structure references; see [Structures].
 
 ```
 I = 0;
@@ -271,6 +278,80 @@ DO WHILE I < LENGTH(BUF);
     I = I + 1;
 END;
 ```
+
+## Structures
+
+```
+DECLARE AIRPLANE (20) STRUCTURE (SPEED BYTE, ALTITUDE ADDRESS);
+DECLARE PAYROLL (100) STRUCTURE (
+    LAST$NAME (15) BYTE,
+    FIRST$NAME (15) BYTE,
+    DOLLARS ADDRESS);
+
+AIRPLANE(17).ALTITUDE = 9000;
+PAYROLL(N).FIRST$NAME(K) = 'A';
+```
+
+A **structure** groups members of different types under one name.
+`STRUCTURE (member, ...)` is a type, written where `BYTE` or `ADDRESS` would
+be, so it can be combined with the other parts of a declaration:
+
+* **Forms:**
+  * a single structure: `DECLARE POINT STRUCTURE (X BYTE, Y BYTE);`
+  * an array of structures: `DECLARE AIRPLANE (20) STRUCTURE (...)`
+  * factored: `DECLARE (A, B) STRUCTURE (...)`, which gives both the same
+    members
+  * BASED: `DECLARE ITEM BASED P STRUCTURE (...)`
+* **Members:** each is `name [(dimension)] BYTE` or `ADDRESS`.
+  * A member can be an array.
+  * A member can't be factored, BASED, or itself a structure; structures
+    don't nest.
+  * Member names belong to their structure, so different structures can use
+    the same names, and a member name never clashes with a variable.
+* **Layout:** the members are stored one after another in the order
+  written, so `SIZE` of a structure is the sum of its members' sizes. An
+  array of structures stores whole structures one after another.
+
+**References.** A member is referenced as `X.M`, `X(i).M`, `X.M(j)` or
+`X(i).M(j)`. Each subscript can be any expression, and each is
+**unchecked**, as for arrays. A member reference can be used anywhere a
+variable can: in expressions, as an assignment target, and with `.`. An
+unsubscripted member array (`POINT.COORD`) means its element 0.
+
+A whole structure (`POINT`, or `AIRPLANE(3)`) is not a value. It can only be
+used in these places:
+
+| Reference | Meaning |
+|---|---|
+| `.POINT`, `.AIRPLANE(3)`, `.AIRPLANE` | the address of the structure (of element 0 for an array) |
+| `.PAYROLL(5).FIRST$NAME` | the address of a member array |
+| `LENGTH(AIRPLANE)`, `LAST(AIRPLANE)` | the number of structures in an array of structures, and the last subscript |
+| `SIZE(POINT)`, `SIZE(AIRPLANE)`, `SIZE(AIRPLANE(3))` | bytes in a structure, the whole array, or one element |
+| `LENGTH(PAYROLL(5).FIRST$NAME)`, `SIZE(...)` | a member array's length and size |
+
+**The built-in shorthand.** A member of an *array* of structures normally
+needs the array's subscript (`AIRPLANE.SPEED` is an error). The built-ins
+are the exception, because every element's member array has the same size:
+`LENGTH(PAYROLL.FIRST$NAME)` is 15.
+
+**Pointers.** Structures combine naturally with BASED variables and the dot
+operator. For example, a procedure can take a structure's address and look
+at it through a BASED structure:
+
+```
+TOTAL: PROCEDURE (Q) ADDRESS;
+    DECLARE Q ADDRESS, R BASED Q STRUCTURE (KEY BYTE, INFO (3) ADDRESS);
+    ...  R.INFO(K) ...
+END TOTAL;
+
+X = TOTAL(.RECORD);
+```
+
+A linked list can be built in an array of structures with an ADDRESS member
+holding `.NODE(i)`, and walked with a BASED structure.
+
+**Not allowed:** structures can't be parameters, values, or iterative DO
+indexes. Pass `.X` and use a BASED structure instead.
 
 ## BASED variables and the dot operator
 
@@ -540,7 +621,9 @@ The type of every expression is worked out at compile time:
 | constant 0--255 | BYTE |
 | constant 256--65535, or a two-character string | ADDRESS |
 | variable, or array element | its declared type |
-| `LENGTH(A)`, `LAST(A)` | ADDRESS |
+| structure member `X.M`, `X(i).M(j)` | the member's type |
+| `LENGTH(A)`, `LAST(A)` | BYTE if 255 or less, otherwise ADDRESS |
+| `SIZE(X)` | ADDRESS |
 | typed procedure call | the procedure's type |
 | `a + b`, `a - b`, `a MOD b`, `a AND b`, `a OR b`, `a XOR b` | BYTE if *both* operands are BYTE, otherwise ADDRESS |
 | `a * b`, `a / b` | always ADDRESS |
@@ -579,7 +662,7 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | Feature | Error message |
 |---|---|
 | an implicit dimension, `DECLARE X(*) BYTE` (only meaningful with `INITIAL`/`DATA`) | `an implicit dimension '(*)' is not supported` |
-| `STRUCTURE`, `LABEL` declarations | `... is not supported` |
+| `LABEL` declarations | `... is not supported` |
 | `INITIAL` and `DATA` | `initialized data is not supported` |
 | `REENTRANT`, `INTERRUPT`, `PUBLIC` | `... is not supported` |
 | `PLUS` and `MINUS` (add and subtract with carry) | `PLUS/MINUS (add/subtract with carry) is not supported` |
@@ -587,7 +670,8 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | `ENABLE`, `DISABLE` | `ENABLE/DISABLE is not supported` |
 | strings of three or more characters | `strings longer than 2 characters are not supported` |
 
-Of the PL/M-80 built-in procedures, only `LENGTH` and `LAST` are provided.
+Of the PL/M-80 built-in procedures, only `LENGTH`, `LAST` and `SIZE` are
+provided.
 Others such as `HIGH`, `LOW`, `SHL`, `SHR`, `ROL` and `ROR` are not
 predefined. Using one gives `... is not declared`, unless you write it
 yourself as a procedure or an `EXTERNAL`.
@@ -620,7 +704,13 @@ next multiple of 8 plus 1.
 | `array dimension must be from 1 to 65535`, `expected an array dimension (a number), found ...` | dimension 0, or not a number |
 | `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
 | `parameter X cannot be an array` | a parameter declared with a dimension |
-| `LENGTH needs the name of a variable` (or `LAST`) | argument isn't a declared variable |
+| `LENGTH needs the name of a variable` (or `LAST`, `SIZE`) | argument isn't a declared variable |
+| `structure X cannot be used as a value; select a member, as in X.M` | a whole structure, or a structure array's element, as a value or target |
+| `X is not a structure`, `structure X has no member M` | bad member reference |
+| `X is an array of structures: select one, as in X(i).M` | `X.M` without the array's subscript (outside the built-ins) |
+| `X is not an array`, `X.M is not an array` | a subscript on something that isn't an array |
+| `structures cannot be nested ...`, `structure members cannot be factored`, `a structure member cannot be BASED`, `member M is declared twice` | bad member list |
+| `parameter X cannot be a structure` | a structure declared as a parameter |
 | `literal X expands recursively (more than 32 levels)` | a literal whose text uses itself |
 | `a LITERALLY declaration cannot be factored`, `... cannot have a dimension` | `DECLARE (A, B) LITERALLY ...`, `DECLARE A(3) LITERALLY ...` |
 | `expected a string, found ...` | `LITERALLY` not followed by a string |
@@ -1015,6 +1105,15 @@ listing and simulator traces easy to follow.
     for a variable, and `LEAX P_X,PCR` / `TFR X,D` for a procedure, so the
     code stays position-independent.
   * Constant lists become `FCB` data after the procedures.
+* **Structures:**
+  * A member reference whose subscripts are all constants is a fixed
+    location, `V_X+offset` (structure subscript × structure size + member
+    offset + member subscript × member size), and is used directly as an
+    operand.
+  * Computed subscripts are scaled with shifts when the size is a power of
+    two, and with `RT_MUL16` otherwise. Two computed subscripts are added on
+    the stack.
+  * BASED structures and the dot operator use the same paths as arrays.
 * **Array elements:**
   * *Constant subscript:* the element is an ordinary operand, `V_A+6` (or
     `V_A+6,U` in an OS-9 module).
@@ -1092,8 +1191,8 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 44 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
-| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, and pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), labels and GOTO (out of loops, blocks and nested procedure calls; 10000 jumps out of three calls to check the stack is reset), `HALT`, `--org` and `--vectors` |
+| `fuzz` | random programs with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply, checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2 (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9`, each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |

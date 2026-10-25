@@ -1,0 +1,1 @@
+2:24: error: structures cannot be nested: a member must be BYTE or ADDRESS

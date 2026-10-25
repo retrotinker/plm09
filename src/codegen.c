@@ -126,39 +126,60 @@ static int is_var(const Expr *e)
     return e->kind == E_NAME && e->sym->kind == SYM_VAR;
 }
 
+static unsigned type_size(Type t)
+{
+    return t == TY_BYTE ? 1 : 2;
+}
+
+/* bytes in one element of a variable: a structure's size, or 1 or 2 */
 static unsigned elem_size(const Expr *e)
 {
-    return e->type == TY_BYTE ? 1 : 2;
+    return e->sym->st ? e->sym->st->size : type_size(e->sym->type);
 }
 
-/* a (non-BASED) variable, or an array element with a constant subscript:
-   a fixed location, described by the variable and a byte offset */
+/* a reference to (part of) a variable: E_NAME, E_INDEX or E_MEMBER */
+static int is_ref(const Expr *e)
+{
+    return is_var(e) || e->kind == E_INDEX || e->kind == E_MEMBER;
+}
+
+/* byte offset of a reference from the start of its variable, if every
+   subscript in it is constant */
+static int const_offset(const Expr *e, unsigned *offset)
+{
+    unsigned long off = 0;
+
+    if (!is_ref(e))
+        return 0;
+    if (e->kind == E_INDEX) {
+        if (e->lhs->kind != E_NUM)
+            return 0;
+        off = (unsigned long)e->lhs->value * elem_size(e);
+    } else if (e->kind == E_MEMBER) {
+        if ((e->lhs && e->lhs->kind != E_NUM) || (e->rhs && e->rhs->kind != E_NUM))
+            return 0;
+        off = e->member->offset;
+        if (e->lhs)
+            off += (unsigned long)e->lhs->value * e->sym->st->size;
+        if (e->rhs)
+            off += (unsigned long)e->rhs->value * type_size(e->member->type);
+    }
+    *offset = (unsigned)(off & 0xffff);
+    return 1;
+}
+
+/* a (non-BASED) variable, element or member at a constant offset: a fixed
+   location, described by the variable and a byte offset */
 static int fixed_location(const Expr *e, unsigned *offset)
 {
-    if (is_var(e) && !e->sym->base) {
-        *offset = 0;
-        return 1;
-    }
-    if (e->kind == E_INDEX && e->lhs->kind == E_NUM && !e->sym->base) {
-        *offset = (e->lhs->value * elem_size(e)) & 0xffff;
-        return 1;
-    }
-    return 0;
+    return !e->sym->base && const_offset(e, offset);
 }
 
-/* a BASED scalar, or a BASED element with a constant subscript: reached as
-   `offset,X` once X holds the base (gen_base_x) */
+/* the same for a BASED variable: reached as `offset,X` once X holds the
+   base (gen_base_x) */
 static int based_location(const Expr *e, unsigned *offset)
 {
-    if (is_var(e) && e->sym->base) {
-        *offset = 0;
-        return 1;
-    }
-    if (e->kind == E_INDEX && e->lhs->kind == E_NUM && e->sym->base) {
-        *offset = (e->lhs->value * elem_size(e)) & 0xffff;
-        return 1;
-    }
-    return 0;
+    return e->sym->base && const_offset(e, offset);
 }
 
 static const char *x_offset(unsigned offset)
@@ -192,7 +213,7 @@ static int simple_operand(const Expr *e, int w, Opnd *o)
         o->value = e->value;
         return 1;
     }
-    if (fixed_location(e, &o->value) && width(e->type) == w) {
+    if (is_ref(e) && fixed_location(e, &o->value) && width(e->type) == w) {
         o->kind = OPND_MEM;
         o->name = e->sym->asm_name;
         return 1;
@@ -217,6 +238,8 @@ static int contains_call(const Expr *e)
         return contains_call(e->lhs);
     case E_ADDR:
         return e->lhs && e->lhs->sym->kind == SYM_VAR && contains_call(e->lhs);
+    case E_MEMBER:
+        return (e->lhs && contains_call(e->lhs)) || (e->rhs && contains_call(e->rhs));
     }
     return 1;
 }
@@ -309,16 +332,61 @@ static void gen_compare(const Expr *e)
     emit("%s\t%s", w == 8 ? "CMPB" : "CMPD", opnd_text(&o, w, WHOLE));
 }
 
-/* array element with a computed subscript: leave the byte offset of the
-   element in D and the array's address in X */
+/* D = D * n, for an element size n */
+static void scale_d(unsigned n)
+{
+    if (n && !(n & (n - 1))) {              /* a power of two: shift */
+        for (; n > 1; n >>= 1) {
+            emit("LSLB");
+            emit("ROLA");
+        }
+        return;
+    }
+    emit("TFR\tD,X");
+    emit("LDD\t#%u", n);
+    emit_call("RT_MUL16");
+}
+
+/* element or member with a computed subscript: leave its byte offset from
+   the start of the variable in D, and the variable's address in X */
 static void gen_elem_offset(const Expr *e)
 {
-    gen_as(e->lhs, 16);
-    if (elem_size(e) == 2) {
-        emit("LSLB");
-        emit("ROLA");
+    if (e->kind == E_INDEX) {
+        gen_as(e->lhs, 16);
+        scale_d(elem_size(e));
+    } else {                                /* E_MEMBER */
+        const Member *m = e->member;
+        unsigned long c = m->offset;
+        int have = 0;
+        if (e->lhs) {
+            if (e->lhs->kind == E_NUM) {
+                c += (unsigned long)e->lhs->value * e->sym->st->size;
+            } else {
+                gen_as(e->lhs, 16);
+                scale_d(e->sym->st->size);
+                have = 1;
+            }
+        }
+        if (e->rhs) {
+            if (e->rhs->kind == E_NUM) {
+                c += (unsigned long)e->rhs->value * type_size(m->type);
+            } else {
+                if (have)
+                    push(16);
+                gen_as(e->rhs, 16);
+                scale_d(type_size(m->type));
+                if (have)
+                    emit("ADDD\t,S++");
+                have = 1;
+            }
+        }
+        c &= 0xffff;
+        if (!have)
+            emit("LDD\t#%lu", c);
+        else if (c)
+            emit("ADDD\t#%lu", c);
     }
-    gen_base_x(e->sym);
+    gen_base_x(e->sym);                     /* after any RT_MUL16, which uses X */
 }
 
 /* constant lists of .(...) operands, emitted with the code */
@@ -491,7 +559,8 @@ static void gen_expr(const Expr *e)
     case E_BINARY:
         gen_binary(e);
         break;
-    case E_INDEX: {
+    case E_INDEX:
+    case E_MEMBER: {
         unsigned off;
         const char *ld = e->type == TY_BYTE ? "LDB" : "LDD";
         if (fixed_location(e, &off)) {
@@ -755,7 +824,8 @@ static void emit_variables(void)
         fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
-        unsigned n = (v->dim ? (unsigned)v->dim : 1) * (v->type == TY_BYTE ? 1 : 2);
+        unsigned n = (v->dim ? (unsigned)v->dim : 1)
+                   * (v->st ? v->st->size : type_size(v->type));
         fprintf(out, "%s\tRMB\t%u\n", v->asm_name, n);
     }
 }

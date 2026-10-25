@@ -223,6 +223,33 @@ static Expr *unary(Op op, Loc loc, Expr *operand)
     return e;
 }
 
+/* e is NAME, NAME(args) or NAME(subscript); a following .MEMBER[(j)]
+   makes it a structure member reference */
+static Expr *member_suffix(Expr *e)
+{
+    if (peek_type(0) != T_DOT || raw_type(1) != T_IDENT)
+        return e;
+    next();                                 /* the '.' */
+    Token m = next_raw_ident();
+    Expr *r = new_expr(E_MEMBER, e->loc);
+    r->name = e->name;
+    r->mname = m.text;
+    if (e->kind == E_CALL) {
+        if (e->args.len != 1)
+            error_at(e->loc, "an array takes exactly one subscript");
+        r->lhs = e->args.items[0];
+    } else if (e->kind == E_INDEX) {
+        r->lhs = e->lhs;
+    }
+    if (accept(T_LPAREN)) {
+        r->rhs = parse_expr();
+        if (peek_type(0) == T_COMMA)
+            error_at(peek()->loc, "an array takes exactly one subscript");
+        expect(T_RPAREN);
+    }
+    return r;
+}
+
 static Expr *parse_primary(void)
 {
     Token *t = peek();
@@ -250,7 +277,7 @@ static Expr *parse_primary(void)
         if (!accept(T_LPAREN)) {
             Expr *e = new_expr(E_NAME, id.loc);
             e->name = id.text;
-            return e;
+            return member_suffix(e);
         }
         Expr *e = new_expr(E_CALL, id.loc);
         e->name = id.text;
@@ -258,7 +285,7 @@ static Expr *parse_primary(void)
             vec_push(&e->args, parse_expr());
         while (accept(T_COMMA));
         expect(T_RPAREN);
-        return e;
+        return member_suffix(e);
     }
     case T_LPAREN: {
         next();
@@ -304,7 +331,7 @@ static Expr *parse_primary(void)
             while (accept(T_COMMA));
             expect(T_RPAREN);
         }
-        e->lhs = v;
+        e->lhs = member_suffix(v);
         return e;
     }
     case K_PLUS:
@@ -424,20 +451,68 @@ static Expr *parse_expr(void)
 
 static Block *parse_block(int allow_decls);
 
-static Type parse_type(void)
+/* STRUCTURE ( member {, member} ),  member := IDENT [(NUMBER)] BYTE|ADDRESS
+   (PL/M-80 manual 6.2.7: no factoring, no BASED members, no nesting).
+   Member names are read raw: they are not names in any block scope. */
+static StructType *parse_members(void)
+{
+    StructType *st = xcalloc(1, sizeof *st);
+
+    expect(T_LPAREN);
+    do {
+        if (raw_type(0) == T_LPAREN)
+            error_at(peek()->loc, "structure members cannot be factored");
+        Token id = next_raw_ident();
+        for (int i = 0; i < st->members.len; i++)
+            if (!strcmp(((Member *)st->members.items[i])->name, id.text))
+                error_at(id.loc, "member %s is declared twice", id.text);
+        Member *m = xcalloc(1, sizeof *m);
+        m->name = id.text;
+        m->loc = id.loc;
+        if (peek_type(0) == K_BASED)
+            error_at(peek()->loc, "a structure member cannot be BASED");
+        if (accept(T_LPAREN)) {
+            Loc dl = peek()->loc;
+            if (peek_type(0) != T_NUMBER)
+                unexpected("an array dimension (a number)");
+            m->dim = next().value;
+            if (m->dim == 0)
+                error_at(dl, "array dimension must be from 1 to 65535");
+            expect(T_RPAREN);
+        }
+        if (peek_type(0) == K_STRUCTURE)
+            error_at(peek()->loc, "structures cannot be nested: a member must be BYTE or ADDRESS");
+        if (accept(K_BYTE))
+            m->type = TY_BYTE;
+        else if (accept(K_ADDRESS))
+            m->type = TY_ADDRESS;
+        else
+            unexpected("BYTE or ADDRESS");
+        vec_push(&st->members, m);
+    } while (accept(T_COMMA));
+    expect(T_RPAREN);
+    return st;
+}
+
+/* BYTE | ADDRESS | STRUCTURE (...); *st is set for a structure */
+static Type parse_type(StructType **st)
 {
     Token *t = peek();
 
+    *st = NULL;
     if (accept(K_BYTE))
         return TY_BYTE;
     if (accept(K_ADDRESS))
         return TY_ADDRESS;
+    if (accept(K_STRUCTURE)) {
+        *st = parse_members();
+        return TY_STRUCT;
+    }
     switch (t->type) {
     case K_LABEL: unsupported(t->loc, "LABEL declarations");
-    case K_STRUCTURE: unsupported(t->loc, "STRUCTURE");
     case K_DATA:
     case K_INITIAL: unsupported(t->loc, "initialized data");
-    default: unexpected("BYTE or ADDRESS");
+    default: unexpected("BYTE, ADDRESS or STRUCTURE");
     }
 }
 
@@ -501,7 +576,8 @@ static void parse_declare(Block *b)
             declare_name(first->text, next().text, first->loc);
             continue;
         }
-        Type type = parse_type();
+        StructType *st;
+        Type type = parse_type(&st);
         for (int i = 0; i < names.len; i++) {
             Token *id = names.items[i];
             VarDecl *v = xcalloc(1, sizeof *v);
@@ -510,6 +586,7 @@ static void parse_declare(Block *b)
             v->name = id->text;
             v->loc = id->loc;
             v->type = type;
+            v->st = st;                 /* factored names share the layout */
             v->dim = dim;
             v->dim_loc = dim_loc;
             if (bases.items[i]) {
@@ -657,7 +734,7 @@ static Stmt *parse_do(Loc loc, const Vec *labels)
     return s;
 }
 
-/* target := IDENT [ '(' expr ')' ] */
+/* target := IDENT [ '(' expr ')' ] [ '.' IDENT [ '(' expr ')' ] ] */
 static Expr *parse_target(void)
 {
     Token id = expect(T_IDENT);
@@ -671,7 +748,7 @@ static Expr *parse_target(void)
             error_at(peek()->loc, "an array takes exactly one subscript");
         expect(T_RPAREN);
     }
-    return e;
+    return member_suffix(e);
 }
 
 static Stmt *parse_assignment(void)

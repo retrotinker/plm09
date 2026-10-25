@@ -14,7 +14,10 @@
  * and a DO CASE with a "(expr) AND 3" selector and four cases.  Pointer
  * statements set P to the address of an array element (.BA(k), .WA(k), or
  * .BA / .WA) and read or write through the BASED variables PB, PW, PBA(i)
- * and PWA(i).  The expected output comes from an
+ * and PWA(i).  Structure operands SA(i).K and SA(i).V(j) (SA is an array
+ * of 5-byte structures, so subscripts are scaled by a multiply) appear in
+ * expressions and as assignment targets; i is a constant or "(expr) MOD 3",
+ * j a constant or "(expr) AND 1".  The expected output comes from an
  * independent C model of the PL/M-80 rules:
  *   constants <= 255 are BYTE
  *   + - MOD AND OR XOR: BYTE if both operands BYTE (wrapping), else ADDRESS
@@ -53,6 +56,7 @@ static unsigned rnd(unsigned n)
 
 static unsigned bvals[NVARS], wvals[NVARS];
 static unsigned barr[4], warr[4];      /* BA(0..3), WA(0..3) */
+static unsigned sk[3], sv[3][2];       /* SA(0..2).K, SA(0..2).V(0..1) */
 static int div_by_zero;
 
 static unsigned mask(int w)
@@ -108,6 +112,41 @@ static unsigned subscript(char *buf, int depth)
     return x.v & 3;
 }
 
+/* subscript 0..n-1 (n = 2 or 3): a constant, or (expr) AND 1 / MOD 3 */
+static unsigned small_subscript(char *buf, int depth, unsigned n)
+{
+    char a[BUFSZ];
+
+    if (depth >= MAXDEPTH || rnd(2)) {
+        unsigned k = rnd(n);
+        sprintf(buf, "%u", k);
+        return k;
+    }
+    Val x = expr(a, depth + 1);
+    snprintf(buf, BUFSZ, n == 2 ? "(%s) AND 1" : "(%s) MOD 3", a);
+    return n == 2 ? x.v & 1 : x.v % 3;
+}
+
+/* SA(i).K or SA(i).V(j) */
+static Val member(char *buf, int depth)
+{
+    char a[BUFSZ], b[BUFSZ];
+    unsigned i = small_subscript(a, depth, 3);
+    Val r;
+
+    if (rnd(2)) {
+        snprintf(buf, BUFSZ, "SA(%s).K", a);
+        r.v = sk[i];
+        r.w = 8;
+    } else {
+        unsigned j = small_subscript(b, depth, 2);
+        snprintf(buf, BUFSZ, "SA(%s).V(%s)", a, b);
+        r.v = sv[i][j];
+        r.w = 16;
+    }
+    return r;
+}
+
 static Val element(char *buf, int depth)
 {
     char a[BUFSZ];
@@ -132,7 +171,10 @@ static Val expr(char *buf, int depth)
     int k;
 
     if (depth >= MAXDEPTH || rnd(4) == 0)
-        return rnd(5) ? leaf(buf) : element(buf, depth);
+    {
+        int k = rnd(10);
+        return k < 7 ? leaf(buf) : k < 9 ? element(buf, depth) : member(buf, depth);
+    }
 
     k = rnd(17);
     if (k >= 14) {                          /* unary */
@@ -316,6 +358,7 @@ int main(int argc, char **argv)
     fprintf(plm, "DECLARE BA(4) BYTE, WA(4) ADDRESS, IB BYTE, (IW, SUM) ADDRESS;\n");
     fprintf(plm, "DECLARE P ADDRESS, PB BASED P BYTE, PW BASED P ADDRESS;\n");
     fprintf(plm, "DECLARE (PBA BASED P) (4) BYTE, (PWA BASED P) (4) ADDRESS;\n");
+    fprintf(plm, "DECLARE SA (3) STRUCTURE (K BYTE, V (2) ADDRESS);\n");
     for (int i = 0; i < NVARS; i++) {
         bvals[i] = rnd(4) ? rnd(256) : 255 * rnd(2);
         wvals[i] = rnd(4) ? rnd(65536) : 65535 * rnd(2);
@@ -326,13 +369,20 @@ int main(int argc, char **argv)
         warr[i] = rnd(65536);
         fprintf(plm, "BA(%d) = %u; WA(%d) = %u;\n", i, barr[i], i, warr[i]);
     }
+    for (int i = 0; i < 3; i++) {
+        sk[i] = rnd(256);
+        sv[i][0] = rnd(65536);
+        sv[i][1] = rnd(65536);
+        fprintf(plm, "SA(%d).K = %u; SA(%d).V(0) = %u; SA(%d).V(1) = %u;\n",
+                i, sk[i], i, sv[i][0], i, sv[i][1]);
+    }
     for (int s = 0; s < NSTMTS; s++) {
         Val v;
         do {
             div_by_zero = 0;
             v = expr(buf, 0);
         } while (div_by_zero);
-        switch (rnd(7)) {
+        switch (rnd(8)) {
         case 0:
             fprintf(plm, "RW = %s;\nCALL PUTDEC(RW);\n", buf);
             fprintf(exp, "%u\n", v.v);
@@ -370,6 +420,28 @@ int main(int argc, char **argv)
         case 6:
             gen_pointer(plm, exp);
             break;
+        case 7: {
+            /* store into a structure member, print it back */
+            char a[BUFSZ], b[BUFSZ];
+            unsigned i, j = 0;
+            int word = rnd(2);
+            do {
+                div_by_zero = 0;
+                i = small_subscript(a, 1, 3);
+                if (word)
+                    j = small_subscript(b, 1, 2);
+            } while (div_by_zero);
+            if (word) {
+                fprintf(plm, "SA(%s).V(%s) = %s;\nCALL PUTDEC(SA(%u).V(%u));\n", a, b, buf, i, j);
+                sv[i][j] = v.v;
+                fprintf(exp, "%u\n", v.v);
+            } else {
+                fprintf(plm, "SA(%s).K = %s;\nCALL PUTDEC(SA(%u).K);\n", a, buf, i);
+                sk[i] = v.v & 0xff;
+                fprintf(exp, "%u\n", sk[i]);
+            }
+            break;
+        }
         default:
             fprintf(plm, "IF %s THEN CALL PUTDEC(1); ELSE CALL PUTDEC(0);\n", buf);
             fprintf(exp, "%u\n", v.v & 1);
