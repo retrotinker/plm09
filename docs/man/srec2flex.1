@@ -1,0 +1,55 @@
+.TH SREC2FLEX 1 2026-10-26 plm09 "plm09 Manual"
+.SH NAME
+srec2flex \- convert S-records to a FLEX binary (.CMD) file
+.SH SYNOPSIS
+.B srec2flex
+.I in.s19
+.I out.cmd
+.SH DESCRIPTION
+.B srec2flex
+turns Motorola S-records, as
+.B "lwasm \-f srec"
+writes them, into a FLEX binary file, which FLEX 9 loads and runs as a
+command.
+.BR lwasm (1)
+has no FLEX output format of its own.
+.PP
+Each run of consecutive loaded bytes becomes $02 records (load address,
+count and data) of at most 252 bytes, in address order, as FLEX's SAVE
+command writes them.
+The S9 record's address becomes the $16 transfer address record that
+makes the file a command; an S9 record is therefore required (lwasm
+writes one for
+.BI "END " label ).
+S0 and S5 records are ignored, and every record's checksum is verified.
+.SH EXIT STATUS
+.TP
+.B 0
+The file was converted.
+.TP
+.B 1
+A malformed record, a bad checksum, an unsupported record type (S2, S3,
+S7, S8) or no S9 record.
+.TP
+.B 2
+A usage error, or a file that couldn't be read or written.
+.SH EXAMPLES
+Build a FLEX command from a PL/M program:
+.PP
+.RS
+.EX
+plmc \-o hello.asm hello.plm
+lwasm \-9 \-f srec \-I runtime \-I runtime/flex \-o hello.s19 hello.asm
+srec2flex hello.s19 HELLO.CMD
+.EE
+.RE
+.PP
+Then copy HELLO.CMD to a FLEX disk, or run it with
+.BR "sim6809 \-\-flex HELLO.CMD" .
+.SH SEE ALSO
+.BR plmc (1),
+.BR sim6809 (1)
+.PP
+The FLEX section of the plmc manual,
+.I docs/plmc.pdf
+in the plm09 source tree.

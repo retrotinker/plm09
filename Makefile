@@ -13,12 +13,14 @@ S2F  := $(BUILD)/srec2flex
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+MANDIR ?= $(PREFIX)/share/man
+MANPAGES := docs/man/plmc.1 docs/man/sim6809.1 docs/man/srec2flex.1
 
 N ?= 200
 OS9N ?= 25
 FLEXN ?= 25
 
-.PHONY: all install docs test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
+.PHONY: all install docs test man-test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
 
 all: $(PLMC) $(SIM) $(S2F)
 
@@ -43,14 +45,16 @@ $(BUILD)/src $(BUILD)/sim:
 -include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
 
 # install plmc, sim6809 and srec2flex in BINDIR (default $(PREFIX)/bin, PREFIX
-# default /usr/local); DESTDIR prefixes it for staged installs
+# default /usr/local) and their man pages in MANDIR/man1 (default
+# $(PREFIX)/share/man); DESTDIR prefixes both for staged installs
 install: all
-	install -d $(DESTDIR)$(BINDIR)
+	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man1
 	install -m 755 $(PLMC) $(SIM) $(S2F) $(DESTDIR)$(BINDIR)
+	install -m 644 $(MANPAGES) $(DESTDIR)$(MANDIR)/man1
 
-test: sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
+test: sim-test man-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
 
-sim-test lex-test parse-test err-test run-test coco-test xroar-test: all
+sim-test man-test lex-test parse-test err-test run-test coco-test xroar-test: all
 	tests/run_tests.sh $(@:-test=)
 
 fuzz-test: all

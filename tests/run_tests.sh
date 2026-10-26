@@ -308,6 +308,28 @@ suite_os9() {
     done
 }
 
+# The man pages in docs/man: each must format without groff warnings, and
+# must mention every option its program's --help lists.
+suite_man() {
+    local p o warn missing
+    for p in plmc sim6809 srec2flex; do
+        if [ ! -e "$ROOT/docs/man/$p.1" ]; then bad "man/$p" "no docs/man/$p.1"; continue; fi
+        warn=$(groff -man -ww -z "$ROOT/docs/man/$p.1" 2>&1)
+        [ -n "$warn" ] && { bad "man/$p" "groff warnings"; echo "$warn"; continue; }
+        # each option, written \- in roff, as a whole word
+        missing=$("$BUILD/$p" --help 2>&1 | python3 -I -c '
+import re, sys
+page = open(sys.argv[1]).read()
+for o in re.findall(r"^ +(-[-a-z0-9]+)", sys.stdin.read(), re.M):
+    roff = re.escape(o.replace("-", "\\-"))
+    if not re.search(r"(^|[^-A-Za-z0-9\\])" + roff + r"($|[^-A-Za-z0-9\\])", page, re.M):
+        print(o, end=" ")
+' "$ROOT/docs/man/$p.1")
+        [ -n "$missing" ] && { bad "man/$p" "options missing from the page:$missing"; continue; }
+        ok
+    done
+}
+
 # The run tests (and fuzz seeds) as FLEX commands: assembled with the FLEX
 # hooks, converted to a .CMD file by srec2flex, and run by sim6809 --flex,
 # which emulates the FLEX DOS entry points and protects FLEX's memory.
@@ -695,6 +717,7 @@ case ${1:-} in
     os9)   suite_os9 "${2:-25}" ;;
     nitros9) suite_nitros9 ;;
     flex)  suite_flex "${2:-25}" ;;
+    man)   suite_man ;;
     dragonflex) suite_dragonflex ;;
     simon6809) suite_simon6809 ;;
     kswichit) suite_kswichit ;;

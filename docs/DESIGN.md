@@ -43,6 +43,7 @@ tests/    run_tests.sh
 tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
           srec2flex.c (S-records to a FLEX .CMD file; built as build/srec2flex)
 docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
+          man/plmc.1  man/sim6809.1  man/srec2flex.1 (man pages)
 ```
 
 **Makefile targets**
@@ -50,9 +51,9 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 | Target | Effect |
 |---|---|
 | `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra -Werror` |
-| `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)`; `BINDIR` defaults to `$(PREFIX)/bin`, `PREFIX` to `/usr/local` |
-| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
-| `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
+| `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` and their man pages to `$(DESTDIR)$(MANDIR)/man1`; `BINDIR` defaults to `$(PREFIX)/bin`, `MANDIR` to `$(PREFIX)/share/man`, `PREFIX` to `/usr/local` |
+| `test` | runs the suites sim, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
+| `sim-test`, `man-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |
 | `flex-test FLEXN=25` | the flex suite, with FLEXN fuzz seeds |
 | `fuzz-test N=200` | the fuzz suite, with N seeds |
@@ -455,6 +456,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | Suite | Contents |
 |---|---|
 | sim | the checks above, plus the runtime routines (`rt_muldiv`, `rt_hooks`) |
+| man | each `docs/man/*.1` formats without warnings (`groff -man -ww -z`) and names every option its program's `--help` lists |
 | lex, parse | `--tokens` / `--ast` golden files |
 | err | programs that must fail; the `.err` file holds the expected message, with position |
 | run | complete programs in sim6809, covering every operator and conversion rule, control flow, input, procedures, HALT, `--org`/`--vectors`, and an assembly check with the example hooks |
@@ -560,5 +562,6 @@ Every changed or added feature updates the matching files in `docs/`, in the sam
 - `sim6809.md` for the simulator
 - this file for architecture, layout, test suites or milestones
 - `README.md` when anything users see changes
+- `man/*.1` when a program's options change
 
 Then rebuild the PDFs with `make docs`.

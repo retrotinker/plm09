@@ -69,7 +69,10 @@ make install    # copies plmc, sim6809 and srec2flex to BINDIR
 
 `BINDIR` defaults to `$(PREFIX)/bin`, and `PREFIX` to `/usr/local`; for
 example `make install BINDIR=~/bin`. `DESTDIR` is put in front for staged
-installs. The runtime and hooks files are not installed: lwasm reads them
+installs. The man pages `plmc(1)`, `sim6809(1)` and `srec2flex(1)` (from
+`docs/man/`) go to `MANDIR/man1`, `MANDIR` defaulting to
+`$(PREFIX)/share/man`, so `man plmc` summarizes the options. The runtime
+and hooks files are not installed: lwasm reads them
 from the source tree's `runtime/` directory (`-I`).
 
 A first program:

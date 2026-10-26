@@ -18,10 +18,13 @@ installed.
 make            # build/plmc and build/sim6809
 make test       # all test suites
 make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local/bin)
+                # and their man pages to MANDIR/man1 (default /usr/local/share/man)
 ```
 
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
-`$(PREFIX)/bin`) and `DESTDIR` (for staged installs) work as usual. The
+`$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`) and `DESTDIR` (for staged
+installs) work as usual. Then `man plmc`, `man sim6809` and `man
+srec2flex` give a summary of each program's options. The
 runtime and hooks files stay in the source tree's `runtime/`, which lwasm
 is pointed at with `-I`.
 

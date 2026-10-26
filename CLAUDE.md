@@ -13,10 +13,10 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 ## Commands
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
-- `make install` copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` (`BINDIR ?= $(PREFIX)/bin`, `PREFIX ?= /usr/local`); test it with `BINDIR=/tmp/...`, never into system paths.
+- `make install` copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` (`BINDIR ?= $(PREFIX)/bin`, `PREFIX ?= /usr/local`), and the man pages `docs/man/*.1` to `$(DESTDIR)$(MANDIR)/man1` (`MANDIR ?= $(PREFIX)/share/man`); test it with `BINDIR=/tmp/...`, never into system paths.
 - `make` also builds `build/srec2flex` (from `tools/srec2flex.c`), which turns S-records into a FLEX `.CMD` binary.
-- `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz.
-- A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, `make simon6809-test`, `make kswichit-test`, `make searle6809-test`, or `make fuzz-test N=500`.
+- `make test` runs every suite in this order: sim, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz.
+- A single suite: `make sim-test`, `make man-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, `make simon6809-test`, `make kswichit-test`, `make searle6809-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
 - `make docs` rebuilds `docs/plmc.pdf` and `docs/sim6809.pdf` from their Markdown sources with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
@@ -30,6 +30,7 @@ build/sim6809 build/t.s19 </dev/null; echo rc=$?
 
 **Test file conventions:**
 - **sim:** `sim/tests/X.asm` + `X.out`. The expected output is stdout followed by a last line `rc=N`. An optional first line `; SIMARGS: -n 1000` passes extra options to the simulator.
+- **man:** `docs/man/{plmc,sim6809,srec2flex}.1` must format with no output from `groff -man -ww -z`, and every option `--help` lists (lines starting with spaces and `-`) must appear in the page as a whole word, written with `\-`.
 - **lex / parse:** `tests/lex/X.plm` + `.tok` and `tests/parse/X.plm` + `.ast`. These are golden files compared with `plmc --tokens` and `plmc --ast` output.
 - **err:** `tests/err/X.plm` + `.err`. Compilation must fail, and its stderr must contain the first line of `.err`.
 - **run:** `tests/run/X.plm` + `.out`, plus optional `.rc` (expected exit status, default 0) and `.in` (fed to stdin). An optional first line `/* PLMCARGS: ... */` passes extra compiler options. The suite also checks that compiled code assembles with `runtime/example/` hooks.
@@ -85,6 +86,7 @@ Every changed or added feature must update the matching files in `docs/`, in the
 - `docs/sim6809.md`: simulator options, machine, CPU behavior, I/O, tracing
 - `docs/DESIGN.md`: architecture, repository layout, test suites, milestones and differences from the plan
 - `README.md` as well, whenever anything users see changes
+- `docs/man/plmc.1`, `sim6809.1`, `srec2flex.1` whenever a program's options, exit statuses or usage change (the man suite checks every `--help` option appears)
 
 Then run `make docs` and commit the regenerated PDFs. The manuals quote real output and messages, so take them from actual runs and check them against the code (for example `plmc --help`, and the `error_at`/`unsupported` strings in `src/`).
 

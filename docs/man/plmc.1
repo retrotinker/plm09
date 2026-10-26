@@ -1,0 +1,188 @@
+.TH PLMC 1 2026-10-26 plm09 "plm09 Manual"
+.SH NAME
+plmc \- PL/M-80 compiler for the Motorola 6809
+.SH SYNOPSIS
+.B plmc
+.RB [ \-o
+.IR file ]
+.RB [ \-\-org
+.IR addr ]
+.RB [ \-\-vectors ]
+.I file.plm
+.br
+.B plmc \-\-os9
+.RB [ \-o
+.IR file ]
+.RB [ \-\-stack
+.IR n ]
+.RB [ \-\-name
+.IR name ]
+.RB [ \-\-memory
+.IR n ]
+.I file.plm
+.br
+.B plmc
+.BR \-\-tokens | \-\-ast
+.I file.plm
+.SH DESCRIPTION
+.B plmc
+compiles a PL/M-80 program into 6809 assembly language for
+.BR lwasm (1).
+It implements PL/M-80 as described in Intel's
+.I PL/M-80 Programming Manual
+(9800268B): BYTE and ADDRESS variables, arrays, structures, BASED
+variables, INITIAL and DATA, LITERALLY, procedures (including REENTRANT
+and INTERRUPT procedures), labels and GOTO, and all the built-in
+procedures and predeclared variables.
+.PP
+The output does not depend on the machine it will run on.
+Everything machine-specific is in a hooks file,
+.IR plm_hooks.asm ,
+which lwasm finds through its include path, together with the startup
+code and runtime routines in the
+.I runtime
+directory of the plm09 source tree.
+To assemble the output:
+.PP
+.RS
+.EX
+lwasm \-9 \-f srec \-I runtime \-I runtime/\fItarget\fP \-o prog.s19 prog.asm
+.EE
+.RE
+.PP
+where
+.I target
+is one of the hooks directories:
+.TP
+.B sim
+the
+.BR sim6809 (1)
+simulator
+.TP
+.B coco
+the Tandy Color Computer under Color BASIC
+.RB ( "\-\-org 3000H" ,
+.B "lwasm \-f decb"
+for a .BIN file)
+.TP
+.B os9
+OS-9 and NitrOS-9 program modules (with
+.BR \-\-os9 ,
+and
+.BR "lwasm \-f os9" )
+.TP
+.B flex
+FLEX 9 commands (convert the S-records with
+.BR srec2flex (1))
+.TP
+.B simon6809
+the Simon6809 board, under its BUGGY monitor
+.RB ( "\-\-org 0400H" )
+.TP
+.B kswichit
+Wichit Sirichote's 6809 Microprocessor Kit
+.RB ( "\-\-org 0200H" )
+.TP
+.B searle6809
+Grant Searle's 6809 SBC, under ASSIST09 or BASIC
+.RB ( "\-\-org 1000H" )
+.TP
+.B example
+a template for a board with an MC6850 ACIA
+.PP
+Always pass
+.B \-9
+to lwasm, which otherwise accepts Hitachi 6309 instructions.
+.SH OPTIONS
+Numbers may be written in PL/M style
+.RB ( 2000H ),
+with
+.B $
+or
+.B 0x
+for hexadecimal, or in decimal.
+.TP
+.BI \-o " file"
+Write the assembly to
+.I file
+instead of standard output.
+.TP
+.BI \-\-org " addr"
+Load and start address of the program (default $0100).
+.TP
+.B \-\-vectors
+Also emit the 6809 reset vector at $FFFE, and the IRQ, FIRQ and NMI
+vectors of any INTERRUPT procedures, for programs that run from ROM.
+.TP
+.B \-\-os9
+Generate a position-independent, reentrant OS-9 program module.
+Variables are kept in the process's data area and addressed through U.
+.TP
+.BI \-\-stack " n"
+With
+.BR \-\-os9 :
+bytes of stack to reserve in the data area (default 256, at least 32).
+.TP
+.BI \-\-name " name"
+With
+.BR \-\-os9 :
+the module name (default: the program's name).
+.TP
+.BI \-\-memory " n"
+With
+.BR \-\-os9 :
+bytes of the data area for the predeclared array MEMORY (default 0).
+.TP
+.B \-\-tokens
+Print the program's tokens and stop.
+.TP
+.B \-\-ast
+Print the syntax tree, after LITERALLY substitution, and stop.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit.
+.SH DIAGNOSTICS
+Errors and warnings are printed as
+.IP
+.IB file : line : column ": error: " message
+.PP
+and compilation stops at the first error.
+Warnings do not stop compilation or change the exit status.
+.SH EXIT STATUS
+.TP
+.B 0
+The program was compiled (or the tokens or tree printed).
+.TP
+.B 1
+An error in the program, or a file that couldn't be read or written.
+.TP
+.B 2
+A usage error.
+.SH EXAMPLES
+Compile, assemble and run a program in the simulator:
+.PP
+.RS
+.EX
+plmc \-o sum.asm sum.plm
+lwasm \-9 \-f srec \-I runtime \-I runtime/sim \-o sum.s19 sum.asm
+sim6809 sum.s19
+.EE
+.RE
+.PP
+Build an OS-9 module:
+.PP
+.RS
+.EX
+plmc \-\-os9 \-\-name sum \-o sum.asm sum.plm
+lwasm \-9 \-f os9 \-I runtime \-I runtime/os9 \-o sum sum.asm
+.EE
+.RE
+.SH SEE ALSO
+.BR sim6809 (1),
+.BR srec2flex (1),
+.BR lwasm (1)
+.PP
+The plmc manual,
+.I docs/plmc.pdf
+in the plm09 source tree, describes the language, the hooks and the
+generated code in detail.

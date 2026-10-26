@@ -1,0 +1,205 @@
+.TH SIM6809 1 2026-10-26 plm09 "plm09 Manual"
+.SH NAME
+sim6809 \- headless Motorola 6809 simulator
+.SH SYNOPSIS
+.B sim6809
+.RI [ options ]
+.I prog.s19
+.br
+.B sim6809 \-\-os9
+.RB [ \-\-load
+.IR addr ]
+.RB [ \-\-data
+.IR addr ]
+.RB [ \-\-param
+.IR string ]
+.RI [ options ]
+.I module
+.br
+.B sim6809 \-\-flex
+.RI [ options ]
+.I prog.cmd
+.SH DESCRIPTION
+.B sim6809
+runs a 6809 program without a display: the complete documented MC6809
+instruction set, with interrupts, and a 16-byte I/O block for character
+I/O and the exit status.
+It loads Motorola S-records (S1 and S9; S0 and S5 are ignored) and Intel
+HEX records (types 00 and 01), and starts at the S9 record's address,
+.BR \-\-entry ,
+or with
+.BR \-\-reset ,
+the reset vector.
+Memory is 64 KB of RAM, filled with $A5 at the start.
+.PP
+It was written to test
+.BR plmc (1)'s
+output, and can also stand in for OS-9 (running program modules), FLEX
+(running .CMD files), and small boards, with their own ROMs (an MC6850
+ACIA, an FT245RL USB FIFO, software interrupts and ROM).
+.SH OPTIONS
+Numbers are decimal unless they start with
+.B 0x
+or
+.BR $ .
+.TP
+.B \-t
+Trace each instruction to standard error before it runs: its address,
+bytes, disassembly and the registers.
+.TP
+.BI \-n " n"
+Stop after
+.I n
+instructions (default 100000000).
+.TP
+.BI \-\-io " base"
+Put the I/O block at
+.I base
+(default $FF00).
+.TP
+.BI \-\-entry " addr"
+Start at
+.IR addr .
+.TP
+.B \-\-reset
+Start at the address in the reset vector ($FFFE), as the 6809 does; for
+ROM images.
+.TP
+.BI \-\-rom " addr"
+Memory from
+.I addr
+to $FFFF is ROM: writes to it are ignored.
+.TP
+.B \-\-zero
+Clear memory instead of filling it with $A5.
+.TP
+.B \-\-os9
+The file is an OS-9 program module.
+Set up a process as F$Fork does, emulate the system calls F$Exit,
+I$Read, I$ReadLn, I$Write and I$WritLn, and enforce memory protection:
+code must stay in the module, and writes in the data area.
+.TP
+.BI \-\-load " addr"
+With
+.BR \-\-os9 :
+load the module at
+.I addr
+(default $2000).
+.TP
+.BI \-\-data " addr"
+With
+.BR \-\-os9 :
+put the data area at
+.IR addr ,
+a multiple of 256 (default $8000).
+.TP
+.BI \-\-param " string"
+With
+.BR \-\-os9 :
+the parameter string (default empty).
+.TP
+.B \-\-flex
+The file is a FLEX binary (.CMD).
+Emulate the FLEX DOS entry points that programs call (the terminal and
+number routines; WARMS ends the run, with B as the exit status) and
+protect FLEX's memory ($C700\-$DFFF).
+.TP
+.BI \-\-acia " addr"
+An MC6850 ACIA with its status at
+.I addr
+and data at
+.IR addr +1,
+on standard input and output.
+A character is offered once the program has polled the status 32 times
+since its last data access, as a person types after a prompt.
+At the end of input it reads 0.
+.TP
+.B \-\-stop\-at\-end
+With
+.BR \-\-acia :
+a program that waits for input after its end ends the run, with exit
+status 0, instead of reading 0.
+.TP
+.BI \-\-ft245 " addr"
+An FT245RL USB FIFO at
+.IR addr ,
+on standard input and output, asserting FIRQ while input is waiting.
+Waiting (SYNC or CWAI) after the end of input ends the run with exit
+status 0.
+.TP
+.B \-\-swi
+Execute SWI, SWI2 and SWI3 through their vectors instead of stopping.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit.
+.SH I/O BLOCK
+Offsets from the base ($FF00):
+.TP
+.B +0
+write: print the character
+.TP
+.B +1
+read: the next character of standard input, 0 at its end
+.TP
+.B +2
+write: stop, with the byte as the exit status
+.TP
+.B +4, +5
+write: print the 16-bit value (high byte at +4) in decimal and a newline,
+on the write to +5
+.TP
+.B +6
+write: assert interrupt lines (1 IRQ, 2 FIRQ, 4 NMI); read: the asserted
+lines
+.TP
+.B +7
+write: release lines
+.TP
+.B +8, +9
+write: the timer period in instructions, started by the write to +9 (0
+stops it)
+.TP
+.B +10
+write: the lines the timer asserts (default IRQ)
+.SH EXIT STATUS
+.TP
+.B 0\-255
+The value the program wrote to the exit port (or B, for OS-9's F$Exit
+and FLEX's WARMS).
+.TP
+.B 124
+The instruction limit was reached.
+.TP
+.B 125
+An illegal opcode or indexed postbyte, SWI without
+.BR \-\-swi ,
+an unsupported OS-9 call or FLEX entry point, or a memory protection
+violation.
+The registers are printed to standard error.
+.TP
+.B 2
+A usage error, or a file that couldn't be loaded.
+.SH EXAMPLES
+Run a program, with input from a file, and trace it:
+.PP
+.RS
+.EX
+sim6809 \-t prog.s19 < input.txt 2> trace.txt
+.EE
+.RE
+.PP
+Run Grant Searle's 6809 SBC BASIC ROM, an Intel HEX file, on the terminal:
+.PP
+.RS
+.EX
+sim6809 \-\-acia 0xA000 \-\-io 0x9000 \-\-rom 0xC000 \-\-reset ExBasROM.hex
+.EE
+.RE
+.SH SEE ALSO
+.BR plmc (1),
+.BR srec2flex (1)
+.PP
+The sim6809 manual,
+.I docs/sim6809.pdf
+in the plm09 source tree, describes the CPU, the devices, the OS-9 and
+FLEX modes and tracing in detail.
