@@ -45,7 +45,9 @@ static void usage(FILE *f)
             "                input is waiting), as on the Simon6809 board; waiting\n"
             "                for input after the end of stdin ends the run (status 0)\n"
             "  --flex        prog is a FLEX binary (.CMD) file; emulate the FLEX DOS\n"
-            "                entry points (WARMS ends the run with exit status B)\n");
+            "                entry points (WARMS ends the run with exit status B)\n"
+            "  -h, --help    print this summary\n"
+            "  --version     print the version\n");
 }
 
 /* parse a number: decimal, 0x hex, or $ hex */
@@ -106,6 +108,9 @@ int main(int argc, char **argv)
         const char *a = argv[i];
         if (!strcmp(a, "-h") || !strcmp(a, "--help")) {
             usage(stdout);
+            return 0;
+        } else if (!strcmp(a, "--version")) {
+            printf("%s (plm09) %s\n", "sim6809", PLM09_VERSION);
             return 0;
         } else if (!strcmp(a, "-t")) {
             tracing = 1;

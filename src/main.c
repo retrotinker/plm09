@@ -24,7 +24,9 @@ static void usage(FILE *f)
             "  --name NAME   with --os9: module name (default: the program's name)\n"
             "  --memory N    with --os9: bytes of the data area for MEMORY (default 0)\n"
             "  --tokens      print the token stream and stop\n"
-            "  --ast         print the syntax tree and stop\n");
+            "  --ast         print the syntax tree and stop\n"
+            "  -h, --help    print this summary\n"
+            "  --version     print the version\n");
 }
 
 static char *read_file(const char *path)
@@ -94,6 +96,9 @@ int main(int argc, char **argv)
         const char *a = argv[i];
         if (!strcmp(a, "-h") || !strcmp(a, "--help")) {
             usage(stdout);
+            return 0;
+        } else if (!strcmp(a, "--version")) {
+            printf("%s (plm09) %s\n", "plmc", PLM09_VERSION);
             return 0;
         } else if (!strcmp(a, "--tokens")) {
             tokens = 1;

@@ -28,7 +28,7 @@ The repository is `/home/linville/claude/plm09/`, a git repo with one commit per
 
 ## Layout
 ```
-Makefile  README.md  CLAUDE.md  .gitignore
+Makefile  README.md  CLAUDE.md  LICENSE (MIT)  plm09.spec (Fedora RPM)  .gitignore
 src/      main.c util.[ch] lexer.[ch] ast.[ch] parser.[ch] symtab.[ch] sema.[ch] codegen.[ch]
 runtime/  plm_crt0.asm  plm_crt0_os9.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
           sim/ coco/ os9/ flex/ example/  plm_hooks.asm   (chosen with -I)
@@ -50,8 +50,9 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 
 | Target | Effect |
 |---|---|
-| `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra -Werror` |
-| `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` and their man pages to `$(DESTDIR)$(MANDIR)/man1`; `BINDIR` defaults to `$(PREFIX)/bin`, `MANDIR` to `$(PREFIX)/share/man`, `PREFIX` to `/usr/local` |
+| `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS)` and `$(LDFLAGS)`; `CFLAGS` (default `-O2 -g`) and `LDFLAGS` can be replaced, as rpmbuild does, and `WERROR` (default `-Werror`) is emptied by the spec; `VERSION` (0.1.0) becomes `PLM09_VERSION`, printed by `--version` |
+| `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` and their man pages to `$(DESTDIR)$(MANDIR)/man1`, and `runtime/` to `$(DESTDIR)$(DATADIR)/plm09/runtime`; `BINDIR` defaults to `$(PREFIX)/bin`, `MANDIR` to `$(PREFIX)/share/man`, `DATADIR` to `$(PREFIX)/share`, `PREFIX` to `/usr/local` |
+| `rpm`, `srpm` | `git archive` of HEAD to `build/rpm/SOURCES/plm09-$(VERSION).tar.gz`, then `rpmbuild -ba`/`-bs plm09.spec` with `_topdir` `build/rpm`; `%check` runs sim, man, lex, parse, err, run and fuzz |
 | `test` | runs the suites sim, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
 | `sim-test`, `man-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |

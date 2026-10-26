@@ -12,8 +12,9 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 
 ## Commands
 
-- `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
-- `make install` copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` (`BINDIR ?= $(PREFIX)/bin`, `PREFIX ?= /usr/local`), and the man pages `docs/man/*.1` to `$(DESTDIR)$(MANDIR)/man1` (`MANDIR ?= $(PREFIX)/share/man`); test it with `BINDIR=/tmp/...`, never into system paths.
+- `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors (`WERROR ?= -Werror`; `CFLAGS`/`LDFLAGS` are only `-O2 -g`/empty, so rpmbuild's flags can replace them without losing the warnings).
+- `make install` copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` (`BINDIR ?= $(PREFIX)/bin`, `PREFIX ?= /usr/local`), and the man pages `docs/man/*.1` to `$(DESTDIR)$(MANDIR)/man1` (`MANDIR ?= $(PREFIX)/share/man`); it also copies `runtime/` to `$(DATADIR)/plm09/runtime`. Test it with `DESTDIR=/tmp/...`, never into system paths.
+- `make rpm` / `make srpm` build `plm09.spec` from `git archive HEAD` (commit first) into `build/rpm`; check with `rpmlint` and `mock -r fedora-44-x86_64`. `VERSION` in the Makefile (`PLM09_VERSION`, printed by `--version`) must match the spec's `Version`; bump both and add a `%changelog` entry together. The spec's `%check` runs only the suites needing no external images.
 - `make` also builds `build/srec2flex` (from `tools/srec2flex.c`), which turns S-records into a FLEX `.CMD` binary.
 - `make test` runs every suite in this order: sim, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz.
 - A single suite: `make sim-test`, `make man-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, `make simon6809-test`, `make kswichit-test`, `make searle6809-test`, or `make fuzz-test N=500`.

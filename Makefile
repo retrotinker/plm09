@@ -1,5 +1,11 @@
+VERSION := 0.1.0
+
+# CFLAGS and LDFLAGS may be replaced (rpmbuild sets its own); the language
+# and warning flags are always used, and WERROR= turns off -Werror
 CC      ?= gcc
-CFLAGS  ?= -std=c11 -Wall -Wextra -Werror -O2 -g
+CFLAGS  ?= -O2 -g
+WERROR  ?= -Werror
+ALL_CFLAGS = -std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS) -DPLM09_VERSION='"$(VERSION)"'
 BUILD   := build
 
 PLMC_SRCS := $(wildcard src/*.c)
@@ -14,30 +20,32 @@ S2F  := $(BUILD)/srec2flex
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
+DATADIR ?= $(PREFIX)/share
+RUNTIME_DIRS := $(sort $(dir $(wildcard runtime/*/plm_hooks.asm)))
 MANPAGES := docs/man/plmc.1 docs/man/sim6809.1 docs/man/srec2flex.1
 
 N ?= 200
 OS9N ?= 25
 FLEXN ?= 25
 
-.PHONY: all install docs test man-test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
+.PHONY: all install rpm srpm docs test man-test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
 
 all: $(PLMC) $(SIM) $(S2F)
 
 $(PLMC): $(PLMC_OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o $@ $^
 
 $(SIM): $(SIM_OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o $@ $^
 
 $(S2F): tools/srec2flex.c | $(BUILD)/src
-	$(CC) $(CFLAGS) -o $@ $<
+	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o $@ $<
 
 $(BUILD)/src/%.o: src/%.c | $(BUILD)/src
-	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+	$(CC) $(ALL_CFLAGS) -MMD -MP -c -o $@ $<
 
 $(BUILD)/sim/%.o: sim/%.c | $(BUILD)/sim
-	$(CC) $(CFLAGS) -MMD -MP -c -o $@ $<
+	$(CC) $(ALL_CFLAGS) -MMD -MP -c -o $@ $<
 
 $(BUILD)/src $(BUILD)/sim:
 	mkdir -p $@
@@ -45,12 +53,35 @@ $(BUILD)/src $(BUILD)/sim:
 -include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
 
 # install plmc, sim6809 and srec2flex in BINDIR (default $(PREFIX)/bin, PREFIX
-# default /usr/local) and their man pages in MANDIR/man1 (default
-# $(PREFIX)/share/man); DESTDIR prefixes both for staged installs
+# default /usr/local), their man pages in MANDIR/man1 (default
+# $(PREFIX)/share/man) and the runtime in DATADIR/plm09/runtime (default
+# $(PREFIX)/share); DESTDIR prefixes them all for staged installs
 install: all
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man1
 	install -m 755 $(PLMC) $(SIM) $(S2F) $(DESTDIR)$(BINDIR)
 	install -m 644 $(MANPAGES) $(DESTDIR)$(MANDIR)/man1
+	install -d $(DESTDIR)$(DATADIR)/plm09/runtime
+	install -m 644 runtime/*.asm $(DESTDIR)$(DATADIR)/plm09/runtime
+	for d in $(RUNTIME_DIRS); do \
+		install -d $(DESTDIR)$(DATADIR)/plm09/$$d && \
+		install -m 644 $$d*.asm $(DESTDIR)$(DATADIR)/plm09/$$d || exit 1; \
+	done
+
+# Fedora RPMs from the committed tree (HEAD), in build/rpm
+RPMTOP := $(abspath $(BUILD)/rpm)
+TARBALL := $(RPMTOP)/SOURCES/plm09-$(VERSION).tar.gz
+
+$(TARBALL): .FORCE
+	mkdir -p $(RPMTOP)/SOURCES
+	git archive --format=tar.gz --prefix=plm09-$(VERSION)/ -o $@ HEAD
+
+rpm: $(TARBALL)
+	rpmbuild -ba --define "_topdir $(RPMTOP)" plm09.spec
+
+srpm: $(TARBALL)
+	rpmbuild -bs --define "_topdir $(RPMTOP)" plm09.spec
+
+.FORCE:
 
 test: sim-test man-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
 

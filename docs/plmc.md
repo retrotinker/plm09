@@ -72,8 +72,14 @@ example `make install BINDIR=~/bin`. `DESTDIR` is put in front for staged
 installs. The man pages `plmc(1)`, `sim6809(1)` and `srec2flex(1)` (from
 `docs/man/`) go to `MANDIR/man1`, `MANDIR` defaulting to
 `$(PREFIX)/share/man`, so `man plmc` summarizes the options. The runtime
-and hooks files are not installed: lwasm reads them
-from the source tree's `runtime/` directory (`-I`).
+and hooks files go to `DATADIR/plm09/runtime` (`DATADIR` defaults to
+`$(PREFIX)/share`): with an installed plmc, write
+`-I /usr/local/share/plm09/runtime -I /usr/local/share/plm09/runtime/sim`
+wherever this manual has `-I runtime -I runtime/sim`.
+
+`make rpm` builds a Fedora RPM from `plm09.spec` (the committed tree, into
+`build/rpm`), which installs in `/usr`, so the runtime is in
+`/usr/share/plm09/runtime`. `plmc --version` prints the version.
 
 A first program:
 
@@ -122,6 +128,7 @@ plmc [options] file.plm
 | `--tokens` | Print the token stream and stop. See [Inspecting the compiler's view]. |
 | `--ast` | Print the syntax tree and stop. |
 | `-h`, `--help` | Print a usage summary and exit. |
+| `--version` | Print `plmc (plm09) ` and the version, and exit. |
 
 The `--org` address and `--stack` size can be written as decimal (`8192`),
 `0x2000`, `$2000` (quote it for the shell) or PL/M style `2000H`, and must fit
@@ -1179,7 +1186,9 @@ The assembly plmc writes always ends with:
 ```
 
 lwasm searches its `-I` directories for these files. `plm_rt.asm` and
-`plm_crt0.asm` come from `runtime/`. Which `plm_hooks.asm` is used depends on
+`plm_crt0.asm` come from `runtime/` (installed as
+`/usr/share/plm09/runtime` by the RPM, or `/usr/local/share/plm09/runtime`
+by `make install`). Which `plm_hooks.asm` is used depends on
 which hooks directory is on the include path, so **the same `.asm` file can
 be assembled for different machines** without recompiling:
 

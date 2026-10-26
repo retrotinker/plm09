@@ -22,11 +22,33 @@ make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local
 ```
 
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
-`$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`) and `DESTDIR` (for staged
-installs) work as usual. Then `man plmc`, `man sim6809` and `man
-srec2flex` give a summary of each program's options. The
-runtime and hooks files stay in the source tree's `runtime/`, which lwasm
-is pointed at with `-I`.
+`$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`, DATADIR `$(PREFIX)/share`) and
+`DESTDIR` (for staged installs) work as usual. The runtime and hooks files
+are installed in `DATADIR/plm09/runtime`, so an installed plmc's output is
+assembled with `-I /usr/local/share/plm09/runtime -I
+/usr/local/share/plm09/runtime/sim` in place of `-I runtime -I runtime/sim`.
+`--version` prints each program's version (0.1.0). Then `man plmc`, `man sim6809` and `man
+srec2flex` give a summary of each program's options. 
+
+**Fedora RPM:** `make rpm` builds `plm09.spec` from the committed tree (HEAD;
+uncommitted changes are left out) into `build/rpm`, running the test suites
+that need only lwasm, python3 and groff; `make srpm` makes just the source
+RPM (for `mock`). Then:
+
+```
+sudo dnf install build/rpm/RPMS/x86_64/plm09-0.1.0-1.*.x86_64.rpm
+```
+
+It installs the programs in `/usr/bin`, the man pages, and the runtime in
+`/usr/share/plm09/runtime`:
+
+```
+plmc -o hello.asm hello.plm
+lwasm -9 -f srec -I /usr/share/plm09/runtime -I /usr/share/plm09/runtime/sim -o hello.s19 hello.asm
+sim6809 hello.s19
+```
+
+plm09 is under the MIT license (see `LICENSE`).
 
 ## Quick start
 
@@ -377,6 +399,7 @@ It implements the full MC6809 instruction set, IRQ/FIRQ/NMI (level-triggered IRQ
 | Suite | What it checks |
 |---|---|
 | `sim` | 6809 self-tests written in assembly with hand-checked expected values; the runtime routines; and every opcode in every addressing mode against lwasm's listing |
+| `man` | the man pages format without groff warnings and name every `--help` option |
 | `lex`, `parse` | `--tokens` and `--ast` output against golden files |
 | `err` | each program must fail to compile with the expected message |
 | `run` | compile, assemble, run, and compare output and exit status |

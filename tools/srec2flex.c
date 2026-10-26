@@ -46,6 +46,16 @@ int main(int argc, char **argv)
     int have_entry = 0, line = 0;
     FILE *in, *out;
 
+    if (argc == 2 && !strcmp(argv[1], "--version")) {
+        printf("srec2flex (plm09) %s\n", PLM09_VERSION);
+        return 0;
+    }
+    if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) {
+        printf("usage: srec2flex in.s19 out.cmd\n"
+               "  -h, --help    print this summary\n"
+               "  --version     print the version\n");
+        return 0;
+    }
     if (argc != 3) {
         fprintf(stderr, "usage: srec2flex in.s19 out.cmd\n");
         return 2;

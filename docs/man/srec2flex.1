@@ -5,6 +5,9 @@ srec2flex \- convert S-records to a FLEX binary (.CMD) file
 .B srec2flex
 .I in.s19
 .I out.cmd
+.br
+.B srec2flex
+.BR \-h | \-\-help | \-\-version
 .SH DESCRIPTION
 .B srec2flex
 turns Motorola S-records, as
@@ -22,6 +25,13 @@ makes the file a command; an S9 record is therefore required (lwasm
 writes one for
 .BI "END " label ).
 S0 and S5 records are ignored, and every record's checksum is verified.
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary and exit.
+.TP
+.B \-\-version
+Print the version and exit.
 .SH EXIT STATUS
 .TP
 .B 0
