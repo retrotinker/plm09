@@ -42,9 +42,8 @@ place of `-I runtime -I runtime/sim`.
 uncommitted changes are left out) into `build/rpm`, running the test suites
 that need only lwasm, python3 and groff; `make srpm` makes just the source
 RPM (for `mock`). The RPM build applies a patch, made by
-`tools/rpmdocs.py`, that changes the runtime paths in the documentation
-(`-I runtime` and so on) to the installed directory, `%{_datadir}/plm09/runtime`,
-and rebuilds the PDFs. Then:
+`tools/rpmdocs.py`, that changes the documentation's runtime paths to the
+installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:
 
 ```
 sudo dnf install build/rpm/RPMS/x86_64/plm09-0.1.0-1.*.x86_64.rpm

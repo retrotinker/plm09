@@ -39,10 +39,11 @@ The output does not depend on the machine it will run on.
 Everything machine-specific is in a hooks file,
 .IR plm_hooks.asm ,
 which lwasm finds through its include path, together with the startup
-code and runtime routines in the
+code and runtime routines, in
 .\" installed-paths
 .\" .IR @RUNTIME@ .
 .\" source-paths
+the
 .I runtime
 directory of the plm09 source tree, installed in
 .IR DATADIR /plm09/runtime

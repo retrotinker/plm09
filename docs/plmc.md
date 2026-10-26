@@ -972,12 +972,12 @@ The 8080 has 256 I/O ports; the 6809 has memory-mapped I/O instead. In
 plmc, **port n is the byte at `RT_PORTS + n`**, an address the hooks
 define:
 
-| Hooks | `RT_PORTS` | So |
+| Hooks (in `runtime/`) | `RT_PORTS` | So |
 |---|---|---|
-| `runtime/sim` | `$FF00`, the I/O block | `OUTPUT(0)` prints a character, `INPUT(1)` reads one, `OUTPUT(4)`/`OUTPUT(5)` print a number, `OUTPUT(2)` exits |
-| `runtime/coco` | `$FF00`, the I/O page | port n is `$FF00 + n`: the PIAs (0--3, 20H--23H), the disk controller (40H--5FH), the SAM (0C0H--0DFH) |
-| `runtime/os9` | `$FF00`, the CoCo 3's I/O page | as on the CoCo; usually better left to OS-9's drivers |
-| `runtime/example` | `ACIA_BASE` | port 0 is the ACIA's status/control register, port 1 its data register |
+| `sim` | `$FF00`, the I/O block | `OUTPUT(0)` prints a character, `INPUT(1)` reads one, `OUTPUT(4)`/`OUTPUT(5)` print a number, `OUTPUT(2)` exits |
+| `coco` | `$FF00`, the I/O page | port n is `$FF00 + n`: the PIAs (0--3, 20H--23H), the disk controller (40H--5FH), the SAM (0C0H--0DFH) |
+| `os9` | `$FF00`, the CoCo 3's I/O page | as on the CoCo; usually better left to OS-9's drivers |
+| `example` | `ACIA_BASE` | port 0 is the ACIA's status/control register, port 1 its data register |
 
 * **`INPUT(n)`** is a BYTE; `n` must be a constant from 0 to 255.
 * **`OUTPUT(n) = value`** is the only use of `OUTPUT`, again with a
@@ -1264,9 +1264,10 @@ GETCH:  PROCEDURE BYTE EXTERNAL;                      END GETCH;
 EXIT:   PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE; END EXIT;
 ```
 
-`PUTDEC` prints a number in decimal followed by a newline.
+`PUTDEC` prints a number in decimal followed by a newline. The hooks in
+the `sim`, `coco`, `os9` and `example` directories of `runtime/` compared:
 
-| | `runtime/sim` | `runtime/coco` | `runtime/os9` | `runtime/example` |
+| | `sim` | `coco` | `os9` | `example` |
 |---|---|---|---|---|
 | `PUTCH` | simulator I/O port | Color BASIC CHROUT; LF sent as CR | `I$Write` to path 1; LF sent as CR | MC6850 ACIA, waits until ready to send |
 | `GETCH` | stdin; 0 at end of input | waits for a key (POLCAT); ENTER gives 13 | `I$Read` from path 0; 0 at end of file | ACIA, waits for a character |
