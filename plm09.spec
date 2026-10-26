@@ -19,8 +19,7 @@ Requires:       lwtools
 plm09 is a compiler for PL/M-80, plmc, that emits Motorola 6809 assembly
 language for lwasm, together with the startup code, runtime routines and
 hooks for several targets (the sim6809 simulator, the Tandy Color Computer,
-OS-9 and NitrOS-9, FLEX 9 and small 6809 boards), installed in
-%{_datadir}/%{name}/runtime.
+OS-9 and NitrOS-9, FLEX 9 and small 6809 boards).
 
 It also includes sim6809, a headless MC6809 simulator with OS-9 and FLEX
 environments and serial devices, and srec2flex, which converts S-records
