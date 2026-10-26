@@ -42,11 +42,11 @@ $(BUILD)/src $(BUILD)/sim:
 
 -include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
 
-# install plmc and sim6809 in BINDIR (default $(PREFIX)/bin, PREFIX
+# install plmc, sim6809 and srec2flex in BINDIR (default $(PREFIX)/bin, PREFIX
 # default /usr/local); DESTDIR prefixes it for staged installs
 install: all
 	install -d $(DESTDIR)$(BINDIR)
-	install -m 755 $(PLMC) $(SIM) $(DESTDIR)$(BINDIR)
+	install -m 755 $(PLMC) $(SIM) $(S2F) $(DESTDIR)$(BINDIR)
 
 test: sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
 

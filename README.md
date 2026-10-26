@@ -17,7 +17,7 @@ installed.
 ```
 make            # build/plmc and build/sim6809
 make test       # all test suites
-make install    # copy plmc and sim6809 to BINDIR (default /usr/local/bin)
+make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local/bin)
 ```
 
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is

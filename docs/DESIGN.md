@@ -50,7 +50,7 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 | Target | Effect |
 |---|---|
 | `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra -Werror` |
-| `install` | copies `plmc` and `sim6809` to `$(DESTDIR)$(BINDIR)`; `BINDIR` defaults to `$(PREFIX)/bin`, `PREFIX` to `/usr/local` |
+| `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)`; `BINDIR` defaults to `$(PREFIX)/bin`, `PREFIX` to `/usr/local` |
 | `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
 | `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |

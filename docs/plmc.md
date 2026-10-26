@@ -64,7 +64,7 @@ include path. Eight hooks files come with plmc:
 ```
 make            # builds build/plmc, build/sim6809 and build/srec2flex
 make test       # runs every test suite
-make install    # copies plmc and sim6809 to BINDIR
+make install    # copies plmc, sim6809 and srec2flex to BINDIR
 ```
 
 `BINDIR` defaults to `$(PREFIX)/bin`, and `PREFIX` to `/usr/local`; for

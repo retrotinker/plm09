@@ -13,7 +13,7 @@ Requirements: gcc, make, lwasm/lwtools on PATH, and python3 (to generate one sim
 ## Commands
 
 - `make` builds `build/plmc` and `build/sim6809` with `-std=c11 -Wall -Wextra -Werror`. Warnings are errors.
-- `make install` copies `plmc` and `sim6809` to `$(DESTDIR)$(BINDIR)` (`BINDIR ?= $(PREFIX)/bin`, `PREFIX ?= /usr/local`); test it with `BINDIR=/tmp/...`, never into system paths.
+- `make install` copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` (`BINDIR ?= $(PREFIX)/bin`, `PREFIX ?= /usr/local`); test it with `BINDIR=/tmp/...`, never into system paths.
 - `make` also builds `build/srec2flex` (from `tools/srec2flex.c`), which turns S-records into a FLEX `.CMD` binary.
 - `make test` runs every suite in this order: sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz.
 - A single suite: `make sim-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, `make simon6809-test`, `make kswichit-test`, `make searle6809-test`, or `make fuzz-test N=500`.
