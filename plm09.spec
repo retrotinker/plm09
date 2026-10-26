@@ -12,7 +12,8 @@ Patch0:         %{name}-%{version}-datadir.patch
 
 BuildRequires:  gcc
 BuildRequires:  make
-# to rebuild the PDF manuals from the patched Markdown
+# to rebuild the PDF manuals from the patched Markdown (the packages pandoc's
+# template loads only if they are installed, such as parskip, are left out)
 BuildRequires:  pandoc-cli
 BuildRequires:  texlive-xetex
 BuildRequires:  texlive-lm
@@ -22,15 +23,12 @@ BuildRequires:  tex(bookmark.sty)
 BuildRequires:  tex(booktabs.sty)
 BuildRequires:  tex(etoolbox.sty)
 BuildRequires:  tex(fontspec.sty)
-BuildRequires:  tex(footnote.sty)
 BuildRequires:  tex(geometry.sty)
 BuildRequires:  tex(hyperref.sty)
 BuildRequires:  tex(iftex.sty)
 BuildRequires:  tex(longtable.sty)
 BuildRequires:  tex(microtype.sty)
-BuildRequires:  tex(parskip.sty)
 BuildRequires:  tex(unicode-math.sty)
-BuildRequires:  tex(upquote.sty)
 BuildRequires:  tex(xcolor.sty)
 BuildRequires:  tex(xurl.sty)
 # for %%check
