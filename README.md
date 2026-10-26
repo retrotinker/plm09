@@ -23,17 +23,28 @@ make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local
 
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
 `$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`, DATADIR `$(PREFIX)/share`) and
-`DESTDIR` (for staged installs) work as usual. The runtime and hooks files
-are installed in `DATADIR/plm09/runtime`, so an installed plmc's output is
-assembled with `-I /usr/local/share/plm09/runtime -I
-/usr/local/share/plm09/runtime/sim` in place of `-I runtime -I runtime/sim`.
-`--version` prints each program's version (0.1.0). Then `man plmc`, `man sim6809` and `man
-srec2flex` give a summary of each program's options. 
+`DESTDIR` (for staged installs) work as usual. `--version` prints each
+program's version (0.1.0), and `man plmc`, `man sim6809` and `man srec2flex`
+give a summary of each program's options.
+
+<!-- installed-paths
+The runtime and hooks files are installed in `@RUNTIME@`, and the commands
+in this document use that directory.
+-->
+<!-- source-paths -->
+The runtime and hooks files are installed in `DATADIR/plm09/runtime`, so an
+installed plmc's output is assembled with `-I
+/usr/local/share/plm09/runtime -I /usr/local/share/plm09/runtime/sim` in
+place of `-I runtime -I runtime/sim`.
+<!-- /source-paths -->
 
 **Fedora RPM:** `make rpm` builds `plm09.spec` from the committed tree (HEAD;
 uncommitted changes are left out) into `build/rpm`, running the test suites
 that need only lwasm, python3 and groff; `make srpm` makes just the source
-RPM (for `mock`). Then:
+RPM (for `mock`). The RPM build applies a patch, made by
+`tools/rpmdocs.py`, that changes the runtime paths in the documentation
+(`-I runtime` and so on) to the installed directory, `%{_datadir}/plm09/runtime`,
+and rebuilds the PDFs. Then:
 
 ```
 sudo dnf install build/rpm/RPMS/x86_64/plm09-0.1.0-1.*.x86_64.rpm

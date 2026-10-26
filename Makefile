@@ -75,10 +75,24 @@ $(TARBALL): .FORCE
 	mkdir -p $(RPMTOP)/SOURCES
 	git archive --format=tar.gz --prefix=plm09-$(VERSION)/ -o $@ HEAD
 
-rpm: $(TARBALL)
+# the patch plm09.spec applies: the documentation's runtime paths changed to
+# the directory the spec installs it in (make install DATADIR=%{_datadir})
+RPM_DATADIR := $(shell rpm --eval '%{_datadir}' 2>/dev/null)
+RPMDOCS := README.md docs/plmc.md docs/sim6809.md docs/man/plmc.1 docs/man/srec2flex.1
+DOCPATCH := $(RPMTOP)/SOURCES/plm09-$(VERSION)-datadir.patch
+
+$(DOCPATCH): $(TARBALL)
+	rm -rf $(RPMTOP)/docpatch && mkdir -p $(RPMTOP)/docpatch/a $(RPMTOP)/docpatch/b
+	tar -xzf $(TARBALL) -C $(RPMTOP)/docpatch/a --strip-components=1
+	tar -xzf $(TARBALL) -C $(RPMTOP)/docpatch/b --strip-components=1
+	cd $(RPMTOP)/docpatch/b && python3 -I tools/rpmdocs.py $(RPM_DATADIR) $(RPMDOCS)
+	cd $(RPMTOP)/docpatch && { diff -ruN a b > $@; [ $$? -eq 1 ]; }
+	rm -rf $(RPMTOP)/docpatch
+
+rpm: $(TARBALL) $(DOCPATCH)
 	rpmbuild -ba --define "_topdir $(RPMTOP)" plm09.spec
 
-srpm: $(TARBALL)
+srpm: $(TARBALL) $(DOCPATCH)
 	rpmbuild -bs --define "_topdir $(RPMTOP)" plm09.spec
 
 .FORCE:

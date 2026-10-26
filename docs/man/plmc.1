@@ -40,11 +40,15 @@ Everything machine-specific is in a hooks file,
 .IR plm_hooks.asm ,
 which lwasm finds through its include path, together with the startup
 code and runtime routines in the
+.\" installed-paths
+.\" .IR @RUNTIME@ .
+.\" source-paths
 .I runtime
-directory of the plm09 source tree, which is installed as
-.I /usr/share/plm09/runtime
-(or under
-.BR /usr/local ).
+directory of the plm09 source tree, installed in
+.IR DATADIR /plm09/runtime
+.RI ( /usr/local/share/plm09/runtime
+by default).
+.\" /source-paths
 To assemble the output:
 .PP
 .RS
@@ -170,8 +174,7 @@ Compile, assemble and run a program in the simulator:
 .RS
 .EX
 plmc \-o sum.asm sum.plm
-lwasm \-9 \-f srec \-I /usr/share/plm09/runtime \e
-      \-I /usr/share/plm09/runtime/sim \-o sum.s19 sum.asm
+lwasm \-9 \-f srec \-I runtime \-I runtime/sim \-o sum.s19 sum.asm
 sim6809 sum.s19
 .EE
 .RE
@@ -181,8 +184,7 @@ Build an OS-9 module:
 .RS
 .EX
 plmc \-\-os9 \-\-name sum \-o sum.asm sum.plm
-lwasm \-9 \-f os9 \-I /usr/share/plm09/runtime \e
-      \-I /usr/share/plm09/runtime/os9 \-o sum sum.asm
+lwasm \-9 \-f os9 \-I runtime \-I runtime/os9 \-o sum sum.asm
 .EE
 .RE
 .SH SEE ALSO
