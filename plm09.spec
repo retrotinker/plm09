@@ -12,25 +12,29 @@ Patch0:         %{name}-%{version}-datadir.patch
 
 BuildRequires:  gcc
 BuildRequires:  make
-# to rebuild the PDF manuals from the patched Markdown (the packages pandoc's
-# template loads only if they are installed, such as parskip, are left out)
+# to rebuild the PDF manuals from the patched Markdown: the TeX packages
+# xelatex reads for them (found with xelatex -recorder; pandoc's template
+# skips some, such as parskip, when they aren't installed)
 BuildRequires:  pandoc-cli
 BuildRequires:  texlive-xetex
+BuildRequires:  texlive-latex
+BuildRequires:  texlive-amsfonts
+BuildRequires:  texlive-amsmath
+BuildRequires:  texlive-bookmark
+BuildRequires:  texlive-booktabs
+BuildRequires:  texlive-etoolbox
+BuildRequires:  texlive-fontspec
+BuildRequires:  texlive-geometry
+BuildRequires:  texlive-hyperref
+BuildRequires:  texlive-iftex
 BuildRequires:  texlive-lm
 BuildRequires:  texlive-lm-math
-BuildRequires:  tex(amsmath.sty)
-BuildRequires:  tex(bookmark.sty)
-BuildRequires:  tex(booktabs.sty)
-BuildRequires:  tex(etoolbox.sty)
-BuildRequires:  tex(fontspec.sty)
-BuildRequires:  tex(geometry.sty)
-BuildRequires:  tex(hyperref.sty)
-BuildRequires:  tex(iftex.sty)
-BuildRequires:  tex(longtable.sty)
-BuildRequires:  tex(microtype.sty)
-BuildRequires:  tex(unicode-math.sty)
-BuildRequires:  tex(xcolor.sty)
-BuildRequires:  tex(xurl.sty)
+BuildRequires:  texlive-microtype
+BuildRequires:  texlive-tools
+BuildRequires:  texlive-unicode-math
+BuildRequires:  texlive-url
+BuildRequires:  texlive-xcolor
+BuildRequires:  texlive-xurl
 # for %%check
 BuildRequires:  lwtools
 BuildRequires:  python3
