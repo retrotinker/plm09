@@ -200,6 +200,7 @@ PUTCH   STB   $FF00     ; PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE;
 - **`runtime/flex/`**, for FLEX 9 commands. See [FLEX](#flex).
 - **`runtime/simon6809/`**, for the Simon6809 board under its BUGGY monitor. See [Simon6809](#simon6809).
 - **`runtime/kswichit/`**, for Wichit Sirichote's 6809 Microprocessor Kit under its monitor. See [6809 Microprocessor Kit](#6809-microprocessor-kit).
+- **`runtime/searle6809/`**, for Grant Searle's 6809 SBC (and Jeff Tranter's PCB of it), under the ASSIST09 monitor or BASIC. See [Grant Searle's 6809 SBC](#grant-searles-6809-sbc).
 - **`runtime/example/`**, a template for an MC6850 ACIA board. It has the same four procedures, with `PUTDEC` written on top of `RT_DIV16`. Copy it and adjust the addresses for your machine. The test suite only checks that it assembles.
 
 ## Color Computer
@@ -285,6 +286,17 @@ lwasm -9 -f srec -I runtime -I runtime/kswichit -o sum.s19 sum.asm
 * **The kit** (Wichit Sirichote, [kswichit.net/6809/6809.htm](https://kswichit.net/6809/6809.htm)): a 68B09 at 1.2288 MHz, 32 KB RAM, an MC6850 ACIA at `$A000` that the hooks use directly (the monitor's routine addresses vary between versions), I/O ports at `$8000` (`OUTPUT(0)` drives the GPIO1 LEDs), and RAM interrupt vectors at `$7FF0`--`$7FF8` that `PLM_SETINT` patches. The stack is at `$7000`, below the monitor's variables.
 * **Tested** in `sim6809` with an ACIA (`--acia`) and a stand-in monitor: the `kswichit` suite.
 
+## Grant Searle's 6809 SBC
+
+```
+build/plmc --org 1000H -o sum.asm sum.plm
+lwasm -9 -f srec -I runtime -I runtime/searle6809 -o sum.s19 sum.asm
+```
+
+* **Running it** with Jeff Tranter's combined ROM: type `L` at ASSIST09's `>` prompt, send `sum.s19`'s S1/S9 lines, then `C 1000` (call; the program returns with RTS, and ASSIST09 shows the registers, B being the exit status). With Grant Searle's BASIC ROM: get the program into RAM, then `CLEAR 200,&HFFF` and `EXEC &H1000`.
+* **The board** ([searle.wales/6809/Simple6809.html](http://searle.wales/6809/Simple6809.html)): a 68B09 at 1.8432 MHz, 32 KB RAM, a 6850 ACIA at `$A000` that the hooks use directly, and a 16 KB ROM. `PLM_SETINT` handles both ROMs' interrupt routing (ASSIST09's RAM vector table, or BASIC's RAM JMPs).
+* **Tested** on both real ROMs in `sim6809` (`--acia`, `--rom`, `--reset`, Intel HEX loading): the `searle6809` suite (`$SEARLE_ROM`, `$SEARLE_BASIC`, defaults in `~/coco/searle6809/`).
+
 ## Generated code
 
 - **Memory layout:** the code starts at `--org`. It begins with `RT_START`, which sets up the stack and DP=0, then calls the main program (`PLM_MAIN`). The procedures, the runtime and the hooks follow, and the variables come last (`RMB`, so they add nothing to the load file).
@@ -323,6 +335,11 @@ build/sim6809 --flex PROG.CMD
 | `--swi` | execute `SWI`, `SWI2` and `SWI3` through their vectors instead of stopping |
 | `--acia ADDR` | an MC6850 ACIA at `ADDR`/`ADDR+1` on stdin/stdout (reads 0 at end of input) |
 | `--ft245 ADDR` | an FT245RL USB FIFO at `ADDR` on stdin/stdout, asserting FIRQ while input waits |
+| `--stop-at-end` | with `--acia`: waiting for input after its end ends the run (status 0) |
+| `--reset` | start at the reset vector (`$FFFE`), for ROM images |
+| `--rom ADDR` | `ADDR`-`$FFFF` is ROM: writes are ignored |
+
+S-records and Intel HEX files (as many ROMs come) are both loaded.
 
 **I/O block**
 

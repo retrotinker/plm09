@@ -40,7 +40,7 @@ static int in(uint32_t a, uint32_t lo, uint32_t hi)
     return a >= lo && a < hi;
 }
 
-/* --ft245: does stdin have a byte for the FIFO?  (-1 at its end) */
+/* --ft245, --acia: does stdin have a byte?  (-1 at its end) */
 static int ft245_ready(void)
 {
     int ch = getchar();
@@ -62,8 +62,20 @@ uint8_t cpu_read8(Cpu *c, uint16_t addr)
         return ch == EOF ? 0 : (uint8_t)ch;
     }
     if (c->acia && (uint16_t)(addr - c->acia_addr) < 2) {
-        if (addr == c->acia_addr)
-            return 0x03;                /* RDRF (data, or the end), TDRE */
+        if (addr == c->acia_addr) {     /* status: TDRE, and RDRF if waited for */
+            if (c->acia_idle < ACIA_IDLE) {
+                c->acia_idle++;
+                return 0x02;
+            }
+            if (ft245_ready() < 0 && c->stop_at_end) {
+                fflush(stdout);
+                c->exit_code = 0;       /* waiting for input that won't come */
+                cpu_stop(c, STOP_EXIT, "end of input");
+                return 0x02;
+            }
+            return 0x03;                /* RDRF: data, or the end */
+        }
+        c->acia_idle = 0;
         int ch = getchar();
         return ch == EOF ? 0 : (uint8_t)ch;
     }
@@ -85,17 +97,20 @@ void cpu_write8(Cpu *c, uint16_t addr, uint8_t v)
         cpu_stop(c, STOP_ILLEGAL, "write outside the data area");
         return;
     }
-    if (c->ro_hi && in(addr, c->ro_lo, c->ro_hi)) {
-        cpu_stop(c, STOP_ILLEGAL, "write to the operating system's memory");
-        return;
+    if (c->ro_hi && in(addr, c->ro_lo, c->ro_hi) && !is_io(c, addr)) {
+        if (!c->rom)
+            cpu_stop(c, STOP_ILLEGAL, "write to the operating system's memory");
+        return;                         /* --rom: ignored, as by real ROM */
     }
     if (c->ft245 && addr == c->ft245_addr) {
         putchar(v);
         return;
     }
     if (c->acia && (uint16_t)(addr - c->acia_addr) < 2) {
-        if (addr != c->acia_addr)       /* control writes are ignored */
+        if (addr != c->acia_addr) {     /* control writes are ignored */
             putchar(v);
+            c->acia_idle = 0;
+        }
         return;
     }
     if (!is_io(c, addr)) {

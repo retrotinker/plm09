@@ -21,6 +21,32 @@ static int hexbyte(const char *s)
     return hi << 4 | lo;
 }
 
+/* one Intel HEX record ":LLAAAATT<data>CC"; 0, or -1 if malformed */
+static int ihex_record(const char *line, size_t len, uint8_t *mem)
+{
+    int count, sum = 0;
+
+    if (len < 11 || (count = hexbyte(line + 1)) < 0 || len != (size_t)(11 + 2 * count))
+        return -1;
+    for (int i = 0; i < count + 5; i++) {
+        int v = hexbyte(line + 1 + 2 * i);
+        if (v < 0)
+            return -1;
+        sum += v;
+    }
+    if (sum & 0xff)
+        return -1;
+    int type = hexbyte(line + 7);
+    if (type == 0) {
+        uint16_t addr = (uint16_t)(hexbyte(line + 3) << 8 | hexbyte(line + 5));
+        for (int i = 0; i < count; i++)
+            mem[(uint16_t)(addr + i)] = (uint8_t)hexbyte(line + 9 + 2 * i);
+    } else if (type != 1) {
+        return -1;                          /* no segments or start addresses */
+    }
+    return 0;
+}
+
 int srec_load(const char *path, uint8_t *mem, uint16_t *entry, int *has_entry)
 {
     FILE *f = fopen(path, "r");
@@ -42,6 +68,13 @@ int srec_load(const char *path, uint8_t *mem, uint16_t *entry, int *has_entry)
         line[len] = 0;
         if (len == 0)
             continue;
+        if (line[0] == ':') {                 /* Intel HEX */
+            if (ihex_record(line, len, mem) < 0) {
+                fprintf(stderr, "%s:%d: malformed Intel HEX record\n", path, lineno);
+                goto fail;
+            }
+            continue;
+        }
         if (line[0] != 'S' || len < 4 || (count = hexbyte(line + 2)) < 0
             || len != (size_t)(4 + 2 * count) || count < 3) {
             fprintf(stderr, "%s:%d: malformed S-record\n", path, lineno);

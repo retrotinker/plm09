@@ -374,7 +374,7 @@ suite_kswichit() {
             bad "$name" "build failed"; cat "$base.plmc.err" "$base.err" 2>/dev/null; continue
         fi
         cat "$base.s19" "$mon" >"$base.both.s19"
-        "$SIM" --swi --acia 0xA000 "$base.both.s19" \
+        "$SIM" --swi --acia 0xA000 --rom 0xC000 "$base.both.s19" \
             <"$( [ -e "${f%.plm}.in" ] && echo "${f%.plm}.in" || echo /dev/null)" \
             2>"$base.sim.err" | tr -d '\r' >"$base.stdout"
         echo "rc=${PIPESTATUS[0]}" >>"$base.stdout"
@@ -382,6 +382,96 @@ suite_kswichit() {
         cat "${f%.plm}.out" >"$exp"
         echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
         check_diff "$name" "$base.stdout" "$exp" && ok
+    done
+}
+
+# The run tests on Grant Searle's 6809 SBC, simulated with sim6809's ACIA at
+# $A000 (--acia, --stop-at-end), each program twice:
+#   - under Jeff Tranter's combined ROM ($SEARLE_ROM, combined.s19): typed
+#     in with ASSIST09's L command and run with C 1000; the output is what
+#     follows the C 1000 line, up to ASSIST09's register display, whose B
+#     (the exit status) is compared with .rc;
+#   - under Grant Searle's BASIC ROM ($SEARLE_BASIC, ExBasROM.hex), which
+#     can't load machine code itself: the program is loaded with the ROM,
+#     and CLEAR 200,&HFFF and EXEC &H1000 run it; the output is what
+#     follows the EXEC line, up to BASIC's OK (no exit status).
+# A program still waiting for input at the end of its .in file has no
+# register display or OK.  With a .vectors file, the interrupt vectors
+# (ASSIST09's table at $70C2, BASIC's RAM JMPs at $00A4-$00AC) are dumped
+# before and after the run, and must be the same.
+suite_searle6809() {
+    local rom=${SEARLE_ROM:-$HOME/coco/searle6809/combined.s19}
+    local basic=${SEARLE_BASIC:-$HOME/coco/searle6809/ExBasROM.hex} f t name base exp vec
+    local peek='?PEEK(&HA4);PEEK(&HA5);PEEK(&HA6);PEEK(&HA7);PEEK(&HA8);PEEK(&HA9);PEEK(&HAA);PEEK(&HAB);PEEK(&HAC)'
+    [ -r "$rom" ] || [ -r "$basic" ] ||
+        { echo "searle6809: no ROM at $rom or $basic (set SEARLE_ROM / SEARLE_BASIC; skipped)"; exit 0; }
+    for f in "$ROOT"/tests/run/*.plm "$ROOT"/tests/searle6809/*.plm; do
+        [ -e "$f" ] || continue
+        grep -q '^/\* PLMCARGS:' "$f" && continue
+        base=$OUT/searle6809-$(basename "$(dirname "$f")")-$(basename "$f" .plm)
+        if ! "$PLMC" --org 1000H -o "$base.asm" "$f" 2>"$base.plmc.err" ||
+           ! lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/searle6809" \
+                -o "$base.s19" "$base.asm" 2>"$base.err"; then
+            bad "searle6809/$(basename "$f" .plm)" "build failed"; cat "$base.plmc.err" "$base.err" 2>/dev/null; continue
+        fi
+        vec=
+        [ -e "${f%.plm}.vectors" ] && vec=1
+        for t in assist09 basic; do
+            name=searle6809/$t/$(basename "$f" .plm)
+            if [ $t = assist09 ]; then
+                [ -r "$rom" ] || continue
+                { [ -n "$vec" ] && printf 'D 70C2 70D3\r'
+                  printf 'L\r'; grep '^S[19]' "$base.s19" | tr -d '\r' | tr '\n' '\r'; printf 'C 1000\r'
+                  [ -n "$vec" ] && printf 'D 70C2 70D3\r'
+                  [ -e "${f%.plm}.in" ] && cat "${f%.plm}.in"; } >"$base.$t.feed"
+                cp "$rom" "$base.$t.image"
+            else
+                [ -r "$basic" ] || continue
+                { [ -n "$vec" ] && printf '%s\r' "$peek"
+                  printf 'CLEAR 200,&HFFF\rEXEC &H1000\r'
+                  [ -n "$vec" ] && printf '%s\r' "$peek"
+                  [ -e "${f%.plm}.in" ] && cat "${f%.plm}.in"; } >"$base.$t.feed"
+                { grep '^S1' "$base.s19"; cat "$basic"; } >"$base.$t.image"
+            fi
+            "$SIM" --acia 0xA000 --stop-at-end --swi --io 0x9000 --rom 0xC000 --reset "$base.$t.image" <"$base.$t.feed" \
+                >"$base.$t.console" 2>"$base.$t.sim.err"
+            python3 -I - "$t" "$base.$t.console" "$base.$t.stdout" "$vec" <<'PY'
+import re, sys
+kind, text = sys.argv[1], open(sys.argv[2], 'rb').read().decode('latin-1')
+vectors = ''
+if sys.argv[4]:                         # the two vector dumps must match
+    dumps = [l.rstrip() for l in text.replace('\r', '').split('\n')
+             if re.match(r'70[CD]0 | \d+  \d+  \d+  \d+ ', l)]
+    half = len(dumps) // 2
+    vectors = ('vectors restored\n' if half and dumps[:half] == dumps[half:]
+               else 'vectors changed: %r\n' % dumps)
+text = text.replace('\0', '').replace('\r', '')
+rc = ''
+if kind == 'assist09':
+    out = text.split('>C 1000\n', 1)[1] if '>C 1000\n' in text else ''
+    m = re.search(r'PC-[0-9A-F]{4} A-.. B-(..)', out)
+    if m:
+        rc = 'rc=%d\n' % int(m.group(1), 16)
+        out = out[:m.start()]
+else:
+    out = text.split('EXEC &H1000\n', 1)[1] if 'EXEC &H1000\n' in text else ''
+    if 'OK\n' in out:                   # BASIC's prompt after the program
+        out = out[:out.index('OK\n')]
+        rc = 'ended\n'
+open(sys.argv[3], 'w').write(out + rc + vectors)
+PY
+            exp=$base.$t.expected
+            cat "${f%.plm}.out" >"$exp"
+            if [ -e "${f%.plm}.in" ] && ! grep -q '^rc=\|^ended$' "$base.$t.stdout"; then
+                :       # still waiting for input
+            elif [ $t = assist09 ]; then
+                echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
+            else
+                echo "ended" >>"$exp"
+            fi
+            [ -n "$vec" ] && echo "vectors restored" >>"$exp"
+            check_diff "$name" "$base.$t.stdout" "$exp" && ok
+        done
     done
 }
 
@@ -408,7 +498,7 @@ suite_simon6809() {
         { grep '^S[19]' "$base.s19" | tr -d '\r' | tr '\n' '\r'
           printf 'G400\r'
           [ -e "${f%.plm}.in" ] && cat "${f%.plm}.in"; } >"$base.feed"
-        "$SIM" --swi --io 0xD800 --ft245 0xD000 --entry 0xE000 "$rom" <"$base.feed" >"$base.console" 2>"$base.sim.err"
+        "$SIM" --swi --io 0xD800 --ft245 0xD000 --rom 0xE000 --entry 0xE000 "$rom" <"$base.feed" >"$base.console" 2>"$base.sim.err"
         echo "sim rc=$?" >>"$base.sim.err"
         python3 -I - "$base.console" "$base.stdout" <<'PY'
 import re, sys
@@ -608,6 +698,7 @@ case ${1:-} in
     dragonflex) suite_dragonflex ;;
     simon6809) suite_simon6809 ;;
     kswichit) suite_kswichit ;;
+    searle6809) suite_searle6809 ;;
     xroar) suite_xroar ;;
     one)
         act=$OUT/one.stdout

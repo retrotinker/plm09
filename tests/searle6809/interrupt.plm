@@ -1,0 +1,24 @@
+/* INTERRUPT procedures on Grant Searle's SBC: PLM_SETINT follows the CPU
+   vectors, storing the handler in ASSIST09's RAM vector table (combined
+   ROM) or putting a JMP at BASIC's RAM vectors (Grant's BASIC).  The
+   interrupts come from sim6809's interrupt port, which the suite moves to
+   $9000 (the board's free space). */
+GI: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE INTSET BYTE AT (09006H), INTCLR BYTE AT (09007H);
+DECLARE TICKS BYTE;
+TICK: PROCEDURE INTERRUPT 0;
+    INTCLR = 1;
+    TICKS = TICKS + 1;
+END TICK;
+QUICK: PROCEDURE INTERRUPT 1;
+    INTCLR = 2;
+    TICKS = TICKS + 10;
+END QUICK;
+TICKS = 0;
+ENABLE;
+INTSET = 1;
+CALL PUTDEC(TICKS);         /* 1 */
+INTSET = 2;
+CALL PUTDEC(TICKS);         /* 11 */
+END GI;

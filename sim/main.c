@@ -24,6 +24,9 @@ static void usage(FILE *f)
             "  -n N          stop after N instructions (default 100000000)\n"
             "  --io BASE     MMIO base address (default $FF00)\n"
             "  --entry ADDR  start address (default: from S9 record)\n"
+            "  --rom ADDR    memory from ADDR to $FFFF is ROM: writes are ignored\n"
+            "  --reset       start at the address in the reset vector ($FFFE), as\n"
+            "                the 6809 does (for ROM images)\n"
             "  --zero        clear memory instead of filling with $A5\n"
             "  --os9         prog is an OS-9 program module (not S-records); emulate\n"
             "                F$Fork and the system calls F$Exit, I$Read, I$ReadLn,\n"
@@ -32,7 +35,10 @@ static void usage(FILE *f)
             "  --data ADDR   with --os9: data area address, page aligned (default $8000)\n"
             "  --param STR   with --os9: parameter string (default empty)\n"
             "  --acia ADDR   an MC6850 ACIA at ADDR (status) and ADDR+1 (data) on\n"
-            "                stdin/stdout; at the end of input it reads 0\n"
+            "                stdin/stdout; input is offered once the program waits\n"
+            "                for it; at the end of input it reads 0\n"
+            "  --stop-at-end with --acia: waiting for input after its end ends the\n"
+            "                run (status 0) instead of reading 0\n"
             "  --swi         execute SWI, SWI2 and SWI3 through their vectors\n"
             "                instead of stopping\n"
             "  --ft245 ADDR  an FT245RL USB FIFO at ADDR (stdin/stdout; FIRQ while\n"
@@ -88,7 +94,8 @@ int main(int argc, char **argv)
     unsigned long limit = 100000000UL, io = 0xff00, entry_opt = 0, v;
     unsigned long load = 0x2000, data = 0x8000;
     int tracing = 0, have_entry_opt = 0, has_entry, os9 = 0, flex = 0, ft245 = 0, swi = 0;
-    int acia = 0;
+    int acia = 0, stop_at_end = 0, reset = 0, rom = 0;
+    unsigned long rom_addr = 0;
     unsigned long ft245_addr = 0, acia_addr = 0;
     const char *params = "";
     uint8_t fill = 0xa5;
@@ -110,6 +117,14 @@ int main(int argc, char **argv)
             flex = 1;
         } else if (!strcmp(a, "--swi")) {
             swi = 1;
+        } else if (i + 1 < argc && !strcmp(a, "--rom")) {
+            if (!parse_num(argv[++i], 0xffff, &rom_addr))
+                goto bad;
+            rom = 1;
+        } else if (!strcmp(a, "--reset")) {
+            reset = 1;
+        } else if (!strcmp(a, "--stop-at-end")) {
+            stop_at_end = 1;
         } else if (i + 1 < argc && !strcmp(a, "--acia")) {
             if (!parse_num(argv[++i], 0xfffe, &acia_addr))
                 goto bad;
@@ -150,7 +165,17 @@ int main(int argc, char **argv)
     cpu.swi = swi;
     cpu.acia = acia;
     cpu.acia_addr = (uint16_t)acia_addr;
+    cpu.stop_at_end = stop_at_end;
     cpu.ft245_addr = (uint16_t)ft245_addr;
+    if (rom && (os9 || flex)) {
+        fprintf(stderr, "sim6809: --rom cannot be combined with --os9 or --flex\n");
+        return RC_USAGE;
+    }
+    if (rom) {
+        cpu.ro_lo = (uint32_t)rom_addr;
+        cpu.ro_hi = 0x10000;
+        cpu.rom = 1;
+    }
     if (os9 && flex) {
         fprintf(stderr, "sim6809: --os9 and --flex cannot be combined\n");
         return RC_USAGE;
@@ -170,6 +195,8 @@ int main(int argc, char **argv)
             return RC_USAGE;
         if (have_entry_opt)
             entry = (uint16_t)entry_opt;
+        else if (reset)
+            entry = (uint16_t)(cpu.mem[0xfffe] << 8 | cpu.mem[0xffff]);
         else if (!has_entry) {
             fprintf(stderr, "sim6809: %s has no S9 entry record; use --entry\n", path);
             return RC_USAGE;

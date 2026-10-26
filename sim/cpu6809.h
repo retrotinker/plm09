@@ -29,6 +29,8 @@ enum {
     IO_SIZE = 16
 };
 
+enum { ACIA_IDLE = 32 };
+
 /* interrupt lines, as bits of IO_INTSET / IO_INTCLR */
 enum { INT_IRQ = 1, INT_FIRQ = 2, INT_NMI = 4 };
 
@@ -71,9 +73,12 @@ typedef struct Cpu {
 
     /* sim6809 --flex: called before each instruction; returns -1 to run
        the instruction normally, or c->stop after emulating a routine at
-       c->pc.  Writes to [ro_lo, ro_hi) stop the CPU (if ro_hi is set). */
+       c->pc.  Writes to [ro_lo, ro_hi) stop the CPU (if ro_hi is set),
+       except to the I/O block.  With rom (--rom ADDR: [ADDR, $10000)) they
+       are ignored instead, as real ROM ignores them. */
     int (*pc_hook)(struct Cpu *c);
     uint32_t ro_lo, ro_hi;
+    int rom;
 
     /* sim6809 --ft245 ADDR: an FT245RL USB FIFO at ft245_addr, as on the
        Simon6809 board.  A read returns the next byte of stdin (0 if there
@@ -84,12 +89,18 @@ typedef struct Cpu {
     uint16_t ft245_addr;
 
     /* sim6809 --acia ADDR: an MC6850 ACIA, status/control at acia_addr and
-       data at acia_addr + 1, on stdin/stdout.  Status: RDRF (bit 0) while
-       stdin has data, TDRE (bit 1) always.  At the end of stdin RDRF stays
-       set and the data register reads 0, as the I/O block's GETCH port
-       does, so programs see the end instead of waiting forever. */
+       data at acia_addr + 1, on stdin/stdout.  Status: TDRE (bit 1) always;
+       RDRF (bit 0) when stdin has data, but only once the status has been
+       read ACIA_IDLE times since the last data access, the way a person
+       types after a prompt rather than while a program is still printing
+       (monitors check for a key between output characters).  At the end
+       of stdin RDRF is set and the data register reads 0, as the I/O
+       block's GETCH port does, unless stop_at_end: then a program waiting
+       for more input ends the run with exit status 0. */
     int acia;
     uint16_t acia_addr;
+    int acia_idle;
+    int stop_at_end;
 
     /* sim6809 --swi: SWI, SWI2 and SWI3 interrupt through their vectors
        instead of stopping the CPU (SWI2 still goes to swi2_hook if set) */

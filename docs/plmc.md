@@ -21,7 +21,7 @@ needs: S-records, Disk BASIC `.BIN` files, raw images and so on.
 
 The compiler is not tied to any particular machine. Everything that depends on
 the hardware lives in a small **hooks file** that lwasm includes, chosen with an
-include path. Seven hooks files come with plmc:
+include path. Eight hooks files come with plmc:
 
 | Hooks | Target |
 |---|---|
@@ -31,6 +31,7 @@ include path. Seven hooks files come with plmc:
 | `runtime/flex/` | the FLEX 9 disk operating system, for `.CMD` commands made by `srec2flex` |
 | `runtime/simon6809/` | the Simon6809 board, under its BUGGY monitor |
 | `runtime/kswichit/` | Wichit Sirichote's 6809 Microprocessor Kit, under its monitor |
+| `runtime/searle6809/` | Grant Searle's 6809 SBC (and boards built from it), under ASSIST09 or BASIC |
 | `runtime/example/` | a template for a board with an MC6850 ACIA serial port |
 
 **Main features**
@@ -1598,6 +1599,61 @@ ROM's reset does, runs the program at `$0200`, and on `SWI` checks that
 the vectors were put back and ends with B as the exit status. A test of
 its own checks IRQ and FIRQ procedures through the RAM vectors.
 
+# Grant Searle's 6809 SBC
+
+```
+build/plmc --org 1000H -o hello.asm hello.plm
+lwasm -9 -f srec -I runtime -I runtime/searle6809 -o hello.s19 hello.asm
+```
+
+Grant Searle's 6809 single-board computer
+([searle.wales/6809/Simple6809.html](http://searle.wales/6809/Simple6809.html))
+is a minimal board: a 68B09 with a 7.3728 MHz crystal (1.8432 MHz E clock),
+32 KB of RAM, a 6850 ACIA at `$A000` (115200 bit/s), and a 16 KB ROM at
+`$C000`. Jeff Tranter's PCB ([github.com/jefftranter/6809](https://github.com/jefftranter/6809/tree/master/sbc))
+is built from it. Two ROMs are common, and the hooks work with both:
+
+* **Jeff Tranter's "combined" ROM** (the ASSIST09 monitor, Microsoft BASIC,
+  a disassembler and trace): at the `>` prompt type `L`, send the S1/S9
+  lines of `hello.s19`, then `C 1000`, which calls the program as a
+  subroutine. When it ends, ASSIST09 shows the registers (B is the exit
+  status). Use `C`, not `G`: the program returns with RTS.
+* **Grant Searle's BASIC ROM** (his serial port of Extended Color BASIC):
+  it can't load machine code itself, so the program has to get into RAM
+  some other way. Then `CLEAR 200,&HFFF` keeps BASIC below `$1000` and
+  `EXEC &H1000` runs it; it returns to BASIC.
+
+More details:
+
+* **Load address:** `--org 1000H`, above BASIC's variables (`$0000`--
+  `$0178`) and its program text. The stack starts at `$6FD0`, below the
+  combined ROM's monitor RAM (`$6FD0`--`$7051`); under BASIC that is free
+  memory below BASIC's stack and strings.
+* **Console:** the ACIA, used directly, so the hooks don't depend on the
+  ROM. LF is sent as CR LF; `GETCH` waits for a character.
+* **Interrupts:** the two ROMs route them differently. ASSIST09's CPU
+  vectors lead to `JMP [n,PCR]` instructions that read the handler's
+  address from its RAM vector table (at `$70C2`); Grant's BASIC points them
+  at JMPs in RAM (`$00A7` IRQ, `$00AA` FIRQ, `$00A4` NMI). `PLM_SETINT`
+  follows the CPU vector and handles either: it stores the handler's
+  address in the table, or puts a JMP at the RAM vector. The bytes it
+  changes are put back when the program ends.
+* **Other values:** `RT_PORTS` = `$A000` (port 0 the ACIA's status, 1 its
+  data; `-DRT_PORTS=$8000` for the free space at `$8000`--`$9FFF`),
+  `RT_CYCLES100` = 184.
+
+The `searle6809` test suite runs every `run` program twice in `sim6809`,
+with an ACIA at `$A000` (`--acia --stop-at-end`) and the ROM read-only
+(`--rom 0xC000`), on the real ROMs: under the combined ROM, typed in with
+ASSIST09's `L` and run with `C 1000` (output up to the register display,
+whose B is compared with the exit status); and under Grant's BASIC ROM,
+loaded together with it and run with `EXEC &H1000` (output up to BASIC's
+`OK`). The ROMs come from `$SEARLE_ROM` (default
+`~/coco/searle6809/combined.s19`) and `$SEARLE_BASIC` (default
+`~/coco/searle6809/ExBasROM.hex`); either is skipped if missing. An
+interrupt test checks that IRQ and FIRQ procedures work under both ROMs
+and that the vectors are the same before and after the program.
+
 # Generated code
 
 ## Layout
@@ -1860,6 +1916,7 @@ group of instructions.
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |
 | `simon6809` | the `run` programs (except those needing compiler options) on the Simon6809 board's real monitor ROM in `sim6809`, typed in as S-records and started with `G400`; outputs and exit statuses compared. Uses `$SIMON_ROM`; skipped without it. See [Simon6809] |
+| `searle6809` | the `run` programs (except those needing compiler options) on Grant Searle's 6809 SBC in `sim6809`, under both its real ROMs (ASSIST09 `L`/`C`, and BASIC `EXEC`). Uses `$SEARLE_ROM` and `$SEARLE_BASIC`; skipped without them. See [Grant Searle's 6809 SBC] |
 | `kswichit` | the `run` programs (except those needing compiler options) with the 6809 Microprocessor Kit's hooks, in `sim6809` with an ACIA and a stand-in monitor. See [Wichit Sirichote's 6809 Microprocessor Kit] |
 | `dragonflex` | the `run` programs (except those needing compiler options or input) as commands on real FLEX: Compusense FLEX for the Dragon 64, booted under XRoar, with each program's printer output compared. Uses `$FLEX_DISK`; skipped if it or XRoar is missing. See [FLEX] |
 | `flex` | every `run` program (except those needing compiler options) plus 25 fuzz programs as FLEX commands (`srec2flex`), run by `sim6809 --flex`, which emulates the FLEX DOS entry points and protects FLEX's memory |

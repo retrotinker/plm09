@@ -6,7 +6,9 @@
 
 /* Load S1 data records from path into mem.  Sets *entry from an S9 record
    and *has_entry to 1 if one was present.  Returns 0 on success, or -1 after
-   printing an error to stderr. */
+   printing an error to stderr.  Lines starting with ':' are Intel HEX
+   records instead (type 00 data, 01 end of file; checksums verified), as
+   ROM images are often distributed; they give no entry address. */
 int srec_load(const char *path, uint8_t *mem, uint16_t *entry, int *has_entry);
 
 #endif

@@ -2,8 +2,9 @@
 ; --swi: SWI, SWI2 and SWI3 interrupt through $FFFA, $FFF4, $FFF2, stack
 ; everything with E set, and (SWI only) set I and F.  --acia: an MC6850 at
 ; $A000/$A001 and --ft245: an FT245RL at $D000, both on stdin/stdout;
-; stdin is empty here, so the ACIA reads RDRF+TDRE and data 0, and the
-; FT245 never asserts FIRQ.  The test ends in SYNC, waiting for FT245
+; stdin is empty here, so the ACIA, once the program has waited (32
+; status reads since the last data access), reads RDRF+TDRE and data 0,
+; and the FT245 never asserts FIRQ.  The test ends in SYNC, waiting for FT245
 ; input that won't come, which ends the run with status 0 (after the
 ; harness has printed its results, if all passed).
 	INCLUDE	harness.inc
@@ -53,10 +54,19 @@ MAIN	LDX	#N_SWI
 
 	LDX	#N_ACIA
 	JSR	TBEGIN
-	LDA	ACIAST		; RDRF and TDRE (end of input: data 0)
+	LDX	#0		; RDRF only once the program has waited:
+WAITRX	LEAX	1,X		; 32 status reads first
+	LDA	ACIAST
+	LSRA
+	BCC	WAITRX
+	TFR	X,D
+	CD	33
+	LDA	ACIAST		; RDRF and TDRE (end of input)
 	C	3
-	LDA	ACIADAT
+	LDA	ACIADAT		; end of input: 0
 	C	0
+	LDA	ACIAST		; a data access starts the wait again
+	C	2
 	LDA	#'A		; data writes go to stdout
 	STA	ACIADAT
 	LDA	#$15		; control writes are ignored

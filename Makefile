@@ -15,7 +15,7 @@ N ?= 200
 OS9N ?= 25
 FLEXN ?= 25
 
-.PHONY: all docs test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test fuzz-test run clean
+.PHONY: all docs test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
 
 all: $(PLMC) $(SIM) $(S2F)
 
@@ -39,7 +39,7 @@ $(BUILD)/src $(BUILD)/sim:
 
 -include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
 
-test: sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test fuzz-test
+test: sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
 
 sim-test lex-test parse-test err-test run-test coco-test xroar-test: all
 	tests/run_tests.sh $(@:-test=)
@@ -59,7 +59,7 @@ flex-test: all
 dragonflex-test: all
 	tests/run_tests.sh dragonflex
 
-simon6809-test kswichit-test: all
+simon6809-test kswichit-test searle6809-test: all
 	tests/run_tests.sh $(@:-test=)
 
 run: all

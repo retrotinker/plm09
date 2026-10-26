@@ -50,7 +50,7 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 | Target | Effect |
 |---|---|
 | `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra -Werror` |
-| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, fuzz |
+| `test` | runs the suites sim, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
 | `sim-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |
 | `flex-test FLEXN=25` | the flex suite, with FLEXN fuzz seeds |
@@ -406,6 +406,7 @@ All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
   - a FLEX binary is made from lwasm's S-records by `srec2flex` ($02 records of up to 252 bytes, $16 transfer address from S9), since lwasm has no FLEX format
 - **simon6809** (Erturk Kocalar's Simon6809 board, BUGGY monitor): console through the monitor's RAM I/O vectors (getchar $001B, putchar $001E, putcr $0027; FT245RL at $D000 underneath); exit, HALT and EXIT with SWI (a breakpoint to the monitor, which shows B); PLM_SETINT patches the RAM JMP vectors ($0009 IRQ, $0006 FIRQ, $000F NMI) and PLM_EXIT restores them; programs at $0400, stack $8000; RT_PORTS $D000, RT_CYCLES100 100.
 - **kswichit** (Wichit Sirichote's 6809 Microprocessor Kit): the 6850 ACIA at $A000 used directly (the monitor's routine addresses differ between versions); SWI back to the monitor; PLM_SETINT patches the RAM vectors ($7FF0 IRQ, $7FF6 FIRQ, $7FF3 NMI); programs at $0200, stack $7000 (below the monitor's $7000-$7FFF); RT_PORTS $8000, RT_CYCLES100 123 (1.2288 MHz).
+- **searle6809** (Grant Searle's 6809 SBC, Jeff Tranter's combined ASSIST09+BASIC ROM or Grant's BASIC ROM): the ACIA at $A000 used directly; the program is a subroutine of the monitor (C) or BASIC (EXEC) and returns with LDS RT_ENTRYS / RTS; stack $6FD0 (below ASSIST09's RAM), programs at $1000; PLM_SETINT follows the CPU vector: ASSIST09's `JMP [n,PCR]` (store the handler's address in the word it reads, 2 bytes) or a RAM JMP (BASIC's $00A4/$00A7/$00AA, 3 bytes); PLM_EXIT restores exactly the bytes changed (ASSIST09's IRQ and FIRQ words are adjacent, so restoring 3 bytes clobbered one, which the suite's vector check caught); RT_CYCLES100 184.
 - **example:**
   - MC6850 ACIA template (`ACIA_BASE`, default $A000; `RT_STACKTOP`, default $8000)
   - both can be overridden with lwasm `-D`
@@ -426,7 +427,8 @@ All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
 - `-t` prints a trace with disassembly to stderr.
 - `--io BASE` moves the MMIO block, and `--entry ADDR` overrides the S9 entry address.
 - S-records: S1/S9 are loaded, S0/S5 ignored, checksums verified. If several S9 records are present, the last one wins, which lets two files be combined.
-- Board devices: `--swi` executes SWI/SWI2/SWI3 through their vectors; `--acia ADDR` is an MC6850 (status always RDRF|TDRE, data from stdin, 0 at its end); `--ft245 ADDR` is an FT245RL whose data-available line drives FIRQ (`cpu_interrupt()` peeks stdin), and waiting in SYNC/CWAI after the end of stdin ends the run with status 0.
+- Loading: S-records and Intel HEX (`:` lines, types 00/01) in the same file; `--reset` starts at [$FFFE]; `--rom ADDR` makes [ADDR, $10000) ignore writes (`Cpu.rom` with the `ro_lo`/`ro_hi` range; the I/O block still works), as real ROM does — Grant's BASIC sizes RAM by writing to it.
+- Board devices: `--swi` executes SWI/SWI2/SWI3 through their vectors; `--acia ADDR` is an MC6850 (TDRE always; RDRF only after 32 status reads since the last data access — monitors like ASSIST09 poll for a key between output characters and would swallow input given earlier; data from stdin, 0 at its end, or with `--stop-at-end` a status poll after the end stops the run); `--ft245 ADDR` is an FT245RL whose data-available line drives FIRQ (`cpu_interrupt()` peeks stdin), and waiting in SYNC/CWAI after the end of stdin ends the run with status 0.
 - `--flex` loads a FLEX binary and emulates the DOS entry points through `Cpu.pc_hook` (`flex_call()`, called before each instruction): the terminal routines, OUTDEC/OUTHEX/OUTADR, CLASS, ADDBX, and WARMS, which stops with B as the exit status. Writes to $C700–$DFFF (`Cpu.ro_lo`/`ro_hi`) and code run there other than at an entry point stop the program.
 
 **MMIO** (base $FF00, configurable)
@@ -460,6 +462,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
 | simon6809 | the run programs (and `tests/simon6809/*.plm`) on the Simon6809's real monitor ROM (`$SIMON_ROM`) in sim6809 `--ft245 0xD000 --swi --io 0xD800`: typed in as S1/S9 records, run with G400, output cut at the monitor's register display, whose B is the exit status; skipped without the ROM |
+| searle6809 | the run programs (and `tests/searle6809/*.plm`) on Grant Searle's SBC in sim6809 `--acia 0xA000 --stop-at-end --swi --io 0x9000 --rom 0xC000 --reset`, twice: under Jeff Tranter's combined ROM (`$SEARLE_ROM`; ASSIST09 `L`, `C 1000`, output up to the register display, B = exit status) and Grant's BASIC ROM (`$SEARLE_BASIC`, Intel HEX; preloaded with the program, `CLEAR 200,&HFFF` / `EXEC &H1000`, output up to `OK`). With a `.vectors` file, the interrupt vectors are dumped before and after and must match |
 | kswichit | the run programs (and `tests/kswichit/*.plm`) with the kit's hooks in sim6809 `--acia 0xA000 --swi`, with `tests/kswichit/fakemon.asm` standing in for the keypad-driven monitor (its reset's RAM vectors; SWI checks they were restored and exits with B) |
 | dragonflex | the run programs without PLMCARGS or input on real FLEX (Compusense FLEX 1.3.2 for the Dragon 64, `$FLEX_DISK`) under XRoar, outputs captured from the printer port; skipped if XRoar or the disk is missing |
 | flex | every run program without PLMCARGS and 25 fuzz programs, built with the FLEX hooks, converted by `srec2flex` and run by `sim6809 --flex`; FLEX's memory is protected |
@@ -529,6 +532,7 @@ How the dragonflex suite works (each point was found the hard way):
 - PLUS and MINUS: the run test `carry` (32- and 24-bit arithmetic, what changes the carry, evaluation order), 32-bit counting under interrupts in `interrupt`, carry statements in the fuzz generator, a parse golden and error tests
 - HIGH, LOW, DOUBLE, SHL, SHR, ROL, ROR: the run test `builtins`, the coco test `builtins` (also on XRoar), built-ins in the fuzz generator's expressions, a parse golden and error tests
 - the other built-ins and predeclared variables: the run tests `flags` (BCD arithmetic with DEC, SCL/SCR, CARRY/ZERO/SIGN/PARITY), `memory` (MOVE, MEMORY, STACKPTR, TIME; in the os9 suites with `--memory 128`) and `ports` (INPUT/OUTPUT on the simulator's I/O block), the XRoar test `time` (40 × TIME(250) is 59 field-sync ticks, predicted 0.983 s), flag statements in the fuzz generator, a parse golden and error tests
+- Grant Searle's 6809 SBC: its hooks, sim6809 Intel HEX loading, `--reset`, `--rom`, ACIA input pacing and `--stop-at-end`, and the `searle6809` suite on both real ROMs
 - the Simon6809 board and the 6809 Microprocessor Kit: their hooks, sim6809 `--swi`/`--acia`/`--ft245` (sim test `devices`), the `simon6809` and `kswichit` suites with an interrupt test each
 - REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
 
