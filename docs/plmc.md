@@ -64,7 +64,13 @@ include path. Eight hooks files come with plmc:
 ```
 make            # builds build/plmc, build/sim6809 and build/srec2flex
 make test       # runs every test suite
+make install    # copies plmc and sim6809 to BINDIR
 ```
+
+`BINDIR` defaults to `$(PREFIX)/bin`, and `PREFIX` to `/usr/local`; for
+example `make install BINDIR=~/bin`. `DESTDIR` is put in front for staged
+installs. The runtime and hooks files are not installed: lwasm reads them
+from the source tree's `runtime/` directory (`-I`).
 
 A first program:
 
