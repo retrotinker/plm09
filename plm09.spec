@@ -1,9 +1,10 @@
 Name:           plm09
 Version:        0.2.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
 License:        MIT
+URL:            https://github.com/retrotinker/plm09
 Source0:        %{name}-%{version}.tar.gz
 # made by make rpm with tools/rpmdocs.py: the documentation's runtime paths
 # (-I runtime ...) changed to %%{_datadir}/plm09/runtime, where this package
@@ -82,6 +83,9 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test fuzz-test
 %{_datadir}/%{name}/
 
 %changelog
+* Tue Oct 27 2026 John W. Linville <linville@tuxdriver.com> - 0.2.0-2
+- Add the URL of the GitHub repository
+
 * Tue Oct 27 2026 John W. Linville <linville@tuxdriver.com> - 0.2.0-1
 - Remove INPUT and OUTPUT: the 6809 has no I/O ports; use BYTE variables
   AT the device's address instead
