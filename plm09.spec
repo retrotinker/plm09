@@ -1,6 +1,6 @@
 Name:           plm09
-Version:        0.1.0
-Release:        2%{?dist}
+Version:        0.2.0
+Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
 License:        MIT
@@ -82,6 +82,10 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test fuzz-test
 %{_datadir}/%{name}/
 
 %changelog
+* Tue Oct 27 2026 John W. Linville <linville@tuxdriver.com> - 0.2.0-1
+- Remove INPUT and OUTPUT: the 6809 has no I/O ports; use BYTE variables
+  AT the device's address instead
+- RT_PORTS is no longer defined by the hooks
 * Mon Oct 26 2026 John W. Linville <linville@tuxdriver.com> - 0.1.0-2
 - Patch the documentation's runtime paths to the installed directory
 - Rebuild the PDF manuals from the patched Markdown

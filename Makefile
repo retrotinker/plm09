@@ -1,4 +1,4 @@
-VERSION := 0.1.0
+VERSION := 0.2.0
 
 # CFLAGS and LDFLAGS may be replaced (rpmbuild sets its own); the language
 # and warning flags are always used, and WERROR= turns off -Werror
@@ -51,6 +51,9 @@ $(BUILD)/src $(BUILD)/sim:
 	mkdir -p $@
 
 -include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
+
+# the programs that print VERSION (--version) are rebuilt when it changes
+$(BUILD)/src/main.o $(BUILD)/sim/main.o $(S2F): Makefile
 
 # install plmc, sim6809 and srec2flex in BINDIR (default $(PREFIX)/bin, PREFIX
 # default /usr/local), their man pages in MANDIR/man1 (default
