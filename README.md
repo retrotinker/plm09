@@ -40,7 +40,7 @@ place of `-I runtime -I runtime/sim`.
 
 **Fedora RPM:** `make rpm` builds `plm09.spec` from the committed tree (HEAD;
 uncommitted changes are left out) into `build/rpm`, running the test suites
-that need only lwasm, python3 and groff; `make srpm` makes just the source
+that need only lwasm, python3 and groff; `make rpm` first removes the RPMs of earlier builds; `make srpm` makes just the source
 RPM (for `mock`). The RPM build applies a patch, made by
 `tools/rpmdocs.py`, that changes the documentation's runtime paths to the
 installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:

@@ -93,6 +93,7 @@ $(DOCPATCH): $(TARBALL)
 	rm -rf $(RPMTOP)/docpatch
 
 rpm: $(TARBALL) $(DOCPATCH)
+	rm -rf $(RPMTOP)/RPMS $(RPMTOP)/SRPMS
 	rpmbuild -ba --define "_topdir $(RPMTOP)" plm09.spec
 
 srpm: $(TARBALL) $(DOCPATCH)
