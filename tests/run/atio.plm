@@ -1,0 +1,26 @@
+/* PLMCARGS: --org 0100H */
+/* NOT-OS9: the I/O block is at an absolute address, outside an OS-9 process */
+/* Device registers as a BYTE array AT their address, the 6809's way of
+   doing what INPUT and OUTPUT (PL/M-80 manual 11.1.1, 11.2.1, not
+   supported) do on the 8080: sim6809's I/O block is at $FF00, where IO(0)
+   prints a character, IO(1) reads one, IO(4) and IO(5) print a number and
+   IO(2) exits.  Expected values in comments. */
+ATIO: DO;
+DECLARE IO(16) BYTE AT (0FF00H);
+DECLARE C BYTE, N ADDRESS;
+DECLARE NL LITERALLY '10';
+IO(0) = 'O'; IO(0) = 'K'; IO(0) = NL;                   /* OK */
+C = IO(1);                                              /* 'A' from the .in file */
+DO WHILE C <> 0 AND C <> NL;
+    IO(0) = C + 1;                                      /* B C D */
+    C = IO(1);
+END;
+IO(0) = NL;
+N = 1234;
+IO(4) = HIGH(N);
+IO(5) = LOW(N);                                         /* 1234 */
+C, IO(0) = 'Z';                                         /* Z, and C */
+IO(0) = NL;
+IO(2) = C - 'Z' + 7;                                    /* exit status 7 */
+IO(0) = '?';                                            /* not reached */
+END ATIO;

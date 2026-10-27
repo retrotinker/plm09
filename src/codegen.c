@@ -693,9 +693,6 @@ static void gen_builtin(const Expr *e)
     case BI_DOUBLE:
         gen_as(e->lhs, 16);
         return;
-    case BI_INPUT:                      /* port n is at RT_PORTS + n */
-        emit("LDB\tRT_PORTS+%u", e->lhs->value);
-        return;
     case BI_STACKPTR:
         emit("TFR\tS,D");
         return;

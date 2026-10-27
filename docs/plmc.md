@@ -961,28 +961,28 @@ memory instead, so they are exact:
   when `DEC` is used), and one or two stores of the result when `ZERO`,
   `SIGN` or `PARITY` is used.
 
-### INPUT and OUTPUT
+### INPUT and OUTPUT: not supported
+
+PL/M-80's `INPUT(port)` and `OUTPUT(port)` use the 8080's `IN` and `OUT`
+instructions and its separate space of 256 I/O ports. The 6809 has no I/O
+instructions and no port space, only memory-mapped devices, so plmc doesn't
+provide them. A program that uses either without declaring it gets
 
 ```
-OUTPUT(0) = 'A';                /* write port 0 */
-C = INPUT(1);                   /* read port 1 */
+INPUT is not supported: the 6809 has no I/O ports; declare a BYTE variable AT the device's address
 ```
 
-The 8080 has 256 I/O ports; the 6809 has memory-mapped I/O instead. In
-plmc, **port n is the byte at `RT_PORTS + n`**, an address the hooks
-define:
+Declare the device's registers AT their address instead, as a BYTE
+variable or array:
 
-| Hooks (in `runtime/`) | `RT_PORTS` | So |
-|---|---|---|
-| `sim` | `$FF00`, the I/O block | `OUTPUT(0)` prints a character, `INPUT(1)` reads one, `OUTPUT(4)`/`OUTPUT(5)` print a number, `OUTPUT(2)` exits |
-| `coco` | `$FF00`, the I/O page | port n is `$FF00 + n`: the PIAs (0--3, 20H--23H), the disk controller (40H--5FH), the SAM (0C0H--0DFH) |
-| `os9` | `$FF00`, the CoCo 3's I/O page | as on the CoCo; usually better left to OS-9's drivers |
-| `example` | `ACIA_BASE` | port 0 is the ACIA's status/control register, port 1 its data register |
+```
+DECLARE IO(16) BYTE AT (0FF00H);    /* sim6809's I/O block */
+IO(0) = 'A';                        /* print a character */
+C = IO(1);                          /* read one */
+```
 
-* **`INPUT(n)`** is a BYTE; `n` must be a constant from 0 to 255.
-* **`OUTPUT(n) = value`** is the only use of `OUTPUT`, again with a
-  constant port; it can be one of several targets (`OUTPUT(0), C = 'X';`).
-* **Code:** `LDB RT_PORTS+n` and `STB RT_PORTS+n`.
+Since they aren't built in, `INPUT` and `OUTPUT` are ordinary names that a
+program may declare for its own variables or procedures.
 
 ### MOVE and TIME
 
@@ -1032,7 +1032,7 @@ The type of every expression is worked out at compile time:
 | `HIGH(x)`, `LOW(x)`, `ROL(p, n)`, `ROR(p, n)` | BYTE |
 | `DOUBLE(x)` | ADDRESS |
 | `SHL(p, n)`, `SHR(p, n)`, `SCL(p, n)`, `SCR(p, n)` | the type of `p` |
-| `DEC(x)`, `INPUT(n)`, `CARRY`, `ZERO`, `SIGN`, `PARITY` | BYTE |
+| `DEC(x)`, `CARRY`, `ZERO`, `SIGN`, `PARITY` | BYTE |
 | `STACKPTR` | ADDRESS |
 | `SIZE(X)` | ADDRESS |
 | typed procedure call | the procedure's type |
@@ -1078,8 +1078,9 @@ These parts of PL/M-80 are recognized and rejected with an error:
 
 All of PL/M-80's built-in procedures (`LENGTH`, `LAST`, `SIZE`, `HIGH`,
 `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL`, `ROR`, `SCL`, `SCR`, `DEC`, `CARRY`,
-`ZERO`, `SIGN`, `PARITY`, `INPUT`, `MOVE`, `TIME`) and predeclared variables
-(`OUTPUT`, `MEMORY`, `STACKPTR`) are provided.
+`ZERO`, `SIGN`, `PARITY`, `MOVE`, `TIME`) and predeclared variables
+(`MEMORY`, `STACKPTR`) are provided, except the 8080 port I/O `INPUT` and
+`OUTPUT` (see [INPUT and OUTPUT: not supported]).
 
 # Diagnostics
 
@@ -1110,12 +1111,11 @@ next multiple of 8 plus 1.
 | `array X is too large (more than 65535 bytes)` | e.g. `DECLARE X(40000) ADDRESS` |
 | `parameter X cannot be an array` | a parameter declared with a dimension |
 | `LENGTH needs the name of a variable` (or `LAST`, `SIZE`) | argument isn't a declared variable |
-| `HIGH takes one argument` (or `LOW`, `DOUBLE`, `DEC`, `INPUT`, `TIME`), `SHL takes two arguments, a pattern and a count` (or `SHR`, `ROL`, `ROR`, `SCL`, `SCR`), `CARRY takes no arguments` (or `ZERO`, `SIGN`, `PARITY`), `MOVE takes three arguments, ...` | wrong number of arguments to a built-in |
+| `HIGH takes one argument` (or `LOW`, `DOUBLE`, `DEC`, `TIME`), `SHL takes two arguments, a pattern and a count` (or `SHR`, `ROL`, `ROR`, `SCL`, `SCR`), `CARRY takes no arguments` (or `ZERO`, `SIGN`, `PARITY`), `MOVE takes three arguments, ...` | wrong number of arguments to a built-in |
 | `built-in LOW returns a value and must be used in an expression, not CALLed` | `CALL` of a typed built-in |
 | `built-in TIME is untyped, so it can't be used in an expression (use CALL TIME)` | `TIME` or `MOVE` in an expression |
-| `INPUT needs a port number from 0 to 255 (a constant)`, `OUTPUT needs a port number ...` | a computed or too large port |
-| `OUTPUT can only be assigned to, as in OUTPUT(port) = value` | reading `OUTPUT` |
-| `LENGTH can't be used with MEMORY, whose size isn't known` (or `LAST`, `SIZE`; `OUTPUT`, `STACKPTR`) | a built-in on a predeclared variable |
+| `INPUT is not supported: the 6809 has no I/O ports; declare a BYTE variable AT the device's address` (or `OUTPUT`) | an undeclared `INPUT` or `OUTPUT` |
+| `LENGTH can't be used with MEMORY, whose size isn't known` (or `LAST`, `SIZE`; `STACKPTR`) | a built-in on a predeclared variable |
 | `STACKPTR is not a procedure or an array` | `STACKPTR(...)` |
 | `plmc: --memory is only used with --os9 ...` | `--memory` without `--os9` |
 | `structure X cannot be used as a value; select a member, as in X.M` | a whole structure, or a structure array's element, as a value or target |
@@ -1210,7 +1210,6 @@ lwasm -9 -f decb -I runtime -I runtime/coco -o PROG.BIN prog.asm   # CoCo
 | `RT_STACKTOP` | Initial stack pointer; the stack grows down from here. The value 0 means "keep the caller's stack". |
 | `PLM_EXIT` | Jumped to when the program ends, with the exit status in B (0 for a normal end). Must not return. |
 | `PLM_HALT` | Jumped to by `HALT`. |
-| `RT_PORTS` | Only for programs that use `INPUT` or `OUTPUT`: the address of port 0. |
 | `RT_CYCLES100` | Only for programs that use `TIME`: CPU (E clock) cycles in 100 microseconds. |
 | `PLM_SETINT` | Only for programs with INTERRUPT procedures: called at start-up with B = the interrupt number (0 IRQ, 1 FIRQ, 2 NMI) and X = the entry routine; it must make that interrupt go to X. May change any register but S. |
 | each `EXTERNAL` | A label with the procedure's PL/M name in upper case. |
@@ -1275,7 +1274,6 @@ the `sim`, `coco`, `os9` and `example` directories of `runtime/` compared:
 | `EXIT`, end of program | simulator exit status | back to BASIC (status discarded) | `F$Exit` with the status | stops in a loop |
 | `HALT` | exit status 0 | back to BASIC | `F$Exit` with status 0 | stops in a loop |
 | `PLM_SETINT` | stores the vector at `$FFF8`/`$FFF6`/`$FFFC` | patches BASIC's RAM vector (`JMP` at `$010C`/`$010F`/`$0109`); `PLM_EXIT` restores it | (not used) | does nothing: use `--vectors` |
-| `RT_PORTS` (`INPUT`/`OUTPUT`) | `$FF00`, the I/O block | `$FF00`, the I/O page | `$FF00` (CoCo 3) | `ACIA_BASE` |
 | `RT_CYCLES100` (`TIME`) | 100 (no real timing) | 89 (0.895 MHz) | 179 (1.79 MHz CoCo 3) | 100 (1 MHz); override with `-D` |
 | extra | | `CLS` clears the screen | | |
 | stack | `$FF00` | BASIC's | in the data area (`--stack`) | `$8000` |
@@ -1495,11 +1493,10 @@ Copy `HELLO.CMD` to a FLEX disk and type `HELLO` at the `+++` prompt.
   | `GETCH` | `GETCHR` (`$CD15`): waits for a key, RETURN gives 13; most terminals echo it. When input is redirected to a file (FLEX's `I` command), the next byte is read with FMS (`$D406`) instead, so the end of the file gives 0 rather than FLEX's `READ PAST END OF FILE` error, which would end the program |
   | `PUTDEC` | `OUTDEC` (`$CD39`) and `PCRLF` |
   | `EXIT`, end of program, `HALT` | `WARMS` (`$CD03`), back to the `+++` prompt; FLEX has no exit status |
-  | `RT_PORTS` (`INPUT`/`OUTPUT`) | `$E000`, the I/O area of SWTPC and Gimix machines |
   | `RT_CYCLES100` (`TIME`) | 100, a 1 MHz CPU |
   | stack | `RT_STACKTOP` = `$C700`, the top of FLEX's utility command area (`$C100`--`$C6FF`), which belongs to the running command. Not the top of user RAM: `EXEC`, print spoolers and other resident tools put themselves there (lowering the memory end at `$CC2B`), and a stack there would overwrite them |
 
-  `RT_PORTS`, `RT_CYCLES100` and `RT_STACKTOP` depend on the machine; give
+  `RT_CYCLES100` and `RT_STACKTOP` depend on the machine; give
   yours to lwasm with `-D`, for example `-DRT_CYCLES100=200` for 2 MHz.
 * **`srec2flex`** turns lwasm's S-records into a FLEX binary file: `$02`
   records (address, count, up to 252 bytes) for the loaded bytes, and a
@@ -1570,8 +1567,7 @@ BUGGY monitor (Lennart Benschop's sbc09 monitor, ported) in ROM at
   `$0009` IRQ, `$0006` FIRQ, `$000F` NMI) at the INTERRUPT procedures and
   puts them back at the end. FIRQ is the console's "data available"
   interrupt: a program that takes it over shouldn't use `GETCH`.
-* **Other values:** `RT_PORTS` = `$D000` (the I/O selects, port 0 being
-  the FT245), `RT_CYCLES100` = 100 (a 4 MHz crystal, 1 MHz E clock).
+* **Other values:** `RT_CYCLES100` = 100 (a 4 MHz crystal, 1 MHz E clock).
 
 The `simon6809` test suite runs every `run` program on the board's real
 monitor ROM, in `sim6809` with an FT245 at `$D000` (`--ft245`) and
@@ -1613,8 +1609,8 @@ bit/s, and a monitor in ROM from `$C000`.
   counter and RTIs. `PLM_SETINT` puts a JMP to the INTERRUPT procedure
   there, and the monitor's instructions back at the end. The IRQ switch
   selects the 89C2051's 10 ms tick or the IRQ button.
-* **Other values:** `RT_PORTS` = `$8000` (port 0 the GPIO1 LEDs, 1 the
-  keypad, 2 and 3 the display), `RT_CYCLES100` = 123.
+* **Other values:** `RT_CYCLES100` = 123. The GPIO1 LEDs, keypad and
+  display are at `$8000`--`$8003`; declare them AT those addresses.
 
 The `kswichit` test suite runs every `run` program with these hooks in
 `sim6809` with an ACIA at `$A000` (`--acia`) and working `SWI` (`--swi`).
@@ -1663,9 +1659,7 @@ More details:
   follows the CPU vector and handles either: it stores the handler's
   address in the table, or puts a JMP at the RAM vector. The bytes it
   changes are put back when the program ends.
-* **Other values:** `RT_PORTS` = `$A000` (port 0 the ACIA's status, 1 its
-  data; `-DRT_PORTS=$8000` for the free space at `$8000`--`$9FFF`),
-  `RT_CYCLES100` = 184.
+* **Other values:** `RT_CYCLES100` = 184.
 
 The `searle6809` test suite runs every `run` program twice in `sim6809`,
 with an ACIA at `$A000` (`--acia --stop-at-end`) and the ROM read-only
@@ -1836,8 +1830,7 @@ listing and simulator traces easy to follow.
   * `CARRY` is `LDB RT_CC` / `ANDB #1` / `NEGB`, `ZERO` a `CMPD #1` of
     `RT_RES`, `SIGN` a `SEX` of its high byte, and `PARITY` a call of
     `RT_PARITY`.
-* **Other built-ins:** `INPUT(n)` is `LDB RT_PORTS+n`, `OUTPUT(n) = v` is
-  `STB RT_PORTS+n`, `STACKPTR` is `TFR S,D` / `TFR D,S`, `MOVE` calls
+* **Other built-ins:** `STACKPTR` is `TFR S,D` / `TFR D,S`, `MOVE` calls
   `RT_COPY` (D bytes from X to Y; Y is saved around it if the program has
   REENTRANT procedures), and `TIME` calls `RT_TIME`. `RT_COPY`, `RT_TIME`
   and `RT_PARITY` are assembled only when used (`RT_NEED_COPY`, ...).
@@ -1936,7 +1929,7 @@ group of instructions.
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
 | `err` | 196 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, INPUT and OUTPUT on the simulator's ports, labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, device registers AT sim6809's I/O block in place of INPUT and OUTPUT, and INPUT and OUTPUT as ordinary names, labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |

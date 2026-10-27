@@ -1,0 +1,14 @@
+/* INPUT and OUTPUT aren't built in (the 6809 has no I/O ports), so they
+   are ordinary names a program may declare.  Expected values in comments. */
+IONAME: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE OUTPUT(4) BYTE, I BYTE;
+INPUT: PROCEDURE (N) BYTE;
+    DECLARE N BYTE;
+    RETURN N * 3;
+END INPUT;
+DO I = 0 TO 3;
+    OUTPUT(I) = INPUT(I);
+END;
+CALL PUTDEC(OUTPUT(0) + OUTPUT(1) + OUTPUT(2) + OUTPUT(3));   /* 18 */
+END IONAME;

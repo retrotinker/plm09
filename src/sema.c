@@ -68,6 +68,10 @@ static Symbol *lookup(Scope *scope, const char *name, Loc loc)
     if (sym && sym->pending && !(scope->proc && scope->proc->reentrant))
         error_at(loc, "%s is not declared (only a REENTRANT procedure can use a "
                  "REENTRANT procedure declared after it)", name);
+    /* PL/M-80's port I/O (the 8080's IN and OUT) has no 6809 counterpart */
+    if (!sym && (!strcmp(name, "INPUT") || !strcmp(name, "OUTPUT")))
+        error_at(loc, "%s is not supported: the 6809 has no I/O ports; declare a BYTE "
+                 "variable AT the device's address", name);
     if (!sym)
         error_at(loc, "%s is not declared", name);
     return sym;
@@ -177,7 +181,7 @@ static const struct {
     [BI_SHL] = { "SHL", 2, TY_STRUCT }, [BI_SHR] = { "SHR", 2, TY_STRUCT },
     [BI_ROL] = { "ROL", 2, TY_BYTE }, [BI_ROR] = { "ROR", 2, TY_BYTE },
     [BI_SCL] = { "SCL", 2, TY_STRUCT }, [BI_SCR] = { "SCR", 2, TY_STRUCT },
-    [BI_DEC] = { "DEC", 1, TY_BYTE }, [BI_INPUT] = { "INPUT", 1, TY_BYTE },
+    [BI_DEC] = { "DEC", 1, TY_BYTE },
     [BI_CARRY] = { "CARRY", 0, TY_BYTE }, [BI_ZERO] = { "ZERO", 0, TY_BYTE },
     [BI_SIGN] = { "SIGN", 0, TY_BYTE }, [BI_PARITY] = { "PARITY", 0, TY_BYTE },
     [BI_TIME] = { "TIME", 1, TY_NONE }, [BI_MOVE] = { "MOVE", 3, TY_NONE },
@@ -226,10 +230,6 @@ static int check_value_builtin(Expr *e, Scope *scope, int as_call)
     e->type = builtins[b].type == TY_STRUCT ? e->lhs->type : builtins[b].type;
 
     switch (e->builtin) {
-    case BI_INPUT:              /* a port number, as with OUTPUT */
-        if (e->lhs->kind != E_NUM || e->lhs->value > 255)
-            error_at(e->lhs->loc, "INPUT needs a port number from 0 to 255 (a constant)");
-        break;
     case BI_SCL:
     case BI_SCR:
     case BI_CARRY:
@@ -314,8 +314,6 @@ static void check_expr(Expr *e, Scope *scope)
         sym = e->sym = lookup(scope, e->name, e->loc);
         if (sym->kind == SYM_LABEL)
             error_at(e->loc, "%s is a label, not a variable or procedure", e->name);
-        if (sym->predef == PRE_OUTPUT)
-            error_at(e->loc, "OUTPUT can only be assigned to, as in OUTPUT(port) = value");
         if (sym->predef == PRE_STACKPTR) {      /* the S register */
             if (e->kind == E_CALL)
                 error_at(e->loc, "STACKPTR is not a procedure or an array");
@@ -387,8 +385,6 @@ static void check_expr(Expr *e, Scope *scope)
                      sym->kind == SYM_LABEL ? "label" : "procedure", e->name);
         if (!sym->dim)
             error_at(e->loc, "%s is not an array", e->name);
-        if (sym->predef == PRE_OUTPUT && (e->lhs->kind != E_NUM || e->lhs->value > 255))
-            error_at(e->lhs->loc, "OUTPUT needs a port number from 0 to 255 (a constant)");
         check_sub(e->lhs, scope);
         e->type = sym->type;
         if (e->type == TY_STRUCT && !whole_ok)
@@ -965,8 +961,6 @@ static void check_stmt(Stmt *s, Scope *scope)
                 continue;
             }
             Symbol *sym = t->sym = lookup(scope, t->name, t->loc);
-            if (sym->predef == PRE_OUTPUT)
-                error_at(t->loc, "OUTPUT needs a port number, as in OUTPUT(port) = value");
             if (sym->kind != SYM_VAR)
                 error_at(t->loc, "cannot assign to %s %s",
                          sym->kind == SYM_LABEL ? "label" : "procedure", t->name);
@@ -1103,12 +1097,10 @@ static Symbol *predeclare(Scope *pre, const char *name, Predef what, Type type, 
 void sema_program(Program *prog)
 {
     /* MEMORY: a BYTE array of unknown length after the program's storage;
-       OUTPUT: 256 BYTE ports, at RT_PORTS (from the hooks) and up;
        STACKPTR: the S register */
     Scope *pre = scope_new(NULL, NULL);
     pre->id = -1;
     predeclare(pre, "MEMORY", PRE_MEMORY, TY_BYTE, 1, "RT_MEMORY");
-    predeclare(pre, "OUTPUT", PRE_OUTPUT, TY_BYTE, 256, "RT_PORTS")->absolute = 1;
     predeclare(pre, "STACKPTR", PRE_STACKPTR, TY_ADDRESS, 0, "RT_STACKPTR");
     Scope *global = scope_new(pre, NULL);
 

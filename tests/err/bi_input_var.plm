@@ -1,1 +1,0 @@
-T: DO; DECLARE (B, P) BYTE; B = INPUT(P); END T;

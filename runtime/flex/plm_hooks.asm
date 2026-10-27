@@ -25,9 +25,6 @@
 	IFNDEF	RT_STACKTOP
 RT_STACKTOP	EQU	$C700		; the top of the utility command area
 	ENDC
-	IFNDEF	RT_PORTS
-RT_PORTS	EQU	$E000		; INPUT/OUTPUT: the I/O area of SWTPC and
-	ENDC				; Gimix systems; set yours with -D
 	IFNDEF	RT_CYCLES100
 RT_CYCLES100	EQU	100		; TIME: a 1 MHz CPU; set yours with -D
 	ENDC

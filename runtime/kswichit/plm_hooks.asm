@@ -25,8 +25,6 @@
 ; may be changed.
 
 RT_STACKTOP	EQU	$7000		; below the monitor's variables and stack
-RT_PORTS	EQU	$8000		; INPUT/OUTPUT: port 0 = GPIO1 LEDs (write),
-					; 1 = keypad (read), 2 and 3 = display
 RT_CYCLES100	EQU	123		; TIME: 1.2288 MHz
 
 ACIA_STAT	EQU	$A000		; status (read), control (write)

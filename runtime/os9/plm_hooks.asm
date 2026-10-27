@@ -19,11 +19,8 @@
 ; An I/O error other than end of file ends the program with the error
 ; code as its exit status, as most OS-9 utilities do.
 
-; INPUT(n)/OUTPUT(n) address the hardware directly, port n at RT_PORTS + n
-; (the CoCo 3's I/O page; normally best left to OS-9's drivers).  TIME
-; waits in a loop timed for NitrOS-9's 1.79 MHz CoCo 3 and doesn't give
-; up the CPU.
-RT_PORTS	EQU	$FF00
+; TIME waits in a loop timed for NitrOS-9's 1.79 MHz CoCo 3 and doesn't
+; give up the CPU.
 RT_CYCLES100	EQU	179
 
 F$Exit	EQU	$06

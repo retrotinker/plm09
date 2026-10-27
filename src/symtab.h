@@ -8,7 +8,7 @@ typedef enum SymKind { SYM_VAR, SYM_PROC, SYM_LABEL } SymKind;
 
 /* PL/M-80's predeclared variables (manual 11.2), in a scope around the
    program's, so declarations hide them */
-typedef enum Predef { PRE_NONE, PRE_MEMORY, PRE_OUTPUT, PRE_STACKPTR } Predef;
+typedef enum Predef { PRE_NONE, PRE_MEMORY, PRE_STACKPTR } Predef;
 
 /* where a variable lives: at a fixed place (in memory, or in an --os9
    data area), or in the stack frame of a REENTRANT procedure (Y-relative) */
@@ -37,7 +37,7 @@ typedef struct Symbol {
                                ST_FRAME variable: its procedure */
     unsigned frame_off;     /* ST_FRAME: offset from Y */
     int pending;            /* REENTRANT procedure not declared yet */
-    Predef predef;          /* MEMORY, OUTPUT, STACKPTR */
+    Predef predef;          /* MEMORY, STACKPTR */
     int label_declared;     /* SYM_LABEL from a LABEL declaration */
     LabelAttr label_attr;   /* ... and its attribute */
     int defined;            /* SYM_LABEL: a statement carries it */

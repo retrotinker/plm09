@@ -1,0 +1,1 @@
+1:28: error: INPUT is not supported: the 6809 has no I/O ports; declare a BYTE variable AT the device's address

@@ -170,7 +170,7 @@ Operators group left to right.
 - IF and WHILE test only bit 0 of the condition.
 - AND and OR are evaluated in full, without short-circuiting.
 - `PLUS`/`MINUS` follow the `+ -` typing and add/subtract the carry (borrow); `SCL`/`SCR` rotate through it, `DEC` uses it and the half carry, and `CARRY`/`ZERO`/`SIGN`/`PARITY` read the flags. The 8080 compiler uses the CPU flags, which the manual calls unpredictable; plmc defines them as those of the last `+ - PLUS MINUS SCL SCR DEC` executed and keeps them in memory, as far as the program needs them: the carry (and, for BYTE operations when DEC is used, the half carry) in `RT_CC`, by `ROL` (or `TFR CC,A`/`STA`); the result in `RT_RES`. PLUS, MINUS, SCL and SCR get the carry back with `LSR`; DEC puts carry and half carry into CC (leaving I and F) before `DAA`. Interrupt entry code saves and restores them.
-- **I/O ports:** port n of `INPUT(n)`/`OUTPUT(n)` is the byte at `RT_PORTS + n`, defined by the hooks (`$FF00` for the simulator, CoCo and OS-9; `ACIA_BASE` for the example).
+- **No I/O ports:** PL/M-80's `INPUT(n)`/`OUTPUT(n)` (the 8080's `IN`/`OUT`) have no 6809 counterpart, so they are not provided: sema (`lookup()`) reports an undeclared `INPUT` or `OUTPUT` as not supported, pointing to a BYTE variable AT the device's address, and a program may declare the names for itself. (Until after 0.1.0 they were mapped to the bytes at `RT_PORTS + n`, an address from the hooks.)
 - **TIME** is `RT_TIME`, a loop of 8 × `RT_TIMEK` + 8 cycles per 100 µs, from the hooks' `RT_CYCLES100`. **MOVE** uses `RT_COPY`. **MEMORY** is the label `RT_MEMORY` (after everything, or `--memory` bytes of an OS-9 data area). **STACKPTR** is `TFR S,D` / `TFR D,S`.
 - Assigning ADDRESS to BYTE keeps the low byte. BYTE to ADDRESS zero-extends. Arguments and RETURN values are converted to the declared type.
 - Division by zero gives a quotient of 0FFFFH and a remainder equal to the dividend. This is documented as something not to rely on.
@@ -335,7 +335,7 @@ These can't clash with user names because PL/M identifiers have no `_`.
 - `PLM_EXIT` (exit status in B; must not return)
 - `PLM_HALT`
 - `PLM_SETINT` (B = interrupt number, X = entry routine), only for programs with INTERRUPT procedures
-- `RT_PORTS` (address of port 0), only for programs using INPUT or OUTPUT, and `RT_CYCLES100` (cycles in 100 µs), only for programs using TIME
+- `RT_CYCLES100` (cycles in 100 µs), only for programs using TIME
 - one label per EXTERNAL procedure the program uses
 
 Other details:
@@ -405,11 +405,11 @@ All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
   - PUTCH uses PUTCHR ($CD18), sending LF as PCRLF ($CD24); PUTDEC uses OUTDEC ($CD39) on the number pushed on the stack, then PCRLF
   - GETCH uses GETCHR ($CD15)
   - EXIT, end of program and HALT jump to WARMS ($CD03); FLEX has no exit status, B is passed on (sim6809 --flex uses it)
-  - stack at `RT_STACKTOP` = $C700, the top of the utility command area (the top of user RAM is where EXEC and spoolers park themselves, lowering MEMEND); `RT_PORTS` ($E000) and `RT_CYCLES100` (100) are machine-dependent, all three overridable with `-D`
+  - stack at `RT_STACKTOP` = $C700, the top of the utility command area (the top of user RAM is where EXEC and spoolers park themselves, lowering MEMEND); `RT_CYCLES100` (100) is machine-dependent, both overridable with `-D`
   - no PLM_SETINT (interrupt vectors depend on the machine)
   - a FLEX binary is made from lwasm's S-records by `srec2flex` ($02 records of up to 252 bytes, $16 transfer address from S9), since lwasm has no FLEX format
-- **simon6809** (Erturk Kocalar's Simon6809 board, BUGGY monitor): console through the monitor's RAM I/O vectors (getchar $001B, putchar $001E, putcr $0027; FT245RL at $D000 underneath); exit, HALT and EXIT with SWI (a breakpoint to the monitor, which shows B); PLM_SETINT patches the RAM JMP vectors ($0009 IRQ, $0006 FIRQ, $000F NMI) and PLM_EXIT restores them; programs at $0400, stack $8000; RT_PORTS $D000, RT_CYCLES100 100.
-- **kswichit** (Wichit Sirichote's 6809 Microprocessor Kit): the 6850 ACIA at $A000 used directly (the monitor's routine addresses differ between versions); SWI back to the monitor; PLM_SETINT patches the RAM vectors ($7FF0 IRQ, $7FF6 FIRQ, $7FF3 NMI); programs at $0200, stack $7000 (below the monitor's $7000-$7FFF); RT_PORTS $8000, RT_CYCLES100 123 (1.2288 MHz).
+- **simon6809** (Erturk Kocalar's Simon6809 board, BUGGY monitor): console through the monitor's RAM I/O vectors (getchar $001B, putchar $001E, putcr $0027; FT245RL at $D000 underneath); exit, HALT and EXIT with SWI (a breakpoint to the monitor, which shows B); PLM_SETINT patches the RAM JMP vectors ($0009 IRQ, $0006 FIRQ, $000F NMI) and PLM_EXIT restores them; programs at $0400, stack $8000; RT_CYCLES100 100.
+- **kswichit** (Wichit Sirichote's 6809 Microprocessor Kit): the 6850 ACIA at $A000 used directly (the monitor's routine addresses differ between versions); SWI back to the monitor; PLM_SETINT patches the RAM vectors ($7FF0 IRQ, $7FF6 FIRQ, $7FF3 NMI); programs at $0200, stack $7000 (below the monitor's $7000-$7FFF); RT_CYCLES100 123 (1.2288 MHz).
 - **searle6809** (Grant Searle's 6809 SBC, Jeff Tranter's combined ASSIST09+BASIC ROM or Grant's BASIC ROM): the ACIA at $A000 used directly; the program is a subroutine of the monitor (C) or BASIC (EXEC) and returns with LDS RT_ENTRYS / RTS; stack $6FD0 (below ASSIST09's RAM), programs at $1000; PLM_SETINT follows the CPU vector: ASSIST09's `JMP [n,PCR]` (store the handler's address in the word it reads, 2 bytes) or a RAM JMP (BASIC's $00A4/$00A7/$00AA, 3 bytes); PLM_EXIT restores exactly the bytes changed (ASSIST09's IRQ and FIRQ words are adjacent, so restoring 3 bytes clobbered one, which the suite's vector check caught); RT_CYCLES100 184.
 - **example:**
   - MC6850 ACIA template (`ACIA_BASE`, default $A000; `RT_STACKTOP`, default $8000)
@@ -536,10 +536,11 @@ How the dragonflex suite works (each point was found the hard way):
 - LABEL declarations: the run test `labels` (declared labels in the program, a procedure and a DO block, an inner implicit label hiding a declared one, a PUBLIC label, and an EXTERNAL label naming the hooks' `EXIT`), a parse golden and error tests
 - PLUS and MINUS: the run test `carry` (32- and 24-bit arithmetic, what changes the carry, evaluation order), 32-bit counting under interrupts in `interrupt`, carry statements in the fuzz generator, a parse golden and error tests
 - HIGH, LOW, DOUBLE, SHL, SHR, ROL, ROR: the run test `builtins`, the coco test `builtins` (also on XRoar), built-ins in the fuzz generator's expressions, a parse golden and error tests
-- the other built-ins and predeclared variables: the run tests `flags` (BCD arithmetic with DEC, SCL/SCR, CARRY/ZERO/SIGN/PARITY), `memory` (MOVE, MEMORY, STACKPTR, TIME; in the os9 suites with `--memory 128`) and `ports` (INPUT/OUTPUT on the simulator's I/O block), the XRoar test `time` (40 × TIME(250) is 59 field-sync ticks, predicted 0.983 s), flag statements in the fuzz generator, a parse golden and error tests
+- the other built-ins and predeclared variables: the run tests `flags` (BCD arithmetic with DEC, SCL/SCR, CARRY/ZERO/SIGN/PARITY), `memory` (MOVE, MEMORY, STACKPTR, TIME; in the os9 suites with `--memory 128`), `atio` (an array AT the simulator's I/O block, in place of INPUT/OUTPUT) and `ioname` (INPUT and OUTPUT declared as ordinary names), the XRoar test `time` (40 × TIME(250) is 59 field-sync ticks, predicted 0.983 s), flag statements in the fuzz generator, a parse golden and error tests
 - Grant Searle's 6809 SBC: its hooks, sim6809 Intel HEX loading, `--reset`, `--rom`, ACIA input pacing and `--stop-at-end`, and the `searle6809` suite on both real ROMs
 - the Simon6809 board and the 6809 Microprocessor Kit: their hooks, sim6809 `--swi`/`--acia`/`--ft245` (sim test `devices`), the `simon6809` and `kswichit` suites with an interrupt test each
 - REENTRANT: the run test `reentrant` (the manual's SUM$ARRAY, indirect recursion through a forward call, local arrays and structures, Ackermann, a GOTO out of 20 activations), half the fuzz programs running inside a REENTRANT procedure, a parse golden and error tests
+- INPUT and OUTPUT removed after 0.1.0: the 6809 has no I/O ports, so the 8080 port I/O was dropped (with `RT_PORTS` in the hooks) in favour of BYTE variables AT device addresses; the run tests `atio` and `ioname` and the error tests `input_unsupported`/`output_unsupported` replace `ports` and the port-number checks
 
 ## Known gaps
 - **Language:** PUBLIC (other than on labels), `:=`, are not supported. TIME's timing is only checked on an emulated CoCo; sim6809 has no cycle counts. Arrays are one-dimensional and can't be parameters.

@@ -27,9 +27,6 @@
 ; may be changed.
 
 RT_STACKTOP	EQU	$6FD0		; below the monitor's RAM
-	IFNDEF	RT_PORTS
-RT_PORTS	EQU	$A000		; INPUT/OUTPUT: port 0 = ACIA status, 1 = data
-	ENDC				; (or -DRT_PORTS=$8000 for the free space)
 RT_CYCLES100	EQU	184		; TIME: 1.8432 MHz
 
 ACIA_STAT	EQU	$A000

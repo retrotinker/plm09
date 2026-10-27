@@ -23,7 +23,6 @@
 ; may be changed.
 
 RT_STACKTOP	EQU	$8000		; the top of RAM
-RT_PORTS	EQU	$D000		; INPUT/OUTPUT: the I/O selects ($D000 = FT245)
 RT_CYCLES100	EQU	100		; TIME: 1 MHz
 
 MON_GETCHAR	EQU	$001B		; monitor I/O vectors (JMPs in RAM)

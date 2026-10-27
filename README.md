@@ -156,10 +156,9 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - Subscripts are any expression and aren't range-checked, as in PL/M-80.
   - A plain `BUF` means `BUF(0)`.
   - `LENGTH(BUF)` and `LAST(BUF)` give the number of elements and the highest subscript (BYTE if 255 or less, as in PL/M-80), and `SIZE(X)` the number of bytes.
-- **Built-ins:** all of PL/M-80's, as built-ins only where the name isn't declared:
+- **Built-ins:** all of PL/M-80's except `INPUT` and `OUTPUT`, as built-ins only where the name isn't declared:
   - `HIGH(W)`, `LOW(W)` and `DOUBLE(B)` convert between BYTE and ADDRESS; `SHL(P, N)`/`SHR(P, N)` shift a BYTE or ADDRESS, and `ROL(P, N)`/`ROR(P, N)` rotate a BYTE. They compile to inline code, so they work on every target.
   - `CARRY`, `ZERO`, `SIGN` and `PARITY` read the flags of the last `+ - PLUS MINUS SCL SCR DEC` executed; `SCL`/`SCR` rotate through the carry, and `DEC(A + B)` adjusts a BCD addition. Unlike on the 8080, these flags are exact: plmc keeps them in memory.
-  - `INPUT(n)` and `OUTPUT(n) = v` read and write port n, the byte at `RT_PORTS + n` (the hooks set it: `$FF00` for the simulator's I/O block and the CoCo's I/O page).
   - `CALL MOVE(count, from, to)` copies bytes; `CALL TIME(n)` waits n × 100 µs, timed by the hooks' `RT_CYCLES100`.
   - `MEMORY` is the memory after the program (`--memory N` bytes under OS-9), and `STACKPTR` is the S register.
   - Arrays can't be parameters.
@@ -202,6 +201,12 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 **Not supported yet:**
 - `PUBLIC`
 - embedded assignment `:=`
+
+**Not supported:** `INPUT(n)` and `OUTPUT(n)`, the 8080's port I/O. The 6809
+has no I/O instructions or ports, only memory-mapped devices: declare their
+registers AT their addresses instead, as in `DECLARE IO(16) BYTE AT
+(0FF00H);` for the simulator's I/O block. `INPUT` and `OUTPUT` are then
+ordinary names a program may declare.
 
 The compiler reports these with an error ("... is not supported") rather than
 misreading them.
@@ -301,7 +306,7 @@ build/srec2flex sum.s19 SUM.CMD
 
 * **Running it:** copy `SUM.CMD` to a FLEX disk and type `SUM`. `build/sim6809 --flex SUM.CMD` runs it in the simulator, which emulates FLEX's DOS entry points.
 * **Any FLEX 9 system:** the hooks only use FLEX's jump table at `$CD00` (PUTCHR, PCRLF, GETCHR, OUTDEC, WARMS). The program returns to FLEX when it ends.
-* **Machine-dependent values:** the stack top (`RT_STACKTOP`, default `$C700`, the top of FLEX's utility command area), the I/O ports (`RT_PORTS`, `$E000`) and the clock for `TIME` (`RT_CYCLES100`, 1 MHz) can be set with lwasm's `-D`.
+* **Machine-dependent values:** the stack top (`RT_STACKTOP`, default `$C700`, the top of FLEX's utility command area) and the clock for `TIME` (`RT_CYCLES100`, 1 MHz) can be set with lwasm's `-D`.
 * **`srec2flex`** converts lwasm's S-records to a FLEX binary (`.CMD`), using the S9 entry address as the transfer address.
 * **Tested on real FLEX:** the `dragonflex` suite runs the test programs on Compusense FLEX for the Dragon 64 under XRoar (`$FLEX_DISK`, default `~/coco/flex/FLEX_1.3.2.VDK`).
 
@@ -324,7 +329,7 @@ lwasm -9 -f srec -I runtime -I runtime/kswichit -o sum.s19 sum.asm
 ```
 
 * **Running it:** press LOAD, send `sum.s19` over the serial port (19200 8N1, 1 ms character delay), then GO (from `$0200`). The program returns to the monitor with `SWI`.
-* **The kit** (Wichit Sirichote, [kswichit.net/6809/6809.htm](https://kswichit.net/6809/6809.htm)): a 68B09 at 1.2288 MHz, 32 KB RAM, an MC6850 ACIA at `$A000` that the hooks use directly (the monitor's routine addresses vary between versions), I/O ports at `$8000` (`OUTPUT(0)` drives the GPIO1 LEDs), and RAM interrupt vectors at `$7FF0`--`$7FF8` that `PLM_SETINT` patches. The stack is at `$7000`, below the monitor's variables.
+* **The kit** (Wichit Sirichote, [kswichit.net/6809/6809.htm](https://kswichit.net/6809/6809.htm)): a 68B09 at 1.2288 MHz, 32 KB RAM, an MC6850 ACIA at `$A000` that the hooks use directly (the monitor's routine addresses vary between versions), I/O at `$8000` (the GPIO1 LEDs, keypad and display), and RAM interrupt vectors at `$7FF0`--`$7FF8` that `PLM_SETINT` patches. The stack is at `$7000`, below the monitor's variables.
 * **Tested** in `sim6809` with an ACIA (`--acia`) and a stand-in monitor: the `kswichit` suite.
 
 ## Grant Searle's 6809 SBC
