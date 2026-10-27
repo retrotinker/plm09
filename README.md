@@ -46,7 +46,7 @@ RPM (for `mock`). The RPM build applies a patch, made by
 installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:
 
 ```
-sudo dnf install build/rpm/RPMS/x86_64/plm09-0.2.0-1.*.x86_64.rpm
+sudo dnf install build/rpm/RPMS/x86_64/plm09-0.2.0-*.x86_64.rpm
 ```
 
 It installs the programs in `/usr/bin`, the man pages, and the runtime in
