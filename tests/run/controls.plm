@@ -1,0 +1,12 @@
+$TITLE('CONTROLS: IGNORED (BUT ONE)') PAGEWIDTH(120)
+$NOLIST
+/* Compiler controls other than INCLUDE (Intel's listing and object
+   controls) are ignored with a warning, with their arguments, even before
+   an INCLUDE on the same line.  Expected values in comments. */
+CTLS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+$ eject
+$nolist include(include/twice.plm)
+$LIST
+CALL PUTDEC(TWICE(21));                         /* 42 */
+END CTLS;

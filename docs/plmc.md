@@ -167,7 +167,8 @@ compiles means what PL/M-80 says it means.
   compiler-generated labels from ever colliding with your names.
 * **Comments:** `/* ... */`. They may span several lines but don't nest.
 * **Control lines:** a line with `$` in column 1 holds compiler controls;
-  only `$INCLUDE(file)` is implemented. See [INCLUDE].
+  only `$INCLUDE(file)` has an effect, and the others are ignored with a
+  warning. See [INCLUDE].
 * **Numbers:** must start with a digit and fit in 16 bits (0 to 65535). An
   optional suffix gives the base:
 
@@ -240,9 +241,11 @@ END UTIL;
 * **Diagnostics** in an INCLUDE file name that file and its own line
   numbers, and so do the source comments in the generated assembly
   (`; inc/defs.plm:3: RETURN N + N;`).
-* **Other controls** (`$NOLIST`, `$TITLE(...)`, `$OPTIMIZE`, and the rest)
-  concern Intel's listing and object files, and are reported as not
-  supported; delete them.
+* **Other controls** (`$NOLIST`, `$TITLE('...')`, `$PAGEWIDTH(120)`,
+  `$OPTIMIZE`, and the rest) concern Intel's listing and object files. plmc
+  ignores each one, with any parenthesized argument, and warns:
+  `warning: control NOLIST ignored (only INCLUDE has an effect)`. Several
+  may share a line, also before an INCLUDE (`$NOLIST INCLUDE(DEFS.PLM)`).
 
 ## Declarations
 
@@ -1111,7 +1114,6 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | `PUBLIC` | `... is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
-| compiler controls other than `INCLUDE` (`$NOLIST`, `$TITLE`, ...) | `control X is not supported (only INCLUDE is)` |
 
 All of PL/M-80's built-in procedures (`LENGTH`, `LAST`, `SIZE`, `HIGH`,
 `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL`, `ROR`, `SCL`, `SCR`, `DEC`, `CARRY`,
@@ -1218,7 +1220,9 @@ next multiple of 8 plus 1.
 | `INCLUDE needs a file name in parentheses, as in $INCLUDE(FILE.PLM)`, `INCLUDE file name without a closing ')'`, `INCLUDE needs a file name` | a malformed `$INCLUDE` line |
 | `INCLUDE must be the last control on its line` | text after `$INCLUDE(...)` |
 | `INCLUDE files nested more than 16 deep (does a file include itself?)` | INCLUDE recursion |
-| `control X is not supported (only INCLUDE is)`, `a control name is expected after '$'` | any other control line |
+| `a control name is expected after '$'` | a control line without a control name |
+| `control X without a closing ')'` | an ignored control's argument runs to the end of the line |
+| warning: `control X ignored (only INCLUDE has an effect)` | any control other than `INCLUDE` |
 | warning: `typed procedure F may reach its END without RETURN` | last statement is not `RETURN` or `HALT` |
 | `plmc: --org and --vectors cannot be used with --os9 ...` | OS-9 modules have no fixed address |
 | `plmc: --stack is only used with --os9`, `--name is only used with --os9` | option without `--os9` |
@@ -1970,7 +1974,7 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 201 programs that must fail, each with the expected message and position |
+| `err` | 202 programs that must fail, each with the expected message and position |
 | `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, device registers AT sim6809's I/O block in place of INPUT and OUTPUT, and INPUT and OUTPUT as ordinary names, labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |

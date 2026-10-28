@@ -7,9 +7,10 @@
  * two-character strings as numeric constants and longer ones as LITERALLY
  * bodies.
  *
- * A line with '$' in column 1 is a control line.  The only control is
- * INCLUDE (or IC): $INCLUDE(file) reads the file's text in place of the
- * line.  The file is looked for in the including file's directory, then in
+ * A line with '$' in column 1 is a control line.  The only control with an
+ * effect is INCLUDE (or IC): $INCLUDE(file) reads the file's text in place
+ * of the line; the others (Intel's listing and object controls) are
+ * ignored with a warning.  The file is looked for in the including file's directory, then in
  * each -I directory, as written and in lower case; an ISIS drive prefix
  * (:F1:) is dropped.  Tokens carry the index of their file in src_files.
  */
@@ -193,8 +194,25 @@ static void control_line(void)
         word[n] = 0;
         if (!n)
             error_at(at, "a control name is expected after '$'");
-        if (strcmp(word, "INCLUDE") && strcmp(word, "IC"))
-            error_at(at, "control %s is not supported (only INCLUDE is)", word);
+        if (strcmp(word, "INCLUDE") && strcmp(word, "IC")) {
+            /* Intel's listing and object controls mean nothing here: skip
+               the name and any (argument), which may hold 'strings' */
+            warning_at(at, "control %s ignored (only INCLUDE has an effect)", word);
+            while (*p == ' ' || *p == '\t')
+                advance();
+            if (*p == '(') {
+                int quoted = 0;
+                while (*p && *p != '\n' && (quoted || *p != ')')) {
+                    if (*p == '\'')
+                        quoted = !quoted;
+                    advance();
+                }
+                if (*p != ')')
+                    error_at(at, "control %s without a closing ')'", word);
+                advance();
+            }
+            continue;
+        }
 
         while (*p == ' ' || *p == '\t')
             advance();

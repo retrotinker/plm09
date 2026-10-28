@@ -1,0 +1,6 @@
+$NOLIST
+/* the expected first line is the warning; UNDECLARED makes compilation fail */
+T: DO;
+DECLARE B BYTE;
+B = UNDECLARED;
+END T;

@@ -199,7 +199,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Division by zero** gives a quotient of `0FFFFH` and a remainder equal to the dividend. Programs should not rely on this.
 - **Declaration order:** a name must be declared before it is used.
 - **Recursion needs REENTRANT:** as in classic PL/M, an ordinary procedure's parameters and locals are stored in fixed RAM locations, and the compiler reports direct and indirect recursion through such a procedure as an error. A `REENTRANT` procedure keeps them on the stack (Y-relative frame) and may be recursive; inside a REENTRANT procedure, REENTRANT procedures may be called before they are declared.
-- **INCLUDE:** a line `$INCLUDE(FILE.PLM)` (or `$IC(...)`), with `$` in column 1, compiles that file's text in its place. The file is looked for in the including file's directory and then in the `-I` directories, as written and in lower case; an ISIS drive prefix such as `:F1:` is dropped. Errors in an included file name that file. Other compiler controls (`$NOLIST`, `$TITLE`, ...) are rejected.
+- **INCLUDE:** a line `$INCLUDE(FILE.PLM)` (or `$IC(...)`), with `$` in column 1, compiles that file's text in its place. The file is looked for in the including file's directory and then in the `-I` directories, as written and in lower case; an ISIS drive prefix such as `:F1:` is dropped. Errors in an included file name that file. Other compiler controls (`$NOLIST`, `$TITLE(...)`, ...) are ignored with a warning.
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
