@@ -43,7 +43,7 @@ tests/    run_tests.sh
 tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
           srec2flex.c (S-records to a FLEX .CMD file; built as build/srec2flex)
           rpmdocs.py (the RPM's documentation patch: runtime paths to the installed ones)
-contrib/  Makefile hello.plm sum.plm (example programs built with an installed plm09: TARGET=sim or os9)
+contrib/  Makefile hello.plm sum.plm (example programs built with an installed plm09: TARGET=sim or os9; %doc in the RPM)
 docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
           man/plmc.1  man/sim6809.1  man/srec2flex.1 (man pages)
 ```

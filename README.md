@@ -85,7 +85,7 @@ lwasm -9 -f srec -I runtime -I runtime/sim -o hello.s19 hello.asm
 build/sim6809 hello.s19
 ```
 
-`make run F=hello.plm` does all three steps. `contrib/` has two example programs and a Makefile that builds and runs them with an installed plm09 (the RPM's `/usr/share/plm09`): `make -C contrib`, or `make -C contrib TARGET=os9`.
+`make run F=hello.plm` does all three steps. `contrib/` has two example programs and a Makefile that builds and runs them with an installed plm09 (the RPM's `/usr/share/plm09`): `make -C contrib`, or `make -C contrib TARGET=os9`. The RPM installs them in `/usr/share/doc/plm09/contrib`; copy that directory somewhere writable to build them.
 
 For real hardware, replace `-I runtime/sim` with the directory that holds your
 own `plm_hooks.asm` (see [Hooks](#hooks)). You can also choose another output

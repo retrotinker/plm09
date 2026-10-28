@@ -1,6 +1,6 @@
 Name:           plm09
 Version:        0.3.2
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
 License:        MIT
@@ -73,7 +73,7 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test fuzz-test
 
 %files
 %license LICENSE
-%doc README.md docs/plmc.pdf docs/sim6809.pdf
+%doc README.md docs/plmc.pdf docs/sim6809.pdf contrib
 %{_bindir}/plmc
 %{_bindir}/sim6809
 %{_bindir}/srec2flex
@@ -83,6 +83,9 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test fuzz-test
 %{_datadir}/%{name}/
 
 %changelog
+* Wed Oct 28 2026 John W. Linville <linville@tuxdriver.com> - 0.3.2-2
+- Include the contrib/ examples as documentation
+
 * Wed Oct 28 2026 John W. Linville <linville@tuxdriver.com> - 0.3.2-1
 - Add contrib/: example programs and a Makefile for an installed plm09
 
