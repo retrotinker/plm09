@@ -24,7 +24,7 @@ make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
 `$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`, DATADIR `$(PREFIX)/share`) and
 `DESTDIR` (for staged installs) work as usual. `--version` prints each
-program's version (0.2.0), and `man plmc`, `man sim6809` and `man srec2flex`
+program's version (0.3.0), and `man plmc`, `man sim6809` and `man srec2flex`
 give a summary of each program's options.
 
 <!-- installed-paths
@@ -48,7 +48,7 @@ RPM (for `mock`). The RPM build applies a patch, made by
 installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:
 
 ```
-sudo dnf install build/rpm/RPMS/x86_64/plm09-0.2.0-*.x86_64.rpm
+sudo dnf install build/rpm/RPMS/x86_64/plm09-0.3.0-*.x86_64.rpm
 ```
 
 It installs the programs in `/usr/bin`, the man pages, and the runtime in

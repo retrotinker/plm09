@@ -1,4 +1,4 @@
-VERSION := 0.2.0
+VERSION := 0.3.0
 
 # CFLAGS and LDFLAGS may be replaced (rpmbuild sets its own); the language
 # and warning flags are always used, and WERROR= turns off -Werror

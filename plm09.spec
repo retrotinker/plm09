@@ -1,6 +1,6 @@
 Name:           plm09
-Version:        0.2.0
-Release:        3%{?dist}
+Version:        0.3.0
+Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
 License:        MIT
@@ -83,6 +83,9 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test fuzz-test
 %{_datadir}/%{name}/
 
 %changelog
+* Wed Oct 28 2026 John W. Linville <linville@tuxdriver.com> - 0.3.0-1
+- Add the $INCLUDE compiler control and plmc's -I option
+
 * Wed Oct 28 2026 John W. Linville <linville@tuxdriver.com> - 0.2.0-3
 - Source0 is the GitHub release archive
 
