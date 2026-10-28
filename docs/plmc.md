@@ -84,8 +84,8 @@ defaults to `$(PREFIX)/share`): with an installed plmc, write
 wherever this manual has `-I runtime -I runtime/sim`.
 <!-- /source-paths -->
 
-`make rpm` builds a Fedora RPM from `plm09.spec` (the committed tree, into
-`build/rpm`), which installs in `/usr`, so the runtime is in
+`make rpm` builds a Fedora RPM from `plm09.spec` (from the release tag, or
+the committed tree before the version is tagged, into `build/rpm`), which installs in `/usr`, so the runtime is in
 `/usr/share/plm09/runtime`; its documentation is patched to use that
 directory in its commands. `plmc --version` prints the version.
 

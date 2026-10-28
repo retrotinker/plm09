@@ -70,13 +70,17 @@ install: all
 		install -m 644 $$d*.asm $(DESTDIR)$(DATADIR)/plm09/$$d || exit 1; \
 	done
 
-# Fedora RPMs from the committed tree (HEAD), in build/rpm
+# Fedora RPMs, in build/rpm.  The tarball is the release tag v$(VERSION),
+# the same files as the GitHub archive the spec's Source0 names, or HEAD
+# while VERSION isn't tagged yet; the spec itself comes from the work tree.
 RPMTOP := $(abspath $(BUILD)/rpm)
 TARBALL := $(RPMTOP)/SOURCES/plm09-$(VERSION).tar.gz
+RPMTREE = $(shell git rev-parse -q --verify refs/tags/v$(VERSION) >/dev/null && echo v$(VERSION) || echo HEAD)
 
 $(TARBALL): .FORCE
 	mkdir -p $(RPMTOP)/SOURCES
-	git archive --format=tar.gz --prefix=plm09-$(VERSION)/ -o $@ HEAD
+	@echo "plm09-$(VERSION).tar.gz from $(RPMTREE)"
+	git archive --format=tar.gz --prefix=plm09-$(VERSION)/ -o $@ $(RPMTREE)
 
 # the patch plm09.spec applies: the documentation's runtime paths changed to
 # the directory the spec installs it in (make install DATADIR=%{_datadir})

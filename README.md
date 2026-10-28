@@ -38,8 +38,10 @@ installed plmc's output is assembled with `-I
 place of `-I runtime -I runtime/sim`.
 <!-- /source-paths -->
 
-**Fedora RPM:** `make rpm` builds `plm09.spec` from the committed tree (HEAD;
-uncommitted changes are left out) into `build/rpm`, running the test suites
+**Fedora RPM:** `make rpm` builds `plm09.spec` into `build/rpm` from the
+release tag `v$(VERSION)` (the same files as the GitHub release archive the
+spec's `Source0` names; HEAD while the version isn't tagged yet, and never
+uncommitted changes), running the test suites
 that need only lwasm, python3 and groff; `make rpm` first removes the RPMs of earlier builds; `make srpm` makes just the source
 RPM (for `mock`). The RPM build applies a patch, made by
 `tools/rpmdocs.py`, that changes the documentation's runtime paths to the
