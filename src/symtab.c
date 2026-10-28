@@ -34,6 +34,18 @@ Symbol *scope_lookup(const Scope *s, const char *name)
     return NULL;
 }
 
+/* "line N" for at, or "FILE:N" if at is in another file than from (INCLUDE) */
+static const char *where(Loc at, Loc from)
+{
+    static char buf[300];
+
+    if (at.file == from.file)
+        snprintf(buf, sizeof buf, "line %d", at.line);
+    else
+        snprintf(buf, sizeof buf, "%s:%d", loc_file(at), at.line);
+    return buf;
+}
+
 Symbol *scope_define(Scope *s, const char *name, SymKind kind, Loc loc)
 {
     Symbol *old = scope_lookup_local(s, name);
@@ -44,8 +56,8 @@ Symbol *scope_define(Scope *s, const char *name, SymKind kind, Loc loc)
         /* labels are collected before a block's declarations; report a clash
            at the label, which comes later in the text */
         if (old->kind == SYM_LABEL && !old->label_declared && kind != SYM_LABEL)
-            error_at(old->loc, "%s is already declared at line %d", name, loc.line);
-        error_at(loc, "%s is already declared at line %d", name, old->loc.line);
+            error_at(old->loc, "%s is already declared at %s", name, where(loc, old->loc));
+        error_at(loc, "%s is already declared at %s", name, where(old->loc, loc));
     }
     Symbol *sym = xcalloc(1, sizeof *sym);
     sym->name = xstrdup(name);

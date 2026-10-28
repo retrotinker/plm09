@@ -190,6 +190,7 @@ Operators group left to right.
 
 **LITERALLY in the parser.** Substitution happens in the parser's token buffer, so sema and codegen never see literals.
 - **Lexer:** strings are `T_STRING` tokens. The parser turns one- and two-character strings into constants, and `lex_tokens()` tokenizes a literal's text, located at the place it is used.
+- **INCLUDE:** `skip_space()` treats a `$` in column 1 as a control line (`control_line()`); `$INCLUDE(file)`/`$IC(file)` pushes the reading position on a 16-deep stack and switches to the file (found by `find_include()`: the including file's directory, then the `-I` directories, as written and in lower case, ISIS `:Fn:` dropped), and the end of that file pops back to the end of the control line. The parser never sees file boundaries. `Loc.file` indexes `src_files` (util.c), so `error_at()`, the `--tokens` dump, codegen's source comments (`src_line(loc)`) and "already declared at FILE:N" name included files; LITERALLY bodies (`in_body`) neither see control lines nor end files. Other controls are rejected.
 - **Scopes:** the parser keeps its own scope stack (`LitScope`) of declared names, pushed for the program, procedures and simple DO blocks.
 - **Lazy expansion:** `peek_at(k)` expands positions 0..k, replacing a visible literal name by its tokens, which may expand in turn. Expansion depth is counted per token.
 - **Raw names:** names being defined (DECLARE items, procedure and parameter names, labels, the program name, END labels) are read raw, by `next_raw_ident()` / `raw_type()`, and never expanded. This is what lets `DCL TWO BYTE` in an inner block hide an outer literal `TWO`.
@@ -526,6 +527,7 @@ How the dragonflex suite works (each point was found the hard way):
 - OS-9 support: `--os9`/`--stack`/`--name`, `plm_crt0_os9.asm`, `runtime/os9`, sim6809 `--os9` with memory protection, and the `os9` and `nitros9` suites
 - arrays, with `LENGTH`/`LAST`; the run tests `arrays` and `bigdata`, and arrays in the fuzz generator
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
+- `$INCLUDE` and `-I`: the run test `incl` (ISIS drive prefix, upper-case name found in lower case, `$ic`, nested INCLUDE relative to the included file, INCLUDE in an inner block) and error tests (`include_*`, with fragments in `tests/err/include/`; `include_dir` uses `-I tests/err/include`, so the suite runs from the repository root), `control_unsupported`
 - LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
 - BASED variables and the dot operator: the run test `based`, pointer statements in the fuzz generator, a parse golden and error tests
 - INITIAL and DATA, `(*)`, and strings of any length in value lists: the run test `initial`, INITIAL set-up in the fuzz generator, a parse golden and error tests

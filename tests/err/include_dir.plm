@@ -1,0 +1,4 @@
+/* PLMCARGS: -I tests/err/include */
+T: DO;
+$INCLUDE(BAD.PLM)
+END T;

@@ -1,0 +1,1 @@
+include/self.plm:1:2: error: INCLUDE files nested more than 16 deep (does a file include itself?)

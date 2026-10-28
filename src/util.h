@@ -6,10 +6,21 @@
 
 typedef struct Loc {
     int line, col;
+    int file;           /* index in src_files: 0 the main file, then INCLUDE files */
 } Loc;
 
-extern const char *src_name;    /* file name used in diagnostics */
+/* growable pointer array */
+typedef struct Vec {
+    void **items;
+    int len, cap;
+} Vec;
+
+extern const char *src_name;    /* the main file's name */
+extern Vec src_files;           /* char * per source file (INCLUDE), [0] = src_name */
 extern int warning_count;
+
+/* the name of loc's file, for messages */
+const char *loc_file(Loc loc);
 
 void *xmalloc(size_t n);
 void *xcalloc(size_t n, size_t size);
@@ -24,11 +35,9 @@ void warning_at(Loc loc, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
 _Noreturn void fatal(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
-/* growable pointer array */
-typedef struct Vec {
-    void **items;
-    int len, cap;
-} Vec;
+/* a whole text file, or NULL (errno set) if it can't be opened; fatal on
+   read errors and NUL bytes */
+char *read_text(const char *path);
 
 void vec_push(Vec *v, void *item);
 

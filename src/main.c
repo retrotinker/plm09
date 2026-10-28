@@ -17,6 +17,7 @@ static void usage(FILE *f)
     fprintf(f,
             "usage: plmc [options] file.plm\n"
             "  -o FILE       output assembly file (default: stdout)\n"
+            "  -I DIR        look for $INCLUDE files in DIR too\n"
             "  --org ADDR    load/start address (default $0100)\n"
             "  --vectors     also emit the reset vector at $FFFE\n"
             "  --os9         generate a position-independent OS-9 program module\n"
@@ -31,25 +32,11 @@ static void usage(FILE *f)
 
 static char *read_file(const char *path)
 {
-    FILE *f = fopen(path, "rb");
-    size_t cap = 4096, n = 0, k;
-    char *buf;
+    char *text = read_text(path);
 
-    if (!f)
+    if (!text)
         fatal("%s: %s", path, strerror(errno));
-    buf = xmalloc(cap);
-    while ((k = fread(buf + n, 1, cap - n - 1, f)) > 0) {
-        n += k;
-        if (n + 1 == cap)
-            buf = xrealloc(buf, cap *= 2);
-    }
-    if (ferror(f))
-        fatal("%s: read error", path);
-    fclose(f);
-    buf[n] = 0;
-    if (strlen(buf) != n)
-        fatal("%s: file contains NUL bytes", path);
-    return buf;
+    return text;
 }
 
 /* decimal, 0x hex, $ hex, or PL/M-style trailing H */
@@ -121,6 +108,8 @@ int main(int argc, char **argv)
             if (!parse_addr(argv[++i], &memory))
                 fatal("bad --memory size '%s' (0 to 65535 bytes)", argv[i]);
             memory_given = 1;
+        } else if (!strcmp(a, "-I") && i + 1 < argc) {
+            lex_add_include_dir(argv[++i]);
         } else if (!strcmp(a, "-o") && i + 1 < argc) {
             out_path = argv[++i];
         } else if (!strcmp(a, "--org") && i + 1 < argc) {

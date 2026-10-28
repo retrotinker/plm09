@@ -20,7 +20,7 @@
 static FILE *out;
 static int label_no;
 static int pic;             /* --os9: PC-relative code, U-relative data */
-static int last_comment_line;
+static int last_comment_line, last_comment_file;
 
 static int new_label(void)
 {
@@ -47,14 +47,18 @@ static void emit_label(int n)
 /* source line as a comment, once per line */
 static void emit_source(Loc loc)
 {
-    const char *text = src_line(loc.line);
+    const char *text = src_line(loc);
 
-    if (!text || loc.line == last_comment_line)
+    if (!text || (loc.line == last_comment_line && loc.file == last_comment_file))
         return;
     last_comment_line = loc.line;
+    last_comment_file = loc.file;
     while (*text == ' ' || *text == '\t')
         text++;
-    fprintf(out, "; %d: %s\n", loc.line, text);
+    if (loc.file)                       /* a line of an INCLUDE file */
+        fprintf(out, "; %s:%d: %s\n", loc_file(loc), loc.line, text);
+    else
+        fprintf(out, "; %d: %s\n", loc.line, text);
 }
 
 static const Symbol *find_var(const char *name)
@@ -1480,7 +1484,7 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
     out = f;
     label_no = 0;
     npools = 0;
-    last_comment_line = 0;
+    last_comment_line = last_comment_file = 0;
     pic = opt->os9;
     tpl = xcalloc(sema_vars.len ? (size_t)sema_vars.len : 1, sizeof *tpl);
     for (int i = 0; i < sema_vars.len; i++)

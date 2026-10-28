@@ -127,6 +127,7 @@ plmc [options] file.plm
 | Option | Meaning |
 |---|---|
 | `-o FILE` | Write the assembly to *FILE*. The default is standard output. |
+| `-I DIR` | Also look for `$INCLUDE` files in *DIR*, after the including file's directory. May be given more than once; the directories are searched in order. See [INCLUDE]. |
 | `--org ADDR` | Address where the program is loaded and starts. The default is `$0100`. |
 | `--vectors` | Also emit `ORG $FFFE` / `FDB RT_START`, setting the 6809 reset vector, for programs that run from ROM or straight from reset, and the IRQ, FIRQ and NMI vectors of any INTERRUPT procedures. |
 | `--os9` | Generate a position-independent OS-9 program module instead of a program for a fixed address. See [OS-9 modules]. |
@@ -165,6 +166,8 @@ compiles means what PL/M-80 says it means.
   The underscore is **not** allowed (as in PL/M-80). This is what keeps
   compiler-generated labels from ever colliding with your names.
 * **Comments:** `/* ... */`. They may span several lines but don't nest.
+* **Control lines:** a line with `$` in column 1 holds compiler controls;
+  only `$INCLUDE(file)` is implemented. See [INCLUDE].
 * **Numbers:** must start with a digit and fit in 16 bits (0 to 65535). An
   optional suffix gives the base:
 
@@ -207,6 +210,39 @@ END NAME;
 The name after `END` is optional, but if present it must match. The block may
 optionally be followed by the keyword `EOF`. Within any block, **all
 declarations must come before the first statement.**
+
+## INCLUDE
+
+A line with `$` in its first column is a *control line*, as in Intel's
+compiler. The one control plmc implements is `INCLUDE` (abbreviated `IC`,
+in either case), which reads another file in place of the line:
+
+```
+UTIL: DO;
+$INCLUDE(:F1:HOOKS.PLM)
+DECLARE I BYTE;
+    ...
+END UTIL;
+```
+
+* **Where the text goes:** the file's text is compiled as if it stood
+  where the control line is, so it must fit there: declarations among the
+  declarations, statements among the statements. An INCLUDE file may
+  itself contain INCLUDE lines, up to 16 deep.
+* **Finding the file:** the name is looked for first in the directory of
+  the file that contains the control line, then in each `-I` directory in
+  order. Each place is tried with the name as written, then in lower case,
+  so the upper-case names of ISIS sources find lower-case files. An ISIS
+  drive prefix (`:F0:` to `:F9:`) is dropped, and an absolute path is used
+  as it is.
+* **The line:** INCLUDE must be the last control on its line, and the file
+  name is everything between the parentheses, without surrounding blanks.
+* **Diagnostics** in an INCLUDE file name that file and its own line
+  numbers, and so do the source comments in the generated assembly
+  (`; inc/defs.plm:3: RETURN N + N;`).
+* **Other controls** (`$NOLIST`, `$TITLE(...)`, `$OPTIMIZE`, and the rest)
+  concern Intel's listing and object files, and are reported as not
+  supported; delete them.
 
 ## Declarations
 
@@ -1075,6 +1111,7 @@ These parts of PL/M-80 are recognized and rejected with an error:
 | `PUBLIC` | `... is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
+| compiler controls other than `INCLUDE` (`$NOLIST`, `$TITLE`, ...) | `control X is not supported (only INCLUDE is)` |
 
 All of PL/M-80's built-in procedures (`LENGTH`, `LAST`, `SIZE`, `HIGH`,
 `LOW`, `DOUBLE`, `SHL`, `SHR`, `ROL`, `ROR`, `SCL`, `SCR`, `DEC`, `CARRY`,
@@ -1177,6 +1214,11 @@ next multiple of 8 plus 1.
 | `EXTERNAL name X is also a 6809 register name` | external called `A`, `X`, `PC`, ... |
 | `invalid digit`, `invalid number`, `number ... does not fit in 16 bits` | bad numeric constant |
 | `invalid character`, `unterminated comment`, `unterminated string`, `empty string` | lexical errors |
+| `cannot find INCLUDE file 'X'` | no such file in the including file's directory or a `-I` directory, as written or in lower case |
+| `INCLUDE needs a file name in parentheses, as in $INCLUDE(FILE.PLM)`, `INCLUDE file name without a closing ')'`, `INCLUDE needs a file name` | a malformed `$INCLUDE` line |
+| `INCLUDE must be the last control on its line` | text after `$INCLUDE(...)` |
+| `INCLUDE files nested more than 16 deep (does a file include itself?)` | INCLUDE recursion |
+| `control X is not supported (only INCLUDE is)`, `a control name is expected after '$'` | any other control line |
 | warning: `typed procedure F may reach its END without RETURN` | last statement is not `RETURN` or `HALT` |
 | `plmc: --org and --vectors cannot be used with --os9 ...` | OS-9 modules have no fixed address |
 | `plmc: --stack is only used with --os9`, `--name is only used with --os9` | option without `--os9` |
@@ -1928,7 +1970,7 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 196 programs that must fail, each with the expected message and position |
+| `err` | 201 programs that must fail, each with the expected message and position |
 | `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, device registers AT sim6809's I/O block in place of INPUT and OUTPUT, and INPUT and OUTPUT as ordinary names, labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |

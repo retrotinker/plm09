@@ -1,0 +1,16 @@
+/* $INCLUDE (PL/M-80 manual, compiler controls): the included text replaces
+   the control line.  An ISIS drive prefix is dropped, an upper-case name
+   is also looked for in lower case, IC is INCLUDE's abbreviation, and an
+   included file's own INCLUDEs are relative to its directory.  Expected
+   values in comments. */
+INCL: DO;
+$INCLUDE (:F1:INCLUDE/DEFS.PLM)
+DECLARE I BYTE;
+DO I = 1 TO COUNT;
+    CALL PUTDEC(TWICE(I));                      /* 2 4 6 */
+END;
+DO;
+$ic(include/last.plm)
+    CALL PUTDEC(LAST$ONE);                      /* 77 */
+END;
+END INCL;

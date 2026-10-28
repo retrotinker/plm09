@@ -1,0 +1,4 @@
+/* declarations for incl.plm */
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE COUNT LITERALLY '3';
+$include(twice.plm)

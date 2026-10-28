@@ -1,0 +1,4 @@
+T: DO;
+DECLARE B BYTE;
+$INCLUDE(include/bad.plm)
+END T;

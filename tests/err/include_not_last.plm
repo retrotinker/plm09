@@ -1,0 +1,3 @@
+T: DO;
+$INCLUDE(include/bad.plm) NOLIST
+END T;

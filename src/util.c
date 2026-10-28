@@ -1,13 +1,20 @@
 /* plmc utilities: memory, diagnostics */
 #include "util.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 const char *src_name = "<input>";
+Vec src_files;
 int warning_count;
+
+const char *loc_file(Loc loc)
+{
+    return loc.file > 0 && loc.file < src_files.len ? src_files.items[loc.file] : src_name;
+}
 
 void *xmalloc(size_t n)
 {
@@ -48,7 +55,7 @@ char *xstrndup(const char *s, size_t n)
 
 static void report(Loc loc, const char *kind, const char *fmt, va_list ap)
 {
-    fprintf(stderr, "%s:%d:%d: %s: ", src_name, loc.line, loc.col, kind);
+    fprintf(stderr, "%s:%d:%d: %s: ", loc_file(loc), loc.line, loc.col, kind);
     vfprintf(stderr, fmt, ap);
     fputc('\n', stderr);
 }
@@ -80,6 +87,29 @@ void fatal(const char *fmt, ...)
     fputc('\n', stderr);
     va_end(ap);
     exit(1);
+}
+
+char *read_text(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    size_t cap = 4096, n = 0, k;
+    char *buf;
+
+    if (!f)
+        return NULL;
+    buf = xmalloc(cap);
+    while ((k = fread(buf + n, 1, cap - n - 1, f)) > 0) {
+        n += k;
+        if (n + 1 == cap)
+            buf = xrealloc(buf, cap *= 2);
+    }
+    if (ferror(f))
+        fatal("%s: read error", path);
+    fclose(f);
+    buf[n] = 0;
+    if (strlen(buf) != n)
+        fatal("%s: file contains NUL bytes", path);
+    return buf;
 }
 
 void vec_push(Vec *v, void *item)

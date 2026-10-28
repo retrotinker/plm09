@@ -33,6 +33,10 @@ typedef struct Token {
 void lex_init(const char *src);
 Token lex_next(void);
 
+/* a directory to look for INCLUDE files in (-I), after the including
+   file's own */
+void lex_add_include_dir(const char *dir);
+
 /* tokenize text (a LITERALLY body) into a Vec of Token*, all located at
    `at`; the main input's position is saved and restored */
 Vec lex_tokens(const char *text, Loc at);
@@ -40,8 +44,8 @@ Vec lex_tokens(const char *text, Loc at);
 /* describe a token type for messages: "';'", "DO", "identifier" */
 const char *tok_name(TokType t);
 
-/* source line n (1-based) without its newline, or NULL */
-const char *src_line(int n);
+/* the source line at loc (its file and line) without its newline, or NULL */
+const char *src_line(Loc loc);
 
 /* --tokens output */
 void lex_dump(const char *src);

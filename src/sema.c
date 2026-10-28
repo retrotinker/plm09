@@ -1085,7 +1085,7 @@ static void check_recursion(Proc *p)
 static Symbol *predeclare(Scope *pre, const char *name, Predef what, Type type, int dim,
                           const char *asm_name)
 {
-    Symbol *sym = scope_define(pre, name, SYM_VAR, (Loc){ 0, 0 });
+    Symbol *sym = scope_define(pre, name, SYM_VAR, (Loc){ 0, 0, 0 });
     sym->predef = what;
     sym->type = type;
     sym->dim = dim;

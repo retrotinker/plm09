@@ -5,6 +5,8 @@ plmc \- PL/M-80 compiler for the Motorola 6809
 .B plmc
 .RB [ \-o
 .IR file ]
+.RB [ \-I
+.IR dir ]
 .RB [ \-\-org
 .IR addr ]
 .RB [ \-\-vectors ]
@@ -32,8 +34,20 @@ It implements PL/M-80 as described in Intel's
 .I PL/M-80 Programming Manual
 (9800268B): BYTE and ADDRESS variables, arrays, structures, BASED
 variables, INITIAL and DATA, LITERALLY, procedures (including REENTRANT
-and INTERRUPT procedures), labels and GOTO, and all the built-in
-procedures and predeclared variables.
+and INTERRUPT procedures), labels and GOTO, the built-in procedures and
+predeclared variables except INPUT and OUTPUT (the 6809 has no I/O
+ports), and the
+.B $INCLUDE
+control: a line
+.BI $INCLUDE( file )
+with the
+.B $
+in column 1 compiles
+.IR file 's
+text in its place.
+The file is looked for in the including file's directory, then in the
+.B \-I
+directories, as written and in lower case.
 .PP
 The output does not depend on the machine it will run on.
 Everything machine-specific is in a hooks file,
@@ -114,6 +128,14 @@ for hexadecimal, or in decimal.
 Write the assembly to
 .I file
 instead of standard output.
+.TP
+.BI \-I " dir"
+Also look for
+.B $INCLUDE
+files in
+.IR dir ,
+after the directory of the including file.
+May be given more than once.
 .TP
 .BI \-\-org " addr"
 Load and start address of the program (default $0100).
