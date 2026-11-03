@@ -1,0 +1,5 @@
+/* PLMCARGS: --obj */
+/* a non-main module (no statements) */
+T: DO;
+TICK: PROCEDURE INTERRUPT 0; END TICK;
+END T;

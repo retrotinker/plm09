@@ -127,6 +127,7 @@ plmc [options] file.plm
 | Option | Meaning |
 |---|---|
 | `-o FILE` | Write the assembly to *FILE*. The default is standard output. |
+| `--obj` | Write a module for `lwasm -f obj`, to be linked with other modules by lwlink. See [Object files and lwlink]. |
 | `-I DIR` | Also look for `$INCLUDE` files in *DIR*, after the including file's directory. May be given more than once; the directories are searched in order. See [INCLUDE]. |
 | `--org ADDR` | Address where the program is loaded and starts. The default is `$0100`. |
 | `--vectors` | Also emit `ORG $FFFE` / `FDB RT_START`, setting the 6809 reset vector, for programs that run from ROM or straight from reset, and the IRQ, FIRQ and NMI vectors of any INTERRUPT procedures. |
@@ -708,7 +709,35 @@ END PUTCH;
 The body may contain only the parameter declarations. In the assembly the
 procedure is called by its exact PL/M name, so it must not be a 6809 register
 name (`A`, `B`, `D`, `X`, `Y`, `U`, `S`, `PC`, `CC`, `DP`, `PCR`). The calling
-convention is described under [Hooks].
+convention is described under [Hooks]. An EXTERNAL procedure can also be a
+PUBLIC procedure of another PL/M module; see [Object files and lwlink].
+
+### PUBLIC procedures
+
+`PUBLIC` makes a procedure callable from outside its module, by its own
+name:
+
+```
+GCD: PROCEDURE (A, B) ADDRESS PUBLIC;
+    DECLARE (A, B, T) ADDRESS;
+    ...
+END GCD;
+```
+
+* **Inside the module** it is an ordinary procedure, called as usual.
+* **From outside** it is called with the EXTERNAL convention (see
+  [Calling convention for EXTERNAL procedures]): every argument pushed as a
+  16-bit word, the last one also in D, `JSR GCD`, the result in B or D. So
+  another PL/M module calls it through an `EXTERNAL` declaration, and
+  assembly code (hooks, say) can call it too. plmc puts an entry for this
+  under the procedure's name, next to its code; see [Generated code].
+* **Rules:** PUBLIC procedures are declared at the outer level of their
+  module, and can't also be EXTERNAL. As for EXTERNAL, the name must not be
+  a register name. PUBLIC may be combined with REENTRANT (the entry passes
+  the arguments on in the procedure's own convention) and INTERRUPT.
+* In a program of one module, PUBLIC only adds that entry. It is meant for
+  programs of several modules, built as object files: see
+  [Object files and lwlink].
 
 ## Statements
 
@@ -1111,7 +1140,7 @@ These parts of PL/M-80 are recognized and rejected with an error:
 
 | Feature | Error message |
 |---|---|
-| `PUBLIC` | `... is not supported` |
+| `PUBLIC` or `EXTERNAL` on a variable | `PUBLIC on a variable is not supported`, `EXTERNAL on a variable is not supported` |
 | embedded assignment `:=` | `embedded assignment ':=' is not supported` |
 | a string of three or more characters used as a value | `strings longer than 2 characters are not supported` |
 
@@ -1186,7 +1215,11 @@ next multiple of 8 plus 1.
 | warning: `label L is declared but never used` | a declared label that is neither defined nor used |
 | `L is declared LABEL EXTERNAL, so it cannot label a statement here` | definition of an EXTERNAL label |
 | `PUBLIC and EXTERNAL labels must be declared at the outer level of the main program`, `a LABEL declaration cannot have a dimension`, `a LABEL declaration cannot be BASED` | LABEL in the wrong place or with the wrong options |
-| `PUBLIC name X is also a 6809 register name`, `EXTERNAL name X is also a 6809 register name` | a label name the assembler would misread |
+| `PUBLIC name X is also a 6809 register name`, `EXTERNAL name X is also a 6809 register name` | a label or procedure name the assembler would misread |
+| `a PUBLIC procedure must be declared at the outer level of the module`, `a procedure cannot be both PUBLIC and EXTERNAL` | PUBLIC in the wrong place |
+| `plmc: --obj cannot be combined with --os9, --org or --vectors ...` | `--obj` modules are placed by lwlink |
+| `MEMORY cannot be used with --obj ...`, `INITIAL ... AT cannot be used with --obj ...` | not available in object modules |
+| `an INTERRUPT procedure must be in the main module (the one with statements), which installs it` | INTERRUPT in a non-main `--obj` module |
 | `a GOTO out of a procedure must go to a label at the outer level of the main program` | the target is in an enclosing procedure, or in a block of the main program |
 | `a label must be followed by a statement (use 'L: ;')` | a label right before `END` |
 | `L is a label, not a variable or procedure`, `cannot assign to label L` | a label used as a value |
@@ -1332,6 +1365,118 @@ Add any extra routines your programs need as further labels, and declare them
 in PL/M as `EXTERNAL`. The example file's `ACIA_BASE` and `RT_STACKTOP` are
 wrapped in `IFNDEF`, so they can also be overridden from the lwasm command
 line with `-D`.
+
+# Object files and lwlink
+
+A program can be split into **modules** that are compiled and assembled
+separately, then linked: PL/M-80's way of building larger programs. plmc's
+`--obj` option writes a module for lwasm's object format (`-f obj`), and
+lwtools' linker, `lwlink`, joins the object files into one S-record file.
+Modules call each other's **PUBLIC** procedures through **EXTERNAL**
+declarations.
+
+## An example
+
+Two modules: `main.plm` calls `GCD`, a PUBLIC procedure of `util.plm`, and
+`util.plm` calls back `SHOW`, a PUBLIC procedure of `main.plm`. Each module
+declares the procedures it uses from the other one as EXTERNAL. (These are
+also in the plm09 source tree, in `contrib/obj`, with a Makefile.)
+
+```
+/* main.plm: the main module, the one with statements */
+MAIN: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;    /* a hook */
+GCD: PROCEDURE (A, B) ADDRESS EXTERNAL;                           /* in util.plm */
+    DECLARE (A, B) ADDRESS;
+END GCD;
+SHOW: PROCEDURE (N) PUBLIC;                                       /* used by util.plm */
+    DECLARE N ADDRESS;
+    CALL PUTDEC(N);
+END SHOW;
+CALL SHOW(GCD(1071, 462));
+END MAIN;
+```
+
+```
+/* util.plm: a module of declarations only */
+UTIL: DO;
+SHOW: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END SHOW;        /* in main.plm */
+GCD: PROCEDURE (A, B) ADDRESS PUBLIC;
+    DECLARE (A, B, T) ADDRESS;
+    DO WHILE B <> 0;
+        CALL SHOW(B);
+        T = A MOD B;
+        A = B;
+        B = T;
+    END;
+    RETURN A;
+END GCD;
+END UTIL;
+```
+
+Compile each module with `--obj`, assemble each into an object file with
+`-f obj`, link the object files with plm09's link script, and run the
+result:
+
+```
+$ plmc --obj -o main.asm main.plm
+$ plmc --obj -o util.asm util.plm
+$ lwasm -9 -f obj -I runtime -I runtime/sim -o main.o main.asm
+$ lwasm -9 -f obj -o util.o util.asm
+$ lwlink -f srec -s runtime/plm09.link -o demo.s19 main.o util.o
+$ sim6809 demo.s19
+462
+147
+21
+21
+```
+
+The main module is the only one that needs the hooks directory on lwasm's
+include path. Changing one module means compiling and assembling only that
+module again, and linking.
+
+## The main module and the others
+
+As in PL/M-80, a module whose outer level has **statements** is the **main
+module**; there must be exactly one in a program. The others contain only
+declarations: procedures, variables, literals.
+
+* **The main module** holds the startup code (`RT_START`, the program's
+  entry point), the main program, and the runtime routines and hooks. These
+  are exported, so the other modules use the same copies: their calls of
+  `RT_MUL16`, `RT_DIV16`, `RT_COPY` (MOVE) and so on, and of hook
+  procedures such as `PUTDEC` (declared EXTERNAL, as usual), are resolved
+  by lwlink against the main module.
+* **The other modules** hold only their procedures and variables, and
+  include nothing; lwasm takes every name a module uses but doesn't define
+  as an import (`PRAGMA undefextern`).
+* **Exported names:** each module exports only its PUBLIC procedures (and
+  the main module also `RT_START` and the runtime and hook symbols). All
+  other names, such as `V_X` or `P_GCD`, are local to their object file, so
+  modules may use the same names for their own variables and procedures.
+* **Sections:** code and `DATA` go in section `code`, variables with
+  `INITIAL` values in `data`, and the other variables in `bss`.
+  `runtime/plm09.link` loads `code` at `$0100`, then `data`, then `bss`,
+  and makes `RT_START` the entry point (the S9 record). For another load
+  address, copy the script and change its `load` line; `lwlink -m map.txt`
+  shows where everything went.
+
+## Rules and limits
+
+* A module calls another module's PUBLIC procedure through an EXTERNAL
+  declaration with the same parameters and type. Nothing checks that the
+  two declarations agree, as with assembly-language EXTERNAL procedures.
+* A PUBLIC procedure's name must not clash with another module's PUBLIC
+  name, or with a runtime or hook symbol (`PUTDEC`, `RT_DIV16`, ...);
+  lwlink reports such a clash.
+* `INITIAL` is allowed at the outer level of every module.
+* **Not available with `--obj`:** `--org` and `--vectors` (lwlink places
+  the program), `--os9`, `MEMORY` (the end of the linked program isn't
+  known when a module is compiled) and `INITIAL ... AT`. INTERRUPT
+  procedures must be in the main module, which installs them.
+* **The flags are per module:** the carry and result that PLUS, MINUS,
+  CARRY, ZERO, SIGN and PARITY use are those of the last `+ - PLUS MINUS
+  SCL SCR DEC` executed *in the same module*.
 
 # OS-9 modules
 
@@ -1927,7 +2072,35 @@ listing and simulator traces easy to follow.
   | `Lnnn` | compiler-generated label |
   | `RT_*` | runtime routine or data |
   | `PLM_*` | entry point the hooks provide |
-  | `X` | `EXTERNAL` procedure `X` |
+  | `X` | `EXTERNAL` procedure `X`, or the EXTERNAL-style entry of `PUBLIC` procedure `X` |
+
+* **PUBLIC entries:** after a PUBLIC procedure's code, plmc writes an entry
+  under its name that takes EXTERNAL-style arguments (words on the stack,
+  the last one 2 bytes above the return address) and passes them on. For
+  an ordinary procedure it stores them in the parameters and jumps to the
+  procedure, whose `RTS` returns to the caller (comments added):
+
+  ```
+  ; PUBLIC ADD3: called by its name with the EXTERNAL convention
+  ADD3
+          LDB     7,S             ; A (BYTE), the first argument
+          STB     V2_A
+          LDD     4,S             ; B (ADDRESS)
+          STD     V2_B
+          LDB     3,S             ; C (BYTE), the last
+          STB     V2_C
+          JMP     P_ADD3
+  ```
+
+  For a REENTRANT procedure it pushes them again in their declared widths,
+  calls it, and removes them.
+* **`--obj` modules** have the same code, in `SECTION code` (with `DATA`),
+  `data` (INITIAL values) and `bss` (other variables), behind `PRAGMA
+  undefextern`, with an `EXPORT` for each PUBLIC procedure. The main module
+  INCLUDEs the startup code first and the runtime and hooks last, between
+  `PRAGMA export` and `PRAGMA noexport`, with every optional runtime routine
+  (`RT_NEED_COPY`, ...) assembled; `RT_OBJ` tells the startup code to leave
+  out its `SETDP`, which object files don't allow.
 
 # Inspecting the compiler's view
 
@@ -1974,8 +2147,9 @@ group of instructions.
 | Suite | What it checks |
 |---|---|
 | `lex`, `parse` | `--tokens` and `--ast` output for every number form, every keyword, precedence, dangling `ELSE` and nested procedures, against golden files |
-| `err` | 202 programs that must fail, each with the expected message and position |
-| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, device registers AT sim6809's I/O block in place of INPUT and OUTPUT, and INPUT and OUTPUT as ordinary names, labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `err` | 211 programs that must fail, each with the expected message and position |
+| `run` | complete programs compiled, assembled and run in `sim6809`; output and exit status compared. They cover every operator and conversion rule, control flow including iterative DO (wrap-around, re-evaluated limit and step, conversions) and DO CASE, input, procedures (including nested calls), arrays (a sieve, a sort, edge cases), structures (the manual's AIRPLANE, PAYROLL, POINT and 100×100 examples, built-ins on every reference form, BASED structures, a linked list), BASED variables and the dot operator (the manual's examples, BASED arrays and parameters, constant lists), INITIAL and DATA (the manual's examples, `(*)`, strings in BYTE and ADDRESS arrays, pointer tables, DATA in a procedure), PLUS and MINUS (32- and 24-bit arithmetic, and under interrupts), the built-ins HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR (the manual's examples, constant and computed counts, a declared HIGH hiding the built-in), the flags (BCD arithmetic with DEC, SCL/SCR through the carry, CARRY/ZERO/SIGN/PARITY), MOVE, MEMORY, STACKPTR and TIME, device registers AT sim6809's I/O block in place of INPUT and OUTPUT, and INPUT and OUTPUT as ordinary names, PUBLIC procedures (ordinary, REENTRANT and untyped, whose entries must assemble in every mode), labels and GOTO (out of loops, blocks and nested procedure calls; LABEL declarations, PUBLIC and EXTERNAL labels; 10000 jumps out of three calls to check the stack is reset), AT (aliases, and variables at sim6809's I/O ports), REENTRANT procedures (the manual's SUM$ARRAY, indirect recursion, local arrays and structures, Ackermann), INTERRUPT procedures with ENABLE/DISABLE (IRQ and FIRQ from the simulator's timer interrupting arithmetic and a REENTRANT procedure the handler also uses, NMI with GOTO out), `HALT`, `--org` and `--vectors` |
+| `obj` | programs of several modules (`tests/obj/*/`), each module compiled with `--obj` and assembled with `lwasm -f obj`, linked by lwlink with `runtime/plm09.link`, and run in `sim6809`: PUBLIC procedures with BYTE and ADDRESS arguments and results, a REENTRANT PUBLIC procedure recursing, calls back into the main module, a non-main module using hooks, runtime routines, INITIAL and DATA, a chain through three modules, and an exit status set in another module |
 | `fuzz` | random programs, whose arrays and structures are set up with `INITIAL`, with thousands of random expressions, array elements (with computed subscripts), element assignments, iterative DO loops over random bounds and steps, DO CASE, pointers (`.BA(k)` with reads and writes through BASED variables and BASED arrays), and members of an array of 5-byte structures, whose subscripts need a multiply; HIGH, LOW, DOUBLE, SHL, SHR, ROL and ROR with constant and computed counts; flag statements with random chains of `+ - PLUS MINUS SCL SCR DEC` and reads of `CARRY ZERO SIGN PARITY`, modelled in the order plmc evaluates them; half of them run inside a `REENTRANT` procedure, with the scalars on the stack. They are checked against an independent C model of the language rules; `make fuzz-test N=2000` runs more |
 | `coco`, `xroar` | the Color Computer hooks, in the simulator and on an emulated CoCo 2, including the shift and rotate built-ins, TIME (on XRoar, 40 × `TIME(250)` must take one second of field-sync interrupts) and INTERRUPT procedures (the RAM vectors, restored at exit; on XRoar, 60 field-sync IRQs) (the `xroar` suite is skipped if XRoar, the ROMs or toolshed aren't installed) |
 | `os9` | every `run` program plus 25 fuzz programs compiled with `--os9` and run by `sim6809 --os9` (programs that need compiler options, such as fixed addresses, are only compiled and checked), each at two different module and data addresses with memory protection on. Also checks that the generated code has no absolute calls, jumps or variable references, and (with toolshed) that `os9 ident` accepts the module |

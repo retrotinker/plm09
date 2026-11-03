@@ -288,6 +288,8 @@ static void dump_block(const Block *b, int depth)
             printf(" %s", type_name(p->ret));
         if (p->external)
             printf(" EXTERNAL");
+        if (p->public)
+            printf(" PUBLIC");
         if (p->reentrant)
             printf(" REENTRANT");
         if (p->interrupt)

@@ -69,7 +69,7 @@ make -B docs
 
 %check
 # the suites that need nothing beyond lwasm, python3 and groff
-make WERROR= sim-test man-test lex-test parse-test err-test run-test fuzz-test
+make WERROR= sim-test man-test lex-test parse-test err-test run-test obj-test fuzz-test
 
 %files
 %license LICENSE

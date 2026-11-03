@@ -4,6 +4,7 @@
 #   run_tests.sh os9 [N]                   run tests + N fuzz seeds as OS-9 modules
 #   run_tests.sh flex [N]                  run tests + N fuzz seeds as FLEX commands
 #   run_tests.sh dragonflex                run tests on real FLEX (Dragon 64, XRoar)
+#   run_tests.sh obj                       multi-module programs: plmc --obj, lwasm -f obj, lwlink
 #   run_tests.sh fuzz [N]                  random expression tests
 #   run_tests.sh one FILE.plm              compile, assemble, simulate one program
 set -u
@@ -163,6 +164,43 @@ suite_run() {
             cat "$OUT/hello-example.err"
         fi
     fi
+}
+
+# Programs of several modules (tests/obj/NAME/*.plm, with main.plm the main
+# module): each compiled with --obj and assembled with lwasm -f obj (all
+# with the simulator's hooks on the include path, which only the main
+# module uses), linked by lwlink with runtime/plm09.link, run in sim6809;
+# stdout and the exit status compared with NAME/main.out (+ main.rc,
+# main.in).  Every module must assemble with no INCLUDE but the main one's.
+suite_obj() {
+    local d name base f m objs
+    for d in "$ROOT"/tests/obj/*/; do
+        [ -e "$d/main.plm" ] || continue
+        name=obj/$(basename "$d")
+        base=$OUT/obj-$(basename "$d")
+        objs=()
+        for f in "$d"*.plm; do
+            m=$base-$(basename "$f" .plm)
+            if ! "$PLMC" --obj -o "$m.asm" "$f" 2>"$m.plmc.err"; then
+                bad "$name" "plmc failed on $(basename "$f")"; cat "$m.plmc.err"; continue 2
+            fi
+            if ! lwasm -9 -f obj -I "$ROOT/runtime" -I "$ROOT/runtime/sim" --list="$m.lst" \
+                    -o "$m.o" "$m.asm" 2>"$m.o.err"; then
+                bad "$name" "lwasm failed on $(basename "$f")"; cat "$m.o.err"; continue 2
+            fi
+            objs+=("$m.o")
+        done
+        if ! lwlink -f srec -s "$ROOT/runtime/plm09.link" -m "$base.map" -o "$base.s19" \
+                "${objs[@]}" 2>"$base.link.err"; then
+            bad "$name" "lwlink failed"; cat "$base.link.err"; continue
+        fi
+        "$SIM" "$base.s19" <"$( [ -e "$d/main.in" ] && echo "$d/main.in" || echo /dev/null)" \
+            >"$base.stdout" 2>"$base.sim.err"
+        echo "rc=$?" >>"$base.stdout"
+        cat "$d/main.out" >"$base.expected"
+        echo "rc=$(cat "$d/main.rc" 2>/dev/null || echo 0)" >>"$base.expected"
+        check_diff "$name" "$base.stdout" "$base.expected" && ok
+    done
 }
 
 # CoCo hooks in sim6809, against tests/coco/fakerom.asm (a stand-in for
@@ -712,6 +750,7 @@ case ${1:-} in
     parse) suite_golden parse --ast ast ;;
     err)   suite_err ;;
     run)   suite_run ;;
+    obj)   suite_obj ;;
     fuzz)  suite_fuzz "${2:-200}" ;;
     coco)  suite_coco ;;
     os9)   suite_os9 "${2:-25}" ;;

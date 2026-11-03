@@ -1,0 +1,25 @@
+/* PUBLIC procedures in a program of one module: they are called as usual,
+   and each also gets an entry under its own name for EXTERNAL-style
+   callers (other modules, assembly code), which must assemble in every
+   output mode.  Expected values in comments. */
+PUBL: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE T ADDRESS;
+ADD3: PROCEDURE (A, B, C) ADDRESS PUBLIC;
+    DECLARE (A, C) BYTE, B ADDRESS;
+    RETURN A + B + C;
+END ADD3;
+SUMTO: PROCEDURE (N) ADDRESS PUBLIC REENTRANT;
+    DECLARE N BYTE;
+    IF N = 0 THEN RETURN 0;
+    RETURN N + SUMTO(N - 1);
+END SUMTO;
+BUMP: PROCEDURE PUBLIC;
+    T = T + 1;
+END BUMP;
+T = 41;
+CALL BUMP;
+CALL PUTDEC(T);                                 /* 42 */
+CALL PUTDEC(ADD3(1, 1000, 2));                  /* 1003 */
+CALL PUTDEC(SUMTO(10));                         /* 55 */
+END PUBL;

@@ -1,0 +1,6 @@
+define basesympat s_%s
+define lensympat l_%s
+section code load 0100
+section data
+section bss
+entry RT_START

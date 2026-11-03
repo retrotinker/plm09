@@ -1,0 +1,1 @@
+4:5: error: MEMORY cannot be used with --obj (the end of the linked program isn't known when a module is compiled)

@@ -12,6 +12,13 @@ plmc \- PL/M-80 compiler for the Motorola 6809
 .RB [ \-\-vectors ]
 .I file.plm
 .br
+.B plmc \-\-obj
+.RB [ \-o
+.IR file ]
+.RB [ \-I
+.IR dir ]
+.I file.plm
+.br
 .B plmc \-\-os9
 .RB [ \-o
 .IR file ]
@@ -33,8 +40,8 @@ compiles a PL/M-80 program into 6809 assembly language for
 It implements PL/M-80 as described in Intel's
 .I PL/M-80 Programming Manual
 (9800268B): BYTE and ADDRESS variables, arrays, structures, BASED
-variables, INITIAL and DATA, LITERALLY, procedures (including REENTRANT
-and INTERRUPT procedures), labels and GOTO, the built-in procedures and
+variables, INITIAL and DATA, LITERALLY, procedures (including REENTRANT,
+INTERRUPT and PUBLIC procedures), labels and GOTO, the built-in procedures and
 predeclared variables except INPUT and OUTPUT (the 6809 has no I/O
 ports), and the
 .B $INCLUDE
@@ -144,6 +151,23 @@ Load and start address of the program (default $0100).
 Also emit the 6809 reset vector at $FFFE, and the IRQ, FIRQ and NMI
 vectors of any INTERRUPT procedures, for programs that run from ROM.
 .TP
+.B \-\-obj
+Write a module for
+.BR "lwasm \-f obj" ,
+to be linked with other modules by
+.BR lwlink (1)
+using
+.IR runtime/plm09.link .
+The module with statements is the main module: it holds the startup
+code, runtime and hooks for all of them.
+The others hold declarations only.
+Modules call each other's PUBLIC procedures through EXTERNAL declarations.
+Can't be combined with
+.BR \-\-org ,
+.B \-\-vectors
+or
+.BR \-\-os9 .
+.TP
 .B \-\-os9
 Generate a position-independent, reentrant OS-9 program module.
 Variables are kept in the process's data area and addressed through U.
@@ -210,10 +234,25 @@ plmc \-\-os9 \-\-name sum \-o sum.asm sum.plm
 lwasm \-9 \-f os9 \-I runtime \-I runtime/os9 \-o sum sum.asm
 .EE
 .RE
+.PP
+Build a program from two modules, main.plm (with the statements) and
+util.plm, as object files:
+.PP
+.RS
+.EX
+plmc \-\-obj \-o main.asm main.plm
+plmc \-\-obj \-o util.asm util.plm
+lwasm \-9 \-f obj \-I runtime \-I runtime/sim \-o main.o main.asm
+lwasm \-9 \-f obj \-o util.o util.asm
+lwlink \-f srec \-s runtime/plm09.link \-o demo.s19 main.o util.o
+sim6809 demo.s19
+.EE
+.RE
 .SH SEE ALSO
 .BR sim6809 (1),
 .BR srec2flex (1),
-.BR lwasm (1)
+.BR lwasm (1),
+.BR lwlink (1)
 .PP
 The plmc manual,
 .I docs/plmc.pdf

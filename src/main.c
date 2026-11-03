@@ -20,6 +20,7 @@ static void usage(FILE *f)
             "  -I DIR        look for $INCLUDE files in DIR too\n"
             "  --org ADDR    load/start address (default $0100)\n"
             "  --vectors     also emit the reset vector at $FFFE\n"
+            "  --obj         a module for lwasm -f obj, to be linked with lwlink\n"
             "  --os9         generate a position-independent OS-9 program module\n"
             "  --stack N     with --os9: stack bytes in the data area (default 256)\n"
             "  --name NAME   with --os9: module name (default: the program's name)\n"
@@ -76,7 +77,7 @@ int main(int argc, char **argv)
 {
     const char *path = NULL, *out_path = NULL, *mod_name = NULL;
     int tokens = 0, ast = 0, vectors = 0, os9 = 0, org_given = 0, stack_given = 0;
-    int memory_given = 0;
+    int memory_given = 0, obj = 0;
     unsigned long org = 0x100, stack = 256, memory = 0;
 
     for (int i = 1; i < argc; i++) {
@@ -95,6 +96,8 @@ int main(int argc, char **argv)
             vectors = 1;
         } else if (!strcmp(a, "--os9")) {
             os9 = 1;
+        } else if (!strcmp(a, "--obj")) {
+            obj = 1;
         } else if (!strcmp(a, "--name") && i + 1 < argc) {
             mod_name = argv[++i];
             if (!valid_module_name(mod_name))
@@ -128,6 +131,9 @@ int main(int argc, char **argv)
         return 2;
     }
 
+    if (obj && (os9 || org_given || vectors))
+        fatal("--obj cannot be combined with --os9, --org or --vectors (lwlink places the "
+              "linked program)");
     if (os9 && (org_given || vectors))
         fatal("--org and --vectors cannot be used with --os9 (OS-9 modules are position-independent)");
     if (stack_given && !os9)
@@ -149,10 +155,11 @@ int main(int argc, char **argv)
         return 0;
     }
     sema_pic = os9;
+    sema_obj = obj;
     sema_program(prog);
 
     CodegenOptions opt = { (unsigned)org, vectors, os9, (unsigned)stack, (unsigned)memory,
-                           mod_name };
+                           mod_name, obj };
     FILE *f = stdout;
     if (out_path && !(f = fopen(out_path, "w")))
         fatal("%s: %s", out_path, strerror(errno));

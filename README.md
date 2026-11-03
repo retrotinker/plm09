@@ -99,6 +99,7 @@ format, such as `-f decb` or `-f raw`.
 | `-I DIR` | also look for `$INCLUDE` files in DIR (after the including file's directory) |
 | `--org ADDR` | load and start address, default `$0100` (`$2000`, `2000H` and `0x2000` are all accepted) |
 | `--vectors` | also emit `FDB RT_START` at `$FFFE`, the reset vector, and the vectors of INTERRUPT procedures |
+| `--obj` | write a module for `lwasm -f obj`, to be linked with lwlink (see [Object files](#object-files)) |
 | `--os9` | generate a position-independent OS-9 program module |
 | `--stack N` | with `--os9`: stack bytes in the data area (default 256) |
 | `--name NAME` | with `--os9`: module name (default: the program's name) |
@@ -174,7 +175,8 @@ The source is case-insensitive. `$` is ignored inside names and numbers
   - `DO CASE expr; case-0; case-1; ... END;`; an out-of-range selector runs no case
   - `CALL`, `RETURN [expr]`, `HALT`, and the empty statement `;`
 - **Procedures:**
-  - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL|REENTRANT] [INTERRUPT n]; ... END P;`
+  - `P: PROCEDURE (A, B) [BYTE|ADDRESS] [EXTERNAL|PUBLIC] [REENTRANT] [INTERRUPT n]; ... END P;`
+  - `PUBLIC` (at a module's outer level) makes the procedure callable from other modules, which declare it `EXTERNAL`, and from assembly code, by its own name with the EXTERNAL calling convention. See [Object files](#object-files).
   - `INTERRUPT 0`, `1` and `2` are IRQ, FIRQ and NMI. The procedure runs when that interrupt occurs and returns with `RTI`; it must acknowledge the device itself. The hooks' `PLM_SETINT` installs it at start-up (CoCo: BASIC's RAM vectors, restored at exit), and `--vectors` puts it in the vector table. `ENABLE;` and `DISABLE;` unmask and mask IRQ and FIRQ. Not available with `--os9`.
   - Each parameter must be declared in the procedure body.
   - Procedures may be nested, and a nested procedure can see the variables of the procedures around it.
@@ -203,7 +205,7 @@ The source is case-insensitive. `$` is ignored inside names and numbers
 - **Undefined values:** variables start with whatever is in memory. The simulator fills memory with `$A5` so that use of an uninitialized variable shows up.
 
 **Not supported yet:**
-- `PUBLIC`
+- `PUBLIC` and `EXTERNAL` variables (PUBLIC and EXTERNAL procedures work)
 - embedded assignment `:=`
 
 **Not supported:** `INPUT(n)` and `OUTPUT(n)`, the 8080's port I/O. The 6809
@@ -252,6 +254,42 @@ PUTCH   STB   $FF00     ; PUTCH: PROCEDURE (C) EXTERNAL; DECLARE C BYTE;
 - **`runtime/kswichit/`**, for Wichit Sirichote's 6809 Microprocessor Kit under its monitor. See [6809 Microprocessor Kit](#6809-microprocessor-kit).
 - **`runtime/searle6809/`**, for Grant Searle's 6809 SBC (and Jeff Tranter's PCB of it), under the ASSIST09 monitor or BASIC. See [Grant Searle's 6809 SBC](#grant-searles-6809-sbc).
 - **`runtime/example/`**, a template for an MC6850 ACIA board. It has the same four procedures, with `PUTDEC` written on top of `RT_DIV16`. Copy it and adjust the addresses for your machine. The test suite only checks that it assembles.
+
+## Object files
+
+A program can be split into modules, compiled with `--obj`, assembled into
+object files with `lwasm -f obj`, and linked with `lwlink`. The **main
+module** is the one with statements; it holds the startup code, runtime and
+hooks for all of them. The others hold only declarations. Modules call each
+other's `PUBLIC` procedures through `EXTERNAL` declarations:
+
+```
+/* main.plm */                                  /* util.plm */
+MAIN: DO;                                       UTIL: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL;                 GCD: PROCEDURE (A, B) ADDRESS PUBLIC;
+    DECLARE N ADDRESS; END PUTDEC;                  DECLARE (A, B, T) ADDRESS;
+GCD: PROCEDURE (A, B) ADDRESS EXTERNAL;             DO WHILE B <> 0;
+    DECLARE (A, B) ADDRESS; END GCD;                    T = A MOD B; A = B; B = T;
+CALL PUTDEC(GCD(1071, 462));                        END;
+END MAIN;                                           RETURN A;
+                                                END GCD;
+                                                END UTIL;
+```
+
+```
+plmc --obj -o main.asm main.plm
+plmc --obj -o util.asm util.plm
+lwasm -9 -f obj -I runtime -I runtime/sim -o main.o main.asm
+lwasm -9 -f obj -o util.o util.asm
+lwlink -f srec -s runtime/plm09.link -o demo.s19 main.o util.o
+build/sim6809 demo.s19                          # prints 21
+```
+
+`runtime/plm09.link` loads the program at `$0100` and starts it at
+`RT_START`; copy it and change the `load` line for another address. Not
+available with `--obj`: `--org`, `--vectors`, `--os9`, `MEMORY` and
+`INITIAL ... AT`; the PLUS/CARRY flags are kept per module. `contrib/obj` has
+a complete example with a Makefile.
 
 ## Color Computer
 
@@ -422,6 +460,7 @@ It implements the full MC6809 instruction set, IRQ/FIRQ/NMI (level-triggered IRQ
 | `lex`, `parse` | `--tokens` and `--ast` output against golden files |
 | `err` | each program must fail to compile with the expected message |
 | `run` | compile, assemble, run, and compare output and exit status |
+| `obj` | programs of several modules, built with `--obj`, `lwasm -f obj` and `lwlink`, run in sim6809 |
 | `coco` | the CoCo hooks in `sim6809` against a stand-in ROM |
 | `os9` | the run programs and fuzz programs as OS-9 modules in `sim6809 --os9`, at two load addresses |
 | `nitros9` | the run programs on NitrOS-9 Level 2 booted under XRoar (skipped without XRoar, toolshed, `$NITROS9_DISK` and `$COCO3_ROM`) |

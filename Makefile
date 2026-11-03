@@ -28,7 +28,7 @@ N ?= 200
 OS9N ?= 25
 FLEXN ?= 25
 
-.PHONY: all install rpm srpm docs test man-test sim-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
+.PHONY: all install rpm srpm docs test man-test sim-test lex-test parse-test err-test run-test obj-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
 
 all: $(PLMC) $(SIM) $(S2F)
 
@@ -64,7 +64,7 @@ install: all
 	install -m 755 $(PLMC) $(SIM) $(S2F) $(DESTDIR)$(BINDIR)
 	install -m 644 $(MANPAGES) $(DESTDIR)$(MANDIR)/man1
 	install -d $(DESTDIR)$(DATADIR)/plm09/runtime
-	install -m 644 runtime/*.asm $(DESTDIR)$(DATADIR)/plm09/runtime
+	install -m 644 runtime/*.asm runtime/*.link $(DESTDIR)$(DATADIR)/plm09/runtime
 	for d in $(RUNTIME_DIRS); do \
 		install -d $(DESTDIR)$(DATADIR)/plm09/$$d && \
 		install -m 644 $$d*.asm $(DESTDIR)$(DATADIR)/plm09/$$d || exit 1; \
@@ -105,9 +105,9 @@ srpm: $(TARBALL) $(DOCPATCH)
 
 .FORCE:
 
-test: sim-test man-test lex-test parse-test err-test run-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
+test: sim-test man-test lex-test parse-test err-test run-test obj-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
 
-sim-test man-test lex-test parse-test err-test run-test coco-test xroar-test: all
+sim-test man-test lex-test parse-test err-test run-test obj-test coco-test xroar-test: all
 	tests/run_tests.sh $(@:-test=)
 
 fuzz-test: all

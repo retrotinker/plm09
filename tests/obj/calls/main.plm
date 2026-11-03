@@ -1,0 +1,21 @@
+/* The main module: it has statements, so its output holds the startup
+   code, the runtime and the hooks.  Its EXTERNAL procedures are PUBLIC in
+   util.plm, and TWICE is called back from there.  Expected values in
+   comments. */
+CALLS: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+SQUARE: PROCEDURE (N) ADDRESS EXTERNAL; DECLARE N BYTE; END SQUARE;
+MAX: PROCEDURE (A, B) BYTE EXTERNAL; DECLARE (A, B) BYTE; END MAX;
+FACT: PROCEDURE (N) ADDRESS EXTERNAL; DECLARE N BYTE; END FACT;
+REPORT: PROCEDURE EXTERNAL; END REPORT;
+TWICE: PROCEDURE (N) ADDRESS PUBLIC;
+    DECLARE N ADDRESS;
+    RETURN N + N;
+END TWICE;
+CALL PUTDEC(SQUARE(12));                        /* 144 */
+CALL PUTDEC(MAX(7, 200));                       /* 200 */
+CALL PUTDEC(MAX(9, 3));                         /* 9 */
+CALL PUTDEC(FACT(8));                           /* 40320 */
+CALL REPORT;                                    /* 10, 285, 85 */
+CALL PUTDEC(TWICE(5));                          /* 10: an ordinary call */
+END CALLS;

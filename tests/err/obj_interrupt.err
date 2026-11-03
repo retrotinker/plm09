@@ -1,0 +1,1 @@
+4:17: error: an INTERRUPT procedure must be in the main module (the one with statements), which installs it

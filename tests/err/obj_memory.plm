@@ -1,0 +1,5 @@
+/* PLMCARGS: --obj */
+T: DO;
+DECLARE B BYTE;
+B = MEMORY(0);
+END T;

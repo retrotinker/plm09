@@ -1,0 +1,12 @@
+/* main.plm: the main module, the one with statements */
+MAIN: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;    /* a hook */
+GCD: PROCEDURE (A, B) ADDRESS EXTERNAL;                           /* in util.plm */
+    DECLARE (A, B) ADDRESS;
+END GCD;
+SHOW: PROCEDURE (N) PUBLIC;                                       /* used by util.plm */
+    DECLARE N ADDRESS;
+    CALL PUTDEC(N);
+END SHOW;
+CALL SHOW(GCD(1071, 462));
+END MAIN;
