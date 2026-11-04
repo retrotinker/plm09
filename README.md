@@ -24,7 +24,7 @@ make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
 `$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`, DATADIR `$(PREFIX)/share`) and
 `DESTDIR` (for staged installs) work as usual. `--version` prints each
-program's version (0.4.1), and `man plmc`, `man sim6809` and `man srec2flex`
+program's version (0.4.2), and `man plmc`, `man sim6809` and `man srec2flex`
 give a summary of each program's options.
 
 <!-- installed-paths
@@ -48,7 +48,7 @@ RPM (for `mock`). The RPM build applies a patch, made by
 installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:
 
 ```
-sudo dnf install build/rpm/RPMS/x86_64/plm09-0.4.1-*.x86_64.rpm
+sudo dnf install build/rpm/RPMS/x86_64/plm09-0.4.2-*.x86_64.rpm
 ```
 
 It installs the programs in `/usr/bin`, the man pages, and the runtime in
@@ -316,7 +316,7 @@ LOADM"HELLO":EXEC
 - **Object files:** `--obj` programs (see [Object files](#object-files)) are linked into a `.BIN` with `lwlink -f decb -s runtime/coco/plm09.link -o DEMO.BIN main.o util.o`. The script loads the code at `$0E00`, where Disk BASIC's default graphics pages start (the BASIC program starts at `$2600`), so the program must not use PMODE graphics, and its code and variables must end below `$2600`. List the main module first.
 
 **Testing**
-- `make coco-test` runs the CoCo hooks in `sim6809` with a stand-in for the ROM (`tests/coco/fakerom.asm`). The stand-in also checks that the program returns to BASIC with the stack intact. One test (`tests/coco/obj`) is an `--obj` program linked with `runtime/coco/plm09.link`.
+- `make coco-test` runs the CoCo hooks in `sim6809` with a stand-in for the ROM (`tests/coco/fakerom.asm`). The stand-in also checks that the program returns to BASIC with the stack intact. One test (`tests/coco/obj`) is an `--obj` program linked with `runtime/coco/plm09.link`; `make xroar-test` also runs it on the emulated CoCo, as a `.BIN` written by `lwlink -f decb`.
 - `make xroar-test` runs the same programs on an emulated CoCo 2 with Disk Extended Color BASIC 1.1. It writes each program to a disk image with toolshed's `decb`, has XRoar type `LOADM"T":EXEC`, and compares the text screen with `tests/coco/*.screen`. It is skipped when XRoar, `decb` or the ROMs are missing.
 
 ## OS-9

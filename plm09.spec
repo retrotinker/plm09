@@ -1,5 +1,5 @@
 Name:           plm09
-Version:        0.4.1
+Version:        0.4.2
 Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
@@ -83,6 +83,9 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test obj-test fu
 %{_datadir}/%{name}/
 
 %changelog
+* Wed Nov 04 2026 John W. Linville <linville@tuxdriver.com> - 0.4.2-1
+- Test the CoCo --obj program as a .BIN under XRoar
+
 * Wed Nov 04 2026 John W. Linville <linville@tuxdriver.com> - 0.4.1-1
 - Add runtime/coco/plm09.link: link --obj programs for the CoCo at $0E00
 
