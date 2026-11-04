@@ -148,6 +148,8 @@ typedef struct Proc {
     Vec params;             /* VarDecl*: name and loc; type from the body */
     Type ret;               /* TY_NONE for untyped */
     int external;
+    int public;             /* PUBLIC: also callable by its own name, EXTERNAL-style */
+    Loc public_loc;
     int reentrant;          /* REENTRANT: parameters and locals in a stack frame */
     Loc reentrant_loc;
     int interrupt;          /* INTERRUPT n: n + 1, or 0 */

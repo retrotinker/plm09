@@ -31,6 +31,9 @@ int sema_carry, sema_half, sema_result;
 int sema_uses_copy, sema_uses_time, sema_uses_parity;
 Proc *sema_interrupt[INTERRUPTS];
 int sema_pic;       /* compiling an --os9 module */
+int sema_obj;       /* compiling for lwasm -f obj */
+int sema_main;      /* the main module (outer level has statements) */
+Vec sema_public_procs;
 
 static const char *const register_names[] = {
     "A", "B", "D", "X", "Y", "U", "S", "PC", "CC", "DP", "PCR",
@@ -74,6 +77,9 @@ static Symbol *lookup(Scope *scope, const char *name, Loc loc)
                  "variable AT the device's address", name);
     if (!sym)
         error_at(loc, "%s is not declared", name);
+    if (sym->predef == PRE_MEMORY && sema_obj)
+        error_at(loc, "MEMORY cannot be used with --obj (the end of the linked program isn't "
+                 "known when a module is compiled)");
     return sym;
 }
 
@@ -585,6 +591,9 @@ static void declare_var(VarDecl *v, Scope *scope)
                      "program (use DATA)");
         if (v->implicit_dim)
             v->dim = count_values(v->init, v->type);
+        if (v->init->kind == INIT_INITIAL && v->at && sema_obj)
+            error_at(v->init->loc, "INITIAL ... AT cannot be used with --obj (the values "
+                     "would need an ORG)");
     }
 
     if (v->st && !v->st->size) {        /* lay out the members (once if factored) */
@@ -726,6 +735,9 @@ static void declare_proc(Proc *p, Scope *scope)
                      "parameters", p->name);
         if (sema_pic)
             error_at(p->interrupt_loc, "INTERRUPT procedures cannot be used in an --os9 module");
+        if (sema_obj && !sema_main)
+            error_at(p->interrupt_loc, "an INTERRUPT procedure must be in the main module "
+                     "(the one with statements), which installs it");
         if (n >= INTERRUPTS)
             error_at(p->interrupt_loc, "INTERRUPT %d: the 6809's interrupts are 0 (IRQ), "
                      "1 (FIRQ) and 2 (NMI)", n);
@@ -733,6 +745,16 @@ static void declare_proc(Proc *p, Scope *scope)
             error_at(p->interrupt_loc, "INTERRUPT %d is already used by procedure %s", n,
                      sema_interrupt[n]->name);
         sema_interrupt[n] = p;
+    }
+    if (p->public) {
+        if (p->external)
+            error_at(p->public_loc, "a procedure cannot be both PUBLIC and EXTERNAL");
+        if (scope->id != 0)
+            error_at(p->public_loc, "a PUBLIC procedure must be declared at the outer level "
+                     "of the module");
+        if (is_register_name(p->name))
+            error_at(p->loc, "PUBLIC name %s is also a 6809 register name", p->name);
+        vec_push(&sema_public_procs, p);
     }
     if (scope->proc && scope->proc->reentrant)
         error_at(p->loc, "REENTRANT procedure %s cannot contain procedure declarations",
@@ -1104,6 +1126,7 @@ void sema_program(Program *prog)
     predeclare(pre, "STACKPTR", PRE_STACKPTR, TY_ADDRESS, 0, "RT_STACKPTR");
     Scope *global = scope_new(pre, NULL);
 
+    sema_main = prog->body->stmts.len > 0;
     check_block(prog->body, global);
     for (int i = 0; i < sema_procs.len; i++) {
         Proc *p = sema_procs.items[i];

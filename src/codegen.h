@@ -14,6 +14,7 @@ typedef struct CodegenOptions {
     unsigned stack;     /* --os9: stack space reserved in the data area */
     unsigned memory;    /* --os9: bytes of the data area for MEMORY */
     const char *name;   /* --os9: module name, or NULL for the program name */
+    int obj;            /* --obj: a module for lwasm -f obj and lwlink */
 } CodegenOptions;
 
 /* write lwasm source for a checked program */

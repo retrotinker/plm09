@@ -634,6 +634,10 @@ static void parse_declare(Block *b)
         StructType *st;
         Type type = parse_type(&st);
         AtSpec *at = NULL;
+        if (peek_type(0) == K_PUBLIC)
+            unsupported(peek()->loc, "PUBLIC on a variable");
+        if (peek_type(0) == K_EXTERNAL)
+            unsupported(peek()->loc, "EXTERNAL on a variable");
         if (peek_type(0) == K_AT) {
             at = xcalloc(1, sizeof *at);
             at->loc = next().loc;
@@ -712,7 +716,7 @@ static void parse_end_labels(const Vec *labels)
     expect(T_SEMI);
 }
 
-/* name: PROCEDURE [(params)] [type] [EXTERNAL|REENTRANT|INTERRUPT n] ;
+/* name: PROCEDURE [(params)] [type] [EXTERNAL|PUBLIC|REENTRANT|INTERRUPT n] ;
    block END [name] ; */
 static Proc *parse_procedure(void)
 {
@@ -755,8 +759,10 @@ static Proc *parse_procedure(void)
                 error_at(n.loc, "an INTERRUPT number must be from 0 to 255");
             p->interrupt = (int)n.value + 1;
         }
-        else if (t->type == K_PUBLIC)
-            unsupported(t->loc, "PUBLIC");
+        else if (t->type == K_PUBLIC) {
+            p->public = 1;
+            p->public_loc = next().loc;
+        }
         else
             break;
     }

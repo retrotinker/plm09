@@ -1,0 +1,7 @@
+/* the last module of the chain */
+B: DO;
+STEP2: PROCEDURE (V) BYTE PUBLIC;
+    DECLARE V BYTE;
+    RETURN V + 1;
+END STEP2;
+END B;

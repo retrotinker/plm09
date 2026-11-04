@@ -1312,19 +1312,30 @@ static void emit_frame(const Proc *p)
     }
 }
 
-static void emit_variables(void)
+/* which variables emit_variables writes: --obj puts INITIAL values in a
+   data section and the rest in a bss section */
+enum { VARS_ALL, VARS_INITIAL, VARS_OTHER };
+
+static void emit_variables(int which)
 {
-    fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)" : "");
+    fprintf(out, "\n; variables%s\n", pic ? " (data area, U-relative)"
+            : which == VARS_INITIAL ? " with INITIAL values" : "");
+    if (which == VARS_INITIAL)
+        goto initial;
     if (sema_goto_out)
         fprintf(out, "RT_MAINS\tRMB\t2\t\t; main program's S\n");
     if (sema_carry || sema_half)
         fprintf(out, "RT_CC\tRMB\t1\t\t; carry (bit 0) and half carry of the last + - ...\n");
     if (sema_result)
         fprintf(out, "RT_RES\tRMB\t2\t\t; and its result, for ZERO SIGN PARITY\n");
+initial:
     for (int i = 0; i < sema_vars.len; i++) {
         const Symbol *v = sema_vars.items[i];
         if (v->init == INIT_DATA || in_frame(v))
             continue;                       /* stored with the code, or on the stack */
+        if (which != VARS_ALL
+            && (which == VARS_INITIAL) != (v->init == INIT_INITIAL && !v->at))
+            continue;
         if (v->at) {                        /* no storage of its own */
             fprintf(out, "%s\tEQU\t%s\n", v->asm_name, at_text(v));
             if (v->init == INIT_INITIAL && !pic) {
@@ -1379,10 +1390,59 @@ static void emit_pools(void)
     }
 }
 
-static void emit_code(const Program *prog)
+/* A PUBLIC procedure's entry under its own name, for callers that use the
+   EXTERNAL convention (other modules, assembly code): every argument
+   pushed as a word, the last one also in D; the result in B or D.  An
+   ordinary procedure gets its arguments copied into its parameter slots
+   and is jumped to; a REENTRANT one gets them pushed again in their
+   declared widths, as its own callers do. */
+static void emit_public_entry(const Proc *p)
+{
+    int n = p->params.len;
+
+    fprintf(out, "\n; PUBLIC %s: called by its name with the EXTERNAL convention\n%s\n",
+            p->name, p->name);
+    if (!p->reentrant) {
+        for (int i = 0; i < n; i++) {
+            const Symbol *param = ((VarDecl *)p->params.items[i])->sym;
+            int off = 2 + 2 * (n - 1 - i);          /* past the return address */
+            if (param->type == TY_BYTE) {
+                emit("LDB\t%d,S", off + 1);
+                emit("STB\t%s", var_ref(param->asm_name, 0));
+            } else {
+                emit("LDD\t%d,S", off);
+                emit("STD\t%s", var_ref(param->asm_name, 0));
+            }
+        }
+        emit_jump(p->sym->asm_name);
+        return;
+    }
+    int pushed = 0;
+    for (int i = 0; i < n; i++) {
+        const Symbol *param = ((VarDecl *)p->params.items[i])->sym;
+        int off = 2 + 2 * (n - 1 - i) + pushed;
+        if (param->type == TY_BYTE) {
+            emit("LDB\t%d,S", off + 1);
+            emit("PSHS\tB");
+            pushed += 1;
+        } else {
+            emit("LDD\t%d,S", off);
+            emit("PSHS\tD");
+            pushed += 2;
+        }
+    }
+    emit_call(p->sym->asm_name);
+    if (p->arg_size)
+        emit("LEAS\t%u,S", p->arg_size);
+    emit("RTS");
+}
+
+static void emit_code(const Program *prog, int with_main)
 {
     int copies = 0;
 
+    if (!with_main)
+        goto procedures;
     fprintf(out, "\n; program %s\nPLM_MAIN\n", prog->name);
     if (sema_goto_out)
         emit("STS\t%s\t; for GOTOs out of procedures", var_ref("RT_MAINS", 0));
@@ -1404,6 +1464,7 @@ static void emit_code(const Program *prog)
     gen_block(prog->body);
     emit("RTS");
 
+procedures:
     for (int i = 0; i < sema_procs.len; i++) {
         const Proc *p = sema_procs.items[i];
         if (p->external)
@@ -1420,6 +1481,8 @@ static void emit_code(const Program *prog)
         }
         gen_block(p->body);
         gen_epilogue(p);
+        if (p->public)
+            emit_public_entry(p);
     }
 
     /* LABEL PUBLIC: the PL/M label under its own name, for assembly code */
@@ -1465,18 +1528,26 @@ static void emit_code(const Program *prog)
     }
 
     emit_code_data();
+    if (!with_main)
+        return;                     /* --obj: the main module has the runtime */
 
     for (int i = 0; i < sema_vars.len; i++)
         copies |= needs_template(sema_vars.items[i]);
     fputc('\n', out);
-    if (copies || sema_uses_copy)
+    /* an --obj main module provides every routine: other modules may
+       need them */
+    if (copies || sema_uses_copy || sema_obj)
         fprintf(out, "RT_NEED_COPY\tEQU\t1\n");
-    if (sema_uses_time)
+    if (sema_uses_time || sema_obj)
         fprintf(out, "RT_NEED_TIME\tEQU\t1\n");
-    if (sema_uses_parity)
+    if (sema_uses_parity || sema_obj)
         fprintf(out, "RT_NEED_PARITY\tEQU\t1\n");
+    if (sema_obj)
+        emit("PRAGMA\texport\t\t; the runtime and hooks, for the other modules");
     emit("INCLUDE\t\"plm_rt.asm\"");
     emit("INCLUDE\t\"plm_hooks.asm\"");
+    if (sema_obj)
+        emit("PRAGMA\tnoexport");
 }
 
 void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
@@ -1499,11 +1570,11 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
         fprintf(out, "; generated by plmc from %s (OS-9 program module)\n", src_name);
         emit("PRAGMA\t6809");
         emit("MOD\tRT_EOM,RT_NAME,$11,$81,RT_START,RT_SIZE\t; Prgrm+Objct, ReEnt rev 1");
-        emit_variables();
+        emit_variables(VARS_ALL);
         fprintf(out, "\nRT_NAME\tFCS\t/%s/\n", opt->name ? opt->name : prog->name);
         emit("FCB\t1\t\t; edition");
         emit("INCLUDE\t\"plm_crt0_os9.asm\"");
-        emit_code(prog);
+        emit_code(prog, 1);
         emit_pools();
         fprintf(out, "\nRT_MEMORY\tRMB\t%u\t\t; MEMORY (--memory)\n", opt->memory);
         fprintf(out, "RT_STACK\tRMB\t%u\t\t; stack space (--stack)\n", opt->stack);
@@ -1514,12 +1585,42 @@ void codegen(FILE *f, const Program *prog, const CodegenOptions *opt)
         return;
     }
 
+    if (opt->obj) {
+        /* a module for lwasm -f obj: code and DATA in section code, INITIAL
+           values in data, the other variables in bss; lwlink places them.
+           Names nobody defines here (other modules' PUBLIC procedures, and
+           for other modules the runtime and hooks) become imports. */
+        fprintf(out, "; generated by plmc from %s (--obj %s module)\n", src_name,
+                sema_main ? "main" : "non-main");
+        emit("PRAGMA\t6809");
+        emit("PRAGMA\tundefextern");
+        fprintf(out, "\n\tSECTION\tcode\n");
+        if (sema_main) {
+            fprintf(out, "RT_OBJ\tEQU\t1\t\t; tells the startup code: no SETDP\n");
+            emit("EXPORT\tRT_START\t\t; the entry point (lwlink -e or the link script)");
+            emit("INCLUDE\t\"plm_crt0.asm\"");
+        }
+        for (int i = 0; i < sema_public_procs.len; i++)
+            emit("EXPORT\t%s", ((const Proc *)sema_public_procs.items[i])->name);
+        emit_code(prog, sema_main);
+        emit_pools();
+        emit("ENDSECT");
+        fprintf(out, "\n\tSECTION\tdata\n");
+        emit_variables(VARS_INITIAL);
+        emit("ENDSECT");
+        fprintf(out, "\n\tSECTION\tbss,bss\n");
+        emit_variables(VARS_OTHER);
+        emit("ENDSECT");
+        emit("END");
+        return;
+    }
+
     fprintf(out, "; generated by plmc from %s\n", src_name);
     emit("PRAGMA\t6809");
     emit("ORG\t$%04X", opt->org);
     emit("INCLUDE\t\"plm_crt0.asm\"");
-    emit_code(prog);
-    emit_variables();
+    emit_code(prog, 1);
+    emit_variables(VARS_ALL);
     emit_pools();
     fprintf(out, "\nRT_MEMORY\tEQU\t*\t\t; MEMORY: the memory after the program\n");
     if (opt->vectors) {

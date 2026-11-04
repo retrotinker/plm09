@@ -1,0 +1,13 @@
+/* Three modules: main calls STEP1 (a.plm), which calls STEP2 (b.plm);
+   QUIT (a.plm) ends the program through the EXIT hook.  Arguments of
+   mixed types, in order.  Expected values in comments. */
+CHAIN: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+STEP1: PROCEDURE (X, Y, Z) ADDRESS EXTERNAL;
+    DECLARE (X, Z) BYTE, Y ADDRESS;
+END STEP1;
+QUIT: PROCEDURE (CODE) EXTERNAL; DECLARE CODE BYTE; END QUIT;
+CALL PUTDEC(STEP1(3, 1000, 7));                 /* (3 + 1) * 1000 + 7 = 4007 */
+CALL QUIT(5);                                   /* exit status 5 */
+CALL PUTDEC(0);                                 /* not reached */
+END CHAIN;

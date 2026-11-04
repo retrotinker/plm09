@@ -1,0 +1,1 @@
+plmc: --obj cannot be combined with --os9, --org or --vectors (lwlink places the linked program)

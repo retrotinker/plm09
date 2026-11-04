@@ -1,0 +1,14 @@
+/* util.plm: a module of declarations only */
+UTIL: DO;
+SHOW: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END SHOW;        /* in main.plm */
+GCD: PROCEDURE (A, B) ADDRESS PUBLIC;
+    DECLARE (A, B, T) ADDRESS;
+    DO WHILE B <> 0;
+        CALL SHOW(B);
+        T = A MOD B;
+        A = B;
+        B = T;
+    END;
+    RETURN A;
+END GCD;
+END UTIL;

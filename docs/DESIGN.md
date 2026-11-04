@@ -19,7 +19,12 @@ Testing is automated with `sim6809`, a headless 6809 simulator kept in the same 
 Probes of lwasm 4.24 settled several design choices:
 - **lwasm defaults to 6309 mode.** Generated files contain `PRAGMA 6809` and every build passes `-9`.
 - **`-f srec` carries load addresses and the entry point.** It writes `END label` as the S9 record, and `RMB` emits no bytes. S-records are therefore the format the simulator loads.
-- **lwlink can't write srec.** A single lwasm run pulls in the runtime and hooks with `INCLUDE`.
+- **One lwasm run per program by default.** The runtime and hooks are pulled in with `INCLUDE`. (This was first chosen because lwlink was thought unable to write srec; lwlink 4.24 does write it, which `--obj` relies on, below.)
+- **Object files (`--obj`), from later probes:**
+  - `lwasm -f obj` rejects `SETDP` (so crt0 skips it under `RT_OBJ`);
+  - `PRAGMA undefextern` turns undefined names into imports;
+  - `PRAGMA export` exports exactly the symbols defined while it is on;
+  - `lwlink -f srec -e SYM` writes S1 records and an S9 entry record, with the code at `$0400` under its built-in script. `--section-base` has no effect on srec output, but a script (`runtime/plm09.link`) places the sections; a script must define `basesympat`/`lensympat` itself if `s_SECT`/`l_SECT` are wanted.
 - **Listings need `--list=FILE`.** A separate `-l FILE` fails.
 - **`,PCR` forward references** always get a 16-bit offset.
 
@@ -32,11 +37,13 @@ Makefile  README.md  CLAUDE.md  LICENSE (MIT)  plm09.spec (Fedora RPM)  .gitigno
 src/      main.c util.[ch] lexer.[ch] ast.[ch] parser.[ch] symtab.[ch] sema.[ch] codegen.[ch]
 runtime/  plm_crt0.asm  plm_crt0_os9.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
           sim/ coco/ os9/ flex/ example/  plm_hooks.asm   (chosen with -I)
+          plm09.link (lwlink script for --obj programs: code at $0100, data, bss; entry RT_START)
 sim/      cpu6809.[ch] (also the --acia, --ft245 and --swi devices) disasm.c srec.[ch] os9.[ch] flex.[ch] main.c
           tests/*.asm + *.out, harness.inc (check macros), gen_len_ops.py (length test)
 tests/    run_tests.sh
           lex/*.plm+.tok  parse/*.plm+.ast  err/*.plm+.err
           run/*.plm+.out[+.rc][+.in]
+          obj/NAME/main.plm + other modules + main.out[+.rc][+.in] (--obj programs)
           coco/*.plm+.out[+.in][+.rc][+.screen][+.keys], coco/fakerom.asm
           nitros9/done.asm (completion signal for the nitros9 suite)
           gen/exprgen.c (random expressions + C reference evaluator)
@@ -44,6 +51,7 @@ tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
           srec2flex.c (S-records to a FLEX .CMD file; built as build/srec2flex)
           rpmdocs.py (the RPM's documentation patch: runtime paths to the installed ones)
 contrib/  Makefile hello.plm sum.plm (example programs built with an installed plm09: TARGET=sim or os9; %doc in the RPM)
+          obj/ main.plm util.plm Makefile (two modules as object files, linked with lwlink)
 docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
           man/plmc.1  man/sim6809.1  man/srec2flex.1 (man pages)
 ```
@@ -52,7 +60,7 @@ docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
 
 | Target | Effect |
 |---|---|
-| `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS)` and `$(LDFLAGS)`; `CFLAGS` (default `-O2 -g`) and `LDFLAGS` can be replaced, as rpmbuild does, and `WERROR` (default `-Werror`) is emptied by the spec; `VERSION` (0.3.3) becomes `PLM09_VERSION`, printed by `--version` |
+| `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS)` and `$(LDFLAGS)`; `CFLAGS` (default `-O2 -g`) and `LDFLAGS` can be replaced, as rpmbuild does, and `WERROR` (default `-Werror`) is emptied by the spec; `VERSION` (0.4.0) becomes `PLM09_VERSION`, printed by `--version` |
 | `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` and their man pages to `$(DESTDIR)$(MANDIR)/man1`, and `runtime/` to `$(DESTDIR)$(DATADIR)/plm09/runtime`; `BINDIR` defaults to `$(PREFIX)/bin`, `MANDIR` to `$(PREFIX)/share/man`, `DATADIR` to `$(PREFIX)/share`, `PREFIX` to `/usr/local` |
 | `rpm`, `srpm` | `git archive` of the tag `v$(VERSION)` (HEAD if there is none yet; the same files as GitHub's release archive, the spec's `Source0`) to `build/rpm/SOURCES/plm09-$(VERSION).tar.gz`, and `plm09-$(VERSION)-datadir.patch` (a copy of the tarball's README, plmc.md, sim6809.md, plmc.1 and srec2flex.1 converted by `tools/rpmdocs.py $(rpm --eval %{_datadir})`, diffed against the original), then (for `rpm`, after removing earlier builds' `RPMS` and `SRPMS`) `rpmbuild -ba`/`-bs plm09.spec` with `_topdir` `build/rpm`; the spec applies the patch, checks it names `%{_datadir}/plm09/runtime`, rebuilds the PDFs (`make -B docs`, hence its pandoc and TeX BuildRequires), and `%check` runs sim, man, lex, parse, err, run and fuzz |
 | `test` | runs the suites sim, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
@@ -191,6 +199,8 @@ Operators group left to right.
 
 **LITERALLY in the parser.** Substitution happens in the parser's token buffer, so sema and codegen never see literals.
 - **Lexer:** strings are `T_STRING` tokens. The parser turns one- and two-character strings into constants, and `lex_tokens()` tokenizes a literal's text, located at the place it is used.
+- **PUBLIC procedures:** sema checks them (outer level, not EXTERNAL, not a register name) and lists them in `sema_public_procs`. Codegen's `emit_public_entry()` writes, after the procedure, an entry under its own name for EXTERNAL-convention callers: it copies the stacked words (argument i of n at `2+2*(n-1-i),S`) into the parameter slots and jumps to `P_X`, or, for a REENTRANT procedure, pushes them again in their declared widths, calls it and pops them.
+- **`--obj`:** `sema_obj`/`sema_main` (main = the outer block has statements). `codegen()`'s third layout: `PRAGMA undefextern`, `SECTION code` (crt0 with `RT_OBJ` and `EXPORT RT_START` in the main module, the code, DATA and constant pools), `SECTION data` (INITIAL variables) and `SECTION bss,bss` (the others): `emit_variables(VARS_INITIAL / VARS_OTHER)`. `emit_code(prog, with_main)` leaves `PLM_MAIN`, the runtime and the hooks out of non-main modules; the main module assembles every optional runtime routine and INCLUDEs the runtime and hooks between `PRAGMA export` and `noexport`, so other modules import them. Rejected: `--org`/`--vectors`/`--os9` (main.c), MEMORY (`lookup()`), INITIAL AT (`check_var`), INTERRUPT in a non-main module. `RT_CC`/`RT_RES` stay per module.
 - **INCLUDE:** `skip_space()` treats a `$` in column 1 as a control line (`control_line()`); `$INCLUDE(file)`/`$IC(file)` pushes the reading position on a 16-deep stack and switches to the file (found by `find_include()`: the including file's directory, then the `-I` directories, as written and in lower case, ISIS `:Fn:` dropped), and the end of that file pops back to the end of the control line. The parser never sees file boundaries. `Loc.file` indexes `src_files` (util.c), so `error_at()`, the `--tokens` dump, codegen's source comments (`src_line(loc)`) and "already declared at FILE:N" name included files; LITERALLY bodies (`in_body`) neither see control lines nor end files. Other controls are skipped, with any parenthesized argument (which may hold quoted strings), and give a warning.
 - **Scopes:** the parser keeps its own scope stack (`LitScope`) of declared names, pushed for the program, procedures and simple DO blocks.
 - **Lazy expansion:** `peek_at(k)` expands positions 0..k, replacing a visible literal name by its tokens, which may expand in turn. Expansion depth is counted per token.
@@ -463,6 +473,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | man | each `docs/man/*.1` formats without warnings (`groff -man -ww -z`) and names every option its program's `--help` lists |
 | lex, parse | `--tokens` / `--ast` golden files |
 | err | programs that must fail; the `.err` file holds the expected message, with position |
+| obj | programs of several modules: each compiled with `--obj` and assembled with `lwasm -f obj`, linked with `lwlink -f srec -s runtime/plm09.link`, run in sim6809 |
 | run | complete programs in sim6809, covering every operator and conversion rule, control flow, input, procedures, HALT, `--org`/`--vectors`, and an assembly check with the example hooks |
 | fuzz | `exprgen` seeded random programs against an independent C model of the language rules. They include pointer statements (`P = .BA(k)` with reads and writes through BASED `PB`/`PW` and the BASED arrays `PBA`/`PWA`). They include elements of `BA(4)`/`WA(4)` (constant or `(expr) AND 3` subscripts), assignments to elements, iterative DO loops over random bounds and steps (the model follows the manual's four steps and rejects loops of over 300 passes), and `DO CASE (expr) AND 3`. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
 | coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
@@ -529,6 +540,7 @@ How the dragonflex suite works (each point was found the hard way):
 - arrays, with `LENGTH`/`LAST`; the run tests `arrays` and `bigdata`, and arrays in the fuzz generator
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
 - `$INCLUDE` and `-I` (0.3.0): the run test `incl` (ISIS drive prefix, upper-case name found in lower case, `$ic`, nested INCLUDE relative to the included file, INCLUDE in an inner block) and error tests (`include_*`, with fragments in `tests/err/include/`; `include_dir` uses `-I tests/err/include`, so the suite runs from the repository root), `control_ignored` (0.3.1: the warning) and `control_no_paren`, and the run test `controls` (ignored controls, also before an INCLUDE on the same line)
+- PUBLIC procedures and `--obj` (0.4.0): `runtime/plm09.link`, the `obj` suite (`calls`, `chain`), the run test `public`, the err tests `public_*`, `obj_*` and `external_variable`, and `contrib/obj`
 - LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
 - BASED variables and the dot operator: the run test `based`, pointer statements in the fuzz generator, a parse golden and error tests
 - INITIAL and DATA, `(*)`, and strings of any length in value lists: the run test `initial`, INITIAL set-up in the fuzz generator, a parse golden and error tests

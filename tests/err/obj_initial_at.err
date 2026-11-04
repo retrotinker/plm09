@@ -1,0 +1,1 @@
+3:28: error: INITIAL ... AT cannot be used with --obj (the values would need an ORG)

@@ -8,7 +8,9 @@ RT_START	STS	RT_ENTRYS
 	TFR	X,S
 RT_START1	CLRA
 	TFR	A,DP
+	IFNDEF	RT_OBJ		; (lwasm -f obj allows no SETDP)
 	SETDP	0
+	ENDC
 	JSR	PLM_MAIN
 	CLRB			; normal end of program: exit status 0
 	JMP	PLM_EXIT

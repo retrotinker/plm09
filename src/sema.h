@@ -24,6 +24,9 @@ extern int sema_uses_copy, sema_uses_time, sema_uses_parity;
 enum { INTERRUPTS = 3 };
 extern Proc *sema_interrupt[INTERRUPTS];
 extern int sema_pic;        /* compiling an --os9 module (set before sema) */
+extern int sema_obj;        /* compiling for lwasm -f obj (--obj; set before sema) */
+extern int sema_main;       /* the main module: its outer level has statements */
+extern Vec sema_public_procs; /* Proc*: PUBLIC procedures, exported by name */
 
 /* check the program and annotate it; errors are fatal */
 void sema_program(Program *prog);
