@@ -268,7 +268,9 @@ suite_coco() {
 # with  POKE&H2F00,57:LOADM"T":EXEC:EXEC&H2F00  (plus X.keys, if present,
 # typed afterwards).  XRoar traps at $2F00, which is reached only if the
 # program returned to BASIC, snapshots the machine, and the text screen is
-# compared with X.screen.  Skipped when xroar, decb or the ROMs are missing.
+# compared with X.screen.  tests/coco/obj, an --obj program, is linked by
+# lwlink into a .BIN at $0E00 and run the same way.  Skipped when xroar,
+# decb or the ROMs are missing.
 suite_xroar() {
     local f name base marker keys
     for t in xroar decb; do
@@ -300,6 +302,35 @@ suite_xroar() {
         python3 -I "$ROOT/tools/coco_screen.py" "$base.sna" "$marker" 3000 >"$base.screen"
         check_diff "$name" "$base.screen" "${f%.plm}.screen" && ok
     done
+    # the --obj program, linked with runtime/coco/plm09.link into a .BIN
+    local d=$ROOT/tests/coco/obj m objs=()
+    base=$OUT/xroar-obj
+    rm -f "$base.sna" "$base.dsk"
+    for f in "$d"/main.plm "$d"/util.plm; do
+        m=$base-$(basename "$f" .plm)
+        if ! "$PLMC" --obj -o "$m.asm" "$f" 2>"$m.plmc.err" ||
+           ! lwasm -9 -f obj -I "$ROOT/runtime" -I "$ROOT/runtime/coco" -o "$m.o" "$m.asm" \
+               2>"$m.o.err"; then
+            bad xroar/obj "build failed on $(basename "$f")"; cat "$m.plmc.err" "$m.o.err" 2>/dev/null
+            return
+        fi
+        objs+=("$m.o")
+    done
+    if ! lwlink -f decb -s "$ROOT/runtime/coco/plm09.link" -o "$base.bin" "${objs[@]}" \
+            2>"$base.link.err" ||
+       ! decb dskini "$base.dsk" >/dev/null 2>&1 ||
+       ! decb copy -2 -b "$base.bin" "$base.dsk,T.BIN" >/dev/null 2>&1; then
+        bad xroar/obj "link or disk image failed"; cat "$base.link.err"; return
+    fi
+    marker=$(od -An -tx1 -j5 -N8 "$base.bin" | tr -d ' \n')       # first 8 bytes at $0E00
+    timeout 120 xroar -q -machine cocous -ui null -ao null -no-ratelimit \
+        -load-fd0 "$base.dsk" -type "POKE&H2F00,57:LOADM\"T\":EXEC:EXEC&H2F00\r" \
+        -trap pc=0x2F00 -trap-snap "$base.sna" -trap-timeout 0 -timeout 60 >/dev/null 2>&1
+    if [ ! -e "$base.sna" ]; then
+        bad xroar/obj "never returned to BASIC (no trap at \$2F00)"; return
+    fi
+    python3 -I "$ROOT/tools/coco_screen.py" "$base.sna" "$marker" 0E00 >"$base.screen"
+    check_diff xroar/obj "$base.screen" "$d/main.screen" && ok
 }
 
 # Every run test (and some fuzz programs) again as OS-9 modules: compiled

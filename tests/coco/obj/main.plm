@@ -1,11 +1,14 @@
 /* An --obj program for the Color Computer, linked with
-   runtime/coco/plm09.link (code from $0E00): the main module. */
+   runtime/coco/plm09.link (code from $0E00): the main module.  It runs
+   in sim6809 with the fake ROM, and as a .BIN under XRoar (main.screen). */
 COBJ: DO;
 PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+CLS: PROCEDURE EXTERNAL; END CLS;
 GCD: PROCEDURE (A, B) ADDRESS EXTERNAL; DECLARE (A, B) ADDRESS; END GCD;
 SHOW: PROCEDURE (N) PUBLIC;
     DECLARE N ADDRESS;
     CALL PUTDEC(N);
 END SHOW;
+CALL CLS;
 CALL SHOW(GCD(1071, 462));
 END COBJ;

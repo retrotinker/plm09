@@ -1684,7 +1684,10 @@ The test suite checks these hooks in two ways. They run in the simulator
 against a stand-in for the BASIC ROM (also with an `--obj` program linked
 at `$0E00`). They also run on an emulated CoCo 2
 under XRoar: each program is loaded from a disk image with `LOADM` and
-`EXEC`, and the text screen is compared with what's expected.
+`EXEC`, and the text screen is compared with what's expected. That
+includes the `--obj` program, as the `.BIN` that `lwlink -f decb -s
+runtime/coco/plm09.link` writes, loaded at `$0E00` under Disk Extended
+Color BASIC 1.1.
 
 # FLEX
 
