@@ -38,13 +38,15 @@ src/      main.c util.[ch] lexer.[ch] ast.[ch] parser.[ch] symtab.[ch] sema.[ch]
 runtime/  plm_crt0.asm  plm_crt0_os9.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
           sim/ coco/ os9/ flex/ example/  plm_hooks.asm   (chosen with -I)
           plm09.link (lwlink script for --obj programs: code at $0100, data, bss; entry RT_START)
+          coco/plm09.link (the same for the CoCo: code at $0E00, Disk BASIC's graphics pages)
 sim/      cpu6809.[ch] (also the --acia, --ft245 and --swi devices) disasm.c srec.[ch] os9.[ch] flex.[ch] main.c
           tests/*.asm + *.out, harness.inc (check macros), gen_len_ops.py (length test)
 tests/    run_tests.sh
           lex/*.plm+.tok  parse/*.plm+.ast  err/*.plm+.err
           run/*.plm+.out[+.rc][+.in]
           obj/NAME/main.plm + other modules + main.out[+.rc][+.in] (--obj programs)
-          coco/*.plm+.out[+.in][+.rc][+.screen][+.keys], coco/fakerom.asm
+          coco/*.plm+.out[+.in][+.rc][+.screen][+.keys], coco/fakerom.asm (EXEC at PROG, default $3000)
+          coco/obj/ main.plm util.plm main.out (an --obj program at $0E00)
           nitros9/done.asm (completion signal for the nitros9 suite)
           gen/exprgen.c (random expressions + C reference evaluator)
 tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
@@ -476,7 +478,7 @@ Instruction fetches bypass MMIO; all other accesses go through it.
 | obj | programs of several modules: each compiled with `--obj` and assembled with `lwasm -f obj`, linked with `lwlink -f srec -s runtime/plm09.link`, run in sim6809 |
 | run | complete programs in sim6809, covering every operator and conversion rule, control flow, input, procedures, HALT, `--org`/`--vectors`, and an assembly check with the example hooks |
 | fuzz | `exprgen` seeded random programs against an independent C model of the language rules. They include pointer statements (`P = .BA(k)` with reads and writes through BASED `PB`/`PW` and the BASED arrays `PBA`/`PWA`). They include elements of `BA(4)`/`WA(4)` (constant or `(expr) AND 3` subscripts), assignments to elements, iterative DO loops over random bounds and steps (the model follows the manual's four steps and rejects loops of over 300 passes), and `DO CASE (expr) AND 3`. A failing program is kept as `build/tests/fuzz-fail-SEED.plm` |
-| coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y |
+| coco | the CoCo hooks in sim6809 with `tests/coco/fakerom.asm`, a stand-in Color BASIC ROM loaded last so its fake EXEC is the entry point. It checks that the program returns with BASIC's S intact, and its CHROUT clobbers Y; plus `tests/coco/obj`, an `--obj` program linked with `runtime/coco/plm09.link` and checked to start at `$0E00`, against the fake ROM assembled with `-DPROG=3584` |
 | xroar | the CoCo programs that have a `.screen` file, run on XRoar's `cocous` (CoCo 2, Disk Extended BASIC 1.1); skipped if xroar, `decb` or the ROMs are missing |
 | os9 | every run program (except the `--org`/`--vectors` one) and 25 fuzz programs built with `--os9` and run by sim6809 `--os9` at two module/data placements (`$2000`/`$8000` and `$3123`/`$9E00`), with the text check for absolute references, plus `os9 ident` when toolshed is present |
 | simon6809 | the run programs (and `tests/simon6809/*.plm`) on the Simon6809's real monitor ROM (`$SIMON_ROM`) in sim6809 `--ft245 0xD000 --swi --io 0xD800`: typed in as S1/S9 records, run with G400, output cut at the monitor's register display, whose B is the exit status; skipped without the ROM |
@@ -541,6 +543,7 @@ How the dragonflex suite works (each point was found the hard way):
 - iterative DO and DO CASE; the run tests `loops` and `case`, and loops and cases in the fuzz generator
 - `$INCLUDE` and `-I` (0.3.0): the run test `incl` (ISIS drive prefix, upper-case name found in lower case, `$ic`, nested INCLUDE relative to the included file, INCLUDE in an inner block) and error tests (`include_*`, with fragments in `tests/err/include/`; `include_dir` uses `-I tests/err/include`, so the suite runs from the repository root), `control_ignored` (0.3.1: the warning) and `control_no_paren`, and the run test `controls` (ignored controls, also before an INCLUDE on the same line)
 - PUBLIC procedures and `--obj` (0.4.0): `runtime/plm09.link`, the `obj` suite (`calls`, `chain`), the run test `public`, the err tests `public_*`, `obj_*` and `external_variable`, and `contrib/obj`
+- `runtime/coco/plm09.link` (code at `$0E00`) and the coco test `obj`; the fake ROM's EXEC address is `PROG`
 - LITERALLY: the lexer's `T_STRING`, parser-level substitution with scopes and raw names, the run test `literally`, a parse golden showing the expansion, and error tests
 - BASED variables and the dot operator: the run test `based`, pointer statements in the fuzz generator, a parse golden and error tests
 - INITIAL and DATA, `(*)`, and strings of any length in value lists: the run test `initial`, INITIAL set-up in the fuzz generator, a parse golden and error tests

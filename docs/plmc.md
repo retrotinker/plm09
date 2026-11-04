@@ -1457,8 +1457,10 @@ declarations: procedures, variables, literals.
 * **Sections:** code and `DATA` go in section `code`, variables with
   `INITIAL` values in `data`, and the other variables in `bss`.
   `runtime/plm09.link` loads `code` at `$0100`, then `data`, then `bss`,
-  and makes `RT_START` the entry point (the S9 record). For another load
-  address, copy the script and change its `load` line; `lwlink -m map.txt`
+  and makes `RT_START` the entry point (the S9 record).
+  `runtime/coco/plm09.link` does the same from `$0E00`, for the Color
+  Computer (see [Running on a Color Computer]). For another load
+  address, copy a script and change its `load` line; `lwlink -m map.txt`
   shows where everything went.
 
 ## Rules and limits
@@ -1658,8 +1660,29 @@ LOADM"HELLO":EXEC
   the program ends, when `PLM_EXIT` restores the vectors and returns to BASIC
   with IRQ enabled and FIRQ disabled.
 
+**Object files.** A program of several modules (see [Object files and
+lwlink]) is linked for the CoCo with `runtime/coco/plm09.link`, which loads
+the code at `$0E00`, followed by the data and variables, and makes
+`RT_START` the entry point. lwlink writes the `.BIN` file itself:
+
+```
+plmc --obj -o main.asm main.plm
+plmc --obj -o util.asm util.plm
+lwasm -9 -f obj -I runtime -I runtime/coco -o main.o main.asm
+lwasm -9 -f obj -o util.o util.asm
+lwlink -f decb -s runtime/coco/plm09.link -o DEMO.BIN main.o util.o
+```
+
+and on the CoCo `LOADM"DEMO":EXEC`. Under Disk Extended Color BASIC,
+`$0E00` is where the four graphics pages reserved by default (PCLEAR 4)
+begin, and the BASIC program starts at `$2600`. A program that doesn't use
+PMODE graphics can live there without a `CLEAR`, as long as its code, data
+and variables end below `$2600`; `lwlink -m map.txt` shows where they end.
+List the main module first, so the code starts with `RT_START`.
+
 The test suite checks these hooks in two ways. They run in the simulator
-against a stand-in for the BASIC ROM. They also run on an emulated CoCo 2
+against a stand-in for the BASIC ROM (also with an `--obj` program linked
+at `$0E00`). They also run on an emulated CoCo 2
 under XRoar: each program is loaded from a disk image with `LOADM` and
 `EXEC`, and the text screen is compared with what's expected.
 

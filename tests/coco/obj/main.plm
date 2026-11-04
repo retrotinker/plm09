@@ -1,0 +1,11 @@
+/* An --obj program for the Color Computer, linked with
+   runtime/coco/plm09.link (code from $0E00): the main module. */
+COBJ: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+GCD: PROCEDURE (A, B) ADDRESS EXTERNAL; DECLARE (A, B) ADDRESS; END GCD;
+SHOW: PROCEDURE (N) PUBLIC;
+    DECLARE N ADDRESS;
+    CALL PUTDEC(N);
+END SHOW;
+CALL SHOW(GCD(1071, 462));
+END COBJ;

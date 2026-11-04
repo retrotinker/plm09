@@ -2,12 +2,16 @@
 ; sim6809.  Only what the hooks use: the POLCAT/CHROUT vectors at $A000,
 ; CLS at $A928, the interrupt vectors, which jump through RAM at
 ; $0109-$0111, plus a fake EXEC caller that runs the program at $3000
+; (or at PROG, given with lwasm -DPROG=...)
 ; on a BASIC-like stack and checks that it comes back with S intact and
 ; BASIC's RAM interrupt vectors put back.
 ; Assemble to S-records and load AFTER the program, so this END wins.
 	PRAGMA	6809
 SIM_IO	EQU	$FF00
 BASIC_S	EQU	$2F00		; stack pointer at EXEC time
+	IFNDEF	PROG
+PROG	EQU	$3000		; where EXEC enters the program
+	ENDC
 
 	ORG	$A000
 	FDB	FPOLCAT		; [$A000] POLCAT
@@ -37,7 +41,7 @@ FBASIC0	LDA	#$7E
 	CMPX	#$0112
 	BNE	FBASIC0
 	ANDCC	#$EF		; BASIC runs with IRQ enabled
-	JSR	$3000
+	JSR	PROG
 	CMPS	#BASIC_S
 	BEQ	FBASIC1
 	LDB	#99

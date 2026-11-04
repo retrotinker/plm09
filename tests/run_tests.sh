@@ -230,6 +230,37 @@ suite_coco() {
         echo "rc=$(cat "${f%.plm}.rc" 2>/dev/null || echo 0)" >>"$exp"
         check_diff "$name" "$base.stdout" "$exp" && ok
     done
+    # an --obj program linked with runtime/coco/plm09.link (code at $0E00),
+    # against a fake ROM whose EXEC enters it there
+    local d=$ROOT/tests/coco/obj m objs=()
+    base=$OUT/coco-obj
+    if ! lwasm -9 -f srec -DPROG=3584 -o "$base-rom.s19" "$ROOT/tests/coco/fakerom.asm" \
+            2>"$base-rom.err"; then
+        bad coco/obj "lwasm failed on the fake ROM"; cat "$base-rom.err"; return
+    fi
+    for f in "$d"/main.plm "$d"/util.plm; do       # the main module first: RT_START at $0E00
+        m=$base-$(basename "$f" .plm)
+        if ! "$PLMC" --obj -o "$m.asm" "$f" 2>"$m.plmc.err" ||
+           ! lwasm -9 -f obj -I "$ROOT/runtime" -I "$ROOT/runtime/coco" -o "$m.o" "$m.asm" \
+               2>"$m.o.err"; then
+            bad coco/obj "build failed on $(basename "$f")"; cat "$m.plmc.err" "$m.o.err" 2>/dev/null
+            return
+        fi
+        objs+=("$m.o")
+    done
+    if ! lwlink -f srec -s "$ROOT/runtime/coco/plm09.link" -m "$base.map" -o "$base.s19" \
+            "${objs[@]}" 2>"$base.link.err"; then
+        bad coco/obj "lwlink failed"; cat "$base.link.err"; return
+    fi
+    if ! grep -q '^S9030E00' "$base.s19"; then
+        bad coco/obj "entry point is not \$0E00"; return
+    fi
+    cat "$base.s19" "$base-rom.s19" >"$base.both.s19"
+    "$SIM" "$base.both.s19" </dev/null >"$base.stdout" 2>"$base.sim.err"
+    echo "rc=$?" >>"$base.stdout"
+    cat "$d/main.out" >"$base.expected"
+    echo "rc=0" >>"$base.expected"
+    check_diff coco/obj "$base.stdout" "$base.expected" && ok
 }
 
 # The same CoCo programs on an emulated CoCo 2 (XRoar, Disk Extended Color

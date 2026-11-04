@@ -67,7 +67,7 @@ install: all
 	install -m 644 runtime/*.asm runtime/*.link $(DESTDIR)$(DATADIR)/plm09/runtime
 	for d in $(RUNTIME_DIRS); do \
 		install -d $(DESTDIR)$(DATADIR)/plm09/$$d && \
-		install -m 644 $$d*.asm $(DESTDIR)$(DATADIR)/plm09/$$d || exit 1; \
+		install -m 644 $$d*.asm $$(ls $$d*.link 2>/dev/null) $(DESTDIR)$(DATADIR)/plm09/$$d || exit 1; \
 	done
 
 # Fedora RPMs, in build/rpm.  The tarball is the release tag v$(VERSION),
