@@ -1,5 +1,5 @@
 Name:           plm09
-Version:        0.3.3
+Version:        0.4.0
 Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
@@ -83,6 +83,11 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test obj-test fu
 %{_datadir}/%{name}/
 
 %changelog
+* Wed Nov 04 2026 John W. Linville <linville@tuxdriver.com> - 0.4.0-1
+- Add PUBLIC procedures and plmc --obj: modules assembled separately
+  with lwasm -f obj and linked with lwlink (runtime/plm09.link)
+- Run the obj test suite in %%check
+
 * Wed Oct 28 2026 John W. Linville <linville@tuxdriver.com> - 0.3.3-1
 - The contrib/ examples are included as documentation
 
