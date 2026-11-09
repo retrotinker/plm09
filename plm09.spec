@@ -1,5 +1,5 @@
 Name:           plm09
-Version:        0.4.4
+Version:        0.4.5
 Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
@@ -83,6 +83,9 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test obj-test fu
 %{_datadir}/%{name}/
 
 %changelog
+* Mon Nov 09 2026 John W. Linville <linville@tuxdriver.com> - 0.4.5-1
+- sim6809 --flex: the command line in the line buffer (--param)
+
 * Mon Nov 09 2026 John W. Linville <linville@tuxdriver.com> - 0.4.4-1
 - sim6809 --os9: F$Mem, I$MakDir, I$ChgDir, and directories read with DIR.
 
