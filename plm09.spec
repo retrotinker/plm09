@@ -1,5 +1,5 @@
 Name:           plm09
-Version:        0.4.2
+Version:        0.4.3
 Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
 
@@ -83,6 +83,10 @@ make WERROR= sim-test man-test lex-test parse-test err-test run-test obj-test fu
 %{_datadir}/%{name}/
 
 %changelog
+* Mon Nov 09 2026 John W. Linville <linville@tuxdriver.com> - 0.4.3-1
+- sim6809 --os9: I$Open, I$Create, I$Close, I$Seek, I$GetStt, I$SetStt and
+  I$Delete on host files
+
 * Wed Nov 04 2026 John W. Linville <linville@tuxdriver.com> - 0.4.2-1
 - Test the CoCo --obj program as a .BIN under XRoar
 
