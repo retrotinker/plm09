@@ -110,8 +110,9 @@ what follows the command's name in FLEX's line buffer.
 .B \-\-flex
 The file is a FLEX binary (.CMD).
 Emulate the FLEX DOS entry points that programs call (the terminal and
-number routines; WARMS ends the run, with B as the exit status) and
-protect FLEX's memory ($C700\-$DFFF).
+number routines; WARMS ends the run, with B as the exit status) and the
+File Management System's commonest functions on host files named
+NAME.EXT, and protect FLEX's memory ($C700\-$DFFF).
 .TP
 .BI \-\-acia " addr"
 An MC6850 ACIA with its status at
