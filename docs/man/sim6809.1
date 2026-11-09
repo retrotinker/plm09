@@ -76,8 +76,11 @@ Clear memory instead of filling it with $A5.
 .B \-\-os9
 The file is an OS-9 program module.
 Set up a process as F$Fork does, emulate the system calls F$Exit,
-I$Read, I$ReadLn, I$Write and I$WritLn, and enforce memory protection:
-code must stay in the module, and writes in the data area.
+I$Read, I$ReadLn, I$Write and I$WritLn on the terminal (paths 0, 1
+and 2), and I$Open, I$Create, I$Close, I$Seek, I$GetStt, I$SetStt and
+I$Delete on host files, named relative to the current directory; and
+enforce memory protection: code must stay in the module, and writes in
+the data area.
 .TP
 .BI \-\-load " addr"
 With
