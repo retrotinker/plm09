@@ -392,6 +392,7 @@ The file becomes an OS-9 module:
 - sets up registers as `F$Fork` does, with the data area at `--data` and `--param`
 - emulates `F$Exit`, `I$Read`, `I$ReadLn`, `I$Write` and `I$WritLn` through `Cpu.swi2_hook`, translating CR to and from newline on the terminal (paths 0 to 2)
 - opens host files as further paths (up to 15) with `I$Open` and `I$Create`, read and written as they are, with `I$Close`, `I$Seek`, `I$GetStt` and `I$SetStt` (`SS.Opt`, `SS.Size`, `SS.Pos`, `SS.EOF`) and `I$Delete`, so that a C library's stdio and file functions can run
+- makes and changes to host directories (`I$MakDir`, `I$ChgDir`), and reads them, opened with `DIR.`, as RBF's 32-byte entries; grows and shrinks the data area, and with it the memory protection, with `F$Mem`
 - enforces memory protection: writes only to the data area, reads only from the module or the data area, PC only in the module
 
 **What the protection doesn't catch.** With under 256 bytes of data, a variable reference that lost its `,U` would still work, because lwasm assembles it as direct-page addressing and OS-9's DP is the data page. The os9 suite therefore also checks the generated text for `JSR`/`JMP` and for variable operands without `,U`.

@@ -12,8 +12,9 @@
    SWI2 handler.  Returns 0, or -1 after printing an error. */
 int os9_load(Cpu *c, const char *path, uint16_t load, uint16_t data, const char *params);
 
-/* SWI2 handler: F$Exit, I$Read, I$ReadLn, I$Write, I$WritLn, I$Open,
-   I$Create, I$Close, I$Seek, I$GetStt, I$SetStt, I$Delete */
+/* SWI2 handler: F$Exit, F$Mem, I$Read, I$ReadLn, I$Write, I$WritLn,
+   I$Open, I$Create, I$Close, I$Seek, I$GetStt, I$SetStt, I$Delete,
+   I$MakDir, I$ChgDir */
 int os9_syscall(Cpu *c);
 
 #endif

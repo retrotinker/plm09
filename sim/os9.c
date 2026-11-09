@@ -6,26 +6,33 @@
  * terminal (SCF): OS-9 ends lines with CR, so output CR is written as a
  * newline, and an input newline is delivered as CR.  I$Open and I$Create
  * open host files (RBF), named relative to the current directory, read and
- * written as they are.
+ * written as they are; opened as directories (DIR.), host directories are
+ * read as RBF's 32-byte entries.  F$Mem grows and shrinks the data area.
  */
-#define _POSIX_C_SOURCE 200809L    /* fileno, ftruncate */
+#define _POSIX_C_SOURCE 200809L    /* fileno, ftruncate, directories */
 #include "os9.h"
 
+#include <dirent.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 enum {
-    F_EXIT = 0x06,
-    I_CREATE = 0x83, I_OPEN = 0x84, I_DELETE = 0x87, I_SEEK = 0x88,
+    F_EXIT = 0x06, F_MEM = 0x07,
+    I_CREATE = 0x83, I_OPEN = 0x84, I_MAKDIR = 0x85, I_CHGDIR = 0x86,
+    I_DELETE = 0x87, I_SEEK = 0x88,
     I_READ = 0x89, I_READLN = 0x8b, I_WRITE = 0x8a, I_WRITLN = 0x8c,
     I_GETSTT = 0x8d, I_SETSTT = 0x8e, I_CLOSE = 0x8f,
     SS_OPT = 0, SS_SIZE = 2, SS_POS = 5, SS_EOF = 6,
     E_PTHFUL = 0xc8,    /* path table full */
     E_BPNUM = 0xc9,     /* bad path number */
     E_BMODE = 0xcb,     /* bad mode */
+    E_MEMFUL = 0xcf,    /* memory full */
     E_UNKSVC = 0xd0,    /* unknown service */
     E_EOF = 0xd3,       /* end of file */
+    E_FNA = 0xd6,       /* file not accessible */
     E_PNNF = 0xd8,      /* path name not found */
     E_CEF = 0xda,       /* creating an existing file */
     E_WRITE = 0xf5,     /* write error */
@@ -213,15 +220,64 @@ static int pathname(Cpu *c, char *name, size_t size)
     return n ? 0 : -1;
 }
 
-/* I$Open (create 0) or I$Create (1): mode A (1 read, 2 write, 3 both),
-   the path name at X; the new path in A */
+static int byname(const void *a, const void *b)
+{
+    return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* the host directory name as RBF has it: a file of 32-byte entries, ".."
+   and "." and then the names in order, each up to 29 characters with bit
+   7 set in the last, followed by a (made up) 3-byte LSN; NULL if it can't
+   be read */
+static FILE *dirfile(const char *name)
+{
+    DIR *d = opendir(name);
+    struct dirent *e;
+    char **names = NULL;
+    size_t n = 0, i;
+    FILE *f;
+
+    if (!d || !(f = tmpfile())) {
+        if (d)
+            closedir(d);
+        return NULL;
+    }
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+        if (!(names = realloc(names, (n + 1) * sizeof *names)) ||
+            !(names[n] = strdup(e->d_name)))
+            exit(2);
+        n++;
+    }
+    closedir(d);
+    qsort(names, n, sizeof *names, byname);
+    for (i = 0; i < n + 2; i++) {
+        const char *s = i == 0 ? ".." : i == 1 ? "." : names[i - 2];
+        uint8_t ent[32] = { 0 };
+        size_t len = strlen(s) > 29 ? 29 : strlen(s);
+        memcpy(ent, s, len);
+        ent[len - 1] |= 0x80;
+        ent[31] = (uint8_t)(i + 1);     /* the LSN */
+        fwrite(ent, 1, sizeof ent, f);
+        if (i >= 2)
+            free(names[i - 2]);
+    }
+    free(names);
+    rewind(f);
+    return f;
+}
+
+/* I$Open (create 0) or I$Create (1): mode A (1 read, 2 write, 3 both; +
+   $80, DIR., to read a directory), the path name at X; the new path in A */
 static int sys_open(Cpu *c, int create)
 {
     char name[256];
+    struct stat st;
     FILE *f;
-    int p, mode = c->a & 3;
+    int p, mode = c->a & 3, isdir;
 
-    if (mode == 0 || (c->a & 0x80))
+    if (mode == 0 || ((c->a & 0x80) && (create || mode != 1)))
         return error(c, E_BMODE);
     if (pathname(c, name, sizeof name) < 0)
         return error(c, E_PNNF);
@@ -229,7 +285,15 @@ static int sys_open(Cpu *c, int create)
         ;
     if (p == NPATHS)
         return error(c, E_PTHFUL);
-    if (create) {
+    isdir = stat(name, &st) == 0 && S_ISDIR(st.st_mode);
+    if (c->a & 0x80) {
+        if (!isdir)
+            return error(c, stat(name, &st) ? E_PNNF : E_BMODE);
+        if (!(f = dirfile(name)))
+            return error(c, E_FNA);
+    } else if (isdir)
+        return error(c, create ? E_CEF : E_FNA);
+    else if (create) {
         if ((f = fopen(name, "rb"))) {
             fclose(f);
             return error(c, E_CEF);
@@ -322,6 +386,56 @@ static int sys_stt(Cpu *c, int set)
     return 0;
 }
 
+/* I$MakDir: a directory named at X (B, its attributes, is ignored) */
+static int sys_makdir(Cpu *c)
+{
+    char name[256];
+
+    if (pathname(c, name, sizeof name) < 0)
+        return error(c, E_PNNF);
+    if (mkdir(name, 0777))
+        return error(c, access(name, F_OK) == 0 ? E_CEF : E_PNNF);
+    ok(c);
+    return 0;
+}
+
+/* I$ChgDir: the data directory (mode A with READ. or WRITE.) or the
+   execution directory (EXEC., ignored) becomes the one named at X */
+static int sys_chgdir(Cpu *c)
+{
+    char name[256];
+    struct stat st;
+
+    if (pathname(c, name, sizeof name) < 0 || stat(name, &st) ||
+        !S_ISDIR(st.st_mode))
+        return error(c, E_PNNF);
+    if ((c->a & 3) && chdir(name))
+        return error(c, E_PNNF);
+    ok(c);
+    return 0;
+}
+
+/* F$Mem: the data area becomes D bytes (rounded up to whole pages; 0
+   asks its size), if that doesn't reach the module or the I/O block;
+   its size in D, its end in Y */
+static int sys_mem(Cpu *c)
+{
+    uint32_t size = (uint32_t)(c->a << 8 | c->b), hi;
+
+    if (size == 0)
+        size = c->data_hi - c->data_lo;
+    size = (size + 255) & ~255u;
+    hi = c->data_lo + size;
+    if (hi > c->io_base || (c->mod_lo < hi && c->data_lo < c->mod_hi))
+        return error(c, E_MEMFUL);
+    c->data_hi = hi;
+    c->a = (uint8_t)(size >> 8);
+    c->b = (uint8_t)size;
+    c->y = (uint16_t)hi;
+    ok(c);
+    return 0;
+}
+
 /* I$Delete: the file named at X */
 static int sys_delete(Cpu *c)
 {
@@ -365,6 +479,12 @@ int os9_syscall(Cpu *c)
         return sys_stt(c, 1);
     case I_DELETE:
         return sys_delete(c);
+    case I_MAKDIR:
+        return sys_makdir(c);
+    case I_CHGDIR:
+        return sys_chgdir(c);
+    case F_MEM:
+        return sys_mem(c);
     default:
         snprintf(msg, sizeof msg, "unsupported OS-9 system call $%02X", fn);
         return cpu_stop(c, STOP_TRAP, msg);
