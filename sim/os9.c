@@ -149,6 +149,8 @@ static int sys_write(Cpu *c, int line)
 
     if (!f)
         return error(c, E_BPNUM);
+    if (f == stderr)    /* (in order, when both go to one file) */
+        fflush(stdout);
     while (n < c->y) {
         uint8_t ch = c->mem[(uint16_t)(c->x + n++)];
         if (fputc(p <= 2 && ch == 0x0d ? '\n' : ch, f) == EOF)
