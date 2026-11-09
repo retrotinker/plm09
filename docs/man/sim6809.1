@@ -17,6 +17,8 @@ sim6809 \- headless Motorola 6809 simulator
 .I module
 .br
 .B sim6809 \-\-flex
+.RB [ \-\-param
+.IR string ]
 .RI [ options ]
 .I prog.cmd
 .SH DESCRIPTION
@@ -101,6 +103,9 @@ a multiple of 256 (default $8000).
 With
 .BR \-\-os9 :
 the parameter string (default empty).
+With
+.BR \-\-flex :
+what follows the command's name in FLEX's line buffer.
 .TP
 .B \-\-flex
 The file is a FLEX binary (.CMD).

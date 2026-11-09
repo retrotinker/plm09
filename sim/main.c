@@ -35,7 +35,8 @@ static void usage(FILE *f)
             "                and I$ChgDir on host files and directories\n"
             "  --load ADDR   with --os9: module load address (default $2000)\n"
             "  --data ADDR   with --os9: data area address, page aligned (default $8000)\n"
-            "  --param STR   with --os9: parameter string (default empty)\n"
+            "  --param STR   with --os9 or --flex: parameter string (default empty;\n"
+            "                with --flex, after the command's name in the line buffer)\n"
             "  --acia ADDR   an MC6850 ACIA at ADDR (status) and ADDR+1 (data) on\n"
             "                stdin/stdout; input is offered once the program waits\n"
             "                for it; at the end of input it reads 0\n"
@@ -193,7 +194,7 @@ int main(int argc, char **argv)
         if (have_entry_opt)
             cpu.pc = (uint16_t)entry_opt;
     } else if (flex) {
-        if (flex_load(&cpu, path) < 0)
+        if (flex_load(&cpu, path, params) < 0)
             return RC_USAGE;
         if (have_entry_opt)
             cpu.pc = (uint16_t)entry_opt;

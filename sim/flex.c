@@ -21,6 +21,9 @@ enum {
     FLEX_HI = 0xe000,
     MEMEND = 0xcc2b,            /* end of user memory */
     LASTTRM = 0xcc11,           /* Last Terminator */
+    LPOINT = 0xcc14,            /* line buffer pointer */
+    LINBUF = 0xc080,            /* line buffer: the command line */
+    LINBUF_SIZE = 128,
     ENTRY_LO = 0xcd00,          /* the DOS jump table */
     ENTRY_HI = 0xcd51,
 };
@@ -31,7 +34,7 @@ static int fail(const char *path, const char *msg)
     return -1;
 }
 
-int flex_load(Cpu *c, const char *path)
+int flex_load(Cpu *c, const char *path, const char *params)
 {
     static uint8_t f[65536 * 2];
     FILE *fp = fopen(path, "rb");
@@ -69,9 +72,29 @@ int flex_load(Cpu *c, const char *path)
     if (!have_xfer)
         return fail(path, "no transfer address: not a FLEX command");
 
+    /* the command line, in the line buffer: NAME [params] CR */
+    const char *base = strrchr(path, '/') ? strrchr(path, '/') + 1 : path;
+    size_t nl = strcspn(base, "."), pl = strlen(params);
+    if (nl + 1 + pl + 1 > LINBUF_SIZE)
+        return fail(path, "the name and --param don't fit FLEX's line buffer (128 bytes)");
+    for (size_t k = 0; k < nl; k++)
+        c->mem[LINBUF + k] = (uint8_t)(base[k] >= 'a' && base[k] <= 'z' ? base[k] - 32 : base[k]);
+    size_t len = nl;
+    if (pl) {
+        c->mem[LINBUF + len++] = ' ';
+        memcpy(c->mem + LINBUF + len, params, pl);
+        len += pl;
+    }
+    c->mem[LINBUF + len] = 0x0d;
+
     memset(c->mem + 0xcc00, 0, 0x100);         /* DOS variables: no files open */
     c->mem[MEMEND] = 0xbf;
     c->mem[MEMEND + 1] = 0xff;
+    /* past the name and the blank after it, as FLEX leaves it (at the
+       CR if there are no parameters) */
+    uint16_t lp = (uint16_t)(LINBUF + nl + (pl ? 1 : 0));
+    c->mem[LPOINT] = (uint8_t)(lp >> 8);
+    c->mem[LPOINT + 1] = (uint8_t)lp;
     c->pc = xfer;
     c->s = FLEX_STACK;
     c->cc = 0;

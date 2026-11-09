@@ -10,9 +10,13 @@
    DOS variables ($CC00-$CCFF) zero (no files open) but memory end ($CC2B)
    = $BFFF; emulate the DOS entry points at $CD00-$CD4E (flex_call); and
    stop the program with an error if it writes to FLEX's memory above the
-   utility command area ($C700-$DFFF) or runs code there.  Returns 0, or
-   -1 after printing an error. */
-int flex_load(Cpu *c, const char *path);
+   utility command area ($C700-$DFFF) or runs code there.  The line
+   buffer ($C080) holds the command line, as FLEX leaves it: the file's
+   name (upper case, without its directory and extension), params after
+   a blank if there are any, and CR, with the line buffer pointer ($CC14)
+   past the name and the blank (at the CR if there are no parameters), as
+   FLEX leaves it.  Returns 0, or -1 after printing an error. */
+int flex_load(Cpu *c, const char *path, const char *params);
 
 /* PC hook: emulate the DOS routine at c->pc, if it is one; returns -1 if
    the PC isn't a FLEX entry point, otherwise c->stop */

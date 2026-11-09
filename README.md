@@ -411,7 +411,7 @@ lwasm -9 -f srec -I runtime -I runtime/searle6809 -o sum.s19 sum.asm
 ```
 build/sim6809 [-t] [-n N] [--io BASE] [--entry ADDR] [--zero] prog.s19
 build/sim6809 --os9 [--load ADDR] [--data ADDR] [--param STR] module
-build/sim6809 --flex PROG.CMD
+build/sim6809 --flex [--param STR] PROG.CMD
 ```
 
 | Option | Meaning |
