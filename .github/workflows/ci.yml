@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Fedora, as the RPM is built for, with lwtools from its repositories
+    container: fedora:44
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    name: check (${{ matrix.cc }})
+    steps:
+      - name: Install the build and test tools
+        run: dnf install -y make ${{ matrix.cc }} lwtools python3 groff-base diffutils
+      - uses: actions/checkout@v7
+      # the tests run programs in sim6809 (and use its srec2flex): its
+      # current master, so a simulator change that breaks plm09 shows here
+      - uses: actions/checkout@v7
+        with:
+          repository: retrotinker/sim6809
+          path: sim6809
+      - name: Build sim6809
+        run: |
+          make -C sim6809 CC=${{ matrix.cc }}
+          echo "$GITHUB_WORKSPACE/sim6809/build" >> "$GITHUB_PATH"
+      # the suites that need XRoar, ROMs or disk images skip themselves
+      - name: Build and run the tests
+        run: make CC=${{ matrix.cc }} test
+      - name: Keep the test outputs if they differ
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-outputs-${{ matrix.cc }}
+          path: build/tests/
