@@ -72,6 +72,8 @@ docs/     DESIGN.md  plmc.md/.pdf  tex/footnotehyper.sty
 | `docs` | build `docs/*.pdf` from the Markdown (pandoc + xelatex) |
 | `clean` | remove `build/` |
 
+**CI.** `.github/workflows/ci.yml`: `make test` with gcc and clang in a `fedora:44` container (lwtools from Fedora), against sim6809 built from its master; xroar, nitros9, dragonflex, simon6809 and searle6809 skip there.
+
 **Test pipeline** (the `run` suite)
 ```
 plmc [PLMCARGS] t.plm -o t.asm

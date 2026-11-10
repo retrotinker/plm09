@@ -20,6 +20,7 @@ Requirements: gcc, make, lwasm/lwtools and `sim6809`/`srec2flex` on PATH (or `ma
 - A single suite: `make rt-test`, `make man-test`, `make lex-test`, `make parse-test`, `make err-test`, `make run-test`, `make obj-test`, `make coco-test`, `make xroar-test`, `make os9-test OS9N=25`, `make nitros9-test`, `make flex-test FLEXN=25`, `make dragonflex-test`, `make simon6809-test`, `make kswichit-test`, `make searle6809-test`, or `make fuzz-test N=500`.
 - `make run F=prog.plm` compiles, assembles and simulates one program, then prints its output.
 - `make clean` removes `build/`.
+- GitHub Actions CI (`.github/workflows/ci.yml`) runs `make test` with gcc and clang in a `fedora:44` container on every PR and push to master, with sim6809 built from retrotinker/sim6809's master and put on PATH; the suites needing XRoar, ROMs or disk images skip themselves there. Failing runs upload `build/tests/`. Changing workflow files needs the gh token's `workflow` scope.
 - `make docs` rebuilds `docs/plmc.pdf` from its Markdown source with pandoc + xelatex (`docs/tex/footnotehyper.sty` stands in for a package this TeX installation lacks). See the documentation rule below.
 
 The suites are run by `tests/run_tests.sh <suite>`. On a mismatch it prints a diff and leaves `*.diff` files and every intermediate (`.asm`, `.lst`, `.s19`, stdout, stderr) in `build/tests/`. There is no single-test switch. To repeat one test by hand, use the same commands the runner uses:
