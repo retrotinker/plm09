@@ -56,7 +56,7 @@ sim6809 build/t.s19 </dev/null; echo rc=$?
   - `-timeout` counts emulated seconds.
 - **fuzz:** `tests/gen/exprgen.c SEED out.plm out.expected` writes a random expression program (half of them inside a REENTRANT procedure, so the scalars are Y-relative) and computes its expected output with its own C model of the typing rules. A failing program is kept as `build/tests/fuzz-fail-SEED.plm`. If you change a typing rule, change it in both `src/sema.c` and `exprgen.c`.
 
-**sim6809** (options, MMIO, exit statuses) is documented in the sim6809 repo's CLAUDE.md and manual. What plm09 relies on: MMIO at $FF00 (+0 put char, +1 get char/0 at EOF, +2 exit status, +4/+5 print decimal, +6/+7 assert/release IRQ 1, FIRQ 2, NMI 4, +8/+9 timer period, +10 timer lines), exit status 124 at the instruction limit and 125 on an illegal opcode, `--os9`, `--flex`, `--swi`, `--acia`, `--ft245`, `--stop-at-end`, `--rom`, `--reset`, `--io`, `--entry` and Intel HEX loading. A change there that plm09 needs is made, released and packaged in sim6809 first.
+**sim6809** (options, MMIO, exit statuses) is documented in the sim6809 repo's CLAUDE.md and manual. What plm09 relies on: MMIO at $FF00 (+0 put char, +1 get char/0 at EOF, +2 exit status, +4/+5 print decimal, +6/+7 assert/release IRQ 1, FIRQ 2, NMI 4, +8/+9 timer period, +10 timer lines, +12..+15 the cycle counter, which the run test `time` reads; sim6809 1.1.0 or later), exit status 124 at the instruction limit and 125 on an illegal opcode, `--os9`, `--flex`, `--swi`, `--acia`, `--ft245`, `--stop-at-end`, `--rom`, `--reset`, `--io`, `--entry` and Intel HEX loading. A change there that plm09 needs is made, released and packaged in sim6809 first.
 
 ## Documentation rule
 
