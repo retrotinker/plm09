@@ -2,30 +2,31 @@
 
 `plmc` compiles a small subset of PL/M-80 into 6809 assembly source for
 [lwasm](http://www.lwtools.ca/) (lwtools 4.24). The output is not tied to any
-machine: all I/O goes through a small hooks file that you supply. The repository
-also contains `sim6809`, a headless 6809 simulator used to run the test suite.
+machine: all I/O goes through a small hooks file that you supply. The test
+suite runs the compiled programs in
+[sim6809](https://github.com/retrotinker/sim6809), a headless 6809 simulator
+that was part of this repository until version 0.5.0.
 
-Full manuals: [docs/plmc.pdf](docs/plmc.pdf) and
-[docs/sim6809.pdf](docs/sim6809.pdf) (Markdown sources next to them).
+Full manual: [docs/plmc.pdf](docs/plmc.pdf) (Markdown source next to it).
 
 ## Building
 
-Requires gcc, make and lwtools. `make test` also needs python3, and its
-`xroar` suite uses XRoar with CoCo ROMs and toolshed's `decb` when they are
+Requires gcc, make and lwtools. `make test` also needs python3 and
+[sim6809](https://github.com/retrotinker/sim6809) (`sim6809` and `srec2flex`
+on PATH, or `make test SIM6809=... SREC2FLEX=...`), and its `xroar` suite uses XRoar with CoCo ROMs and toolshed's `decb` when they are
 installed.
 
 ```
-make            # build/plmc and build/sim6809
+make            # build/plmc
 make test       # all test suites
-make install    # copy plmc, sim6809 and srec2flex to BINDIR (default /usr/local/bin)
-                # and their man pages to MANDIR/man1 (default /usr/local/share/man)
+make install    # copy plmc to BINDIR (default /usr/local/bin), its man page
+                # to MANDIR/man1 (default /usr/local/share/man) and the runtime
 ```
 
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
 `$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`, DATADIR `$(PREFIX)/share`) and
-`DESTDIR` (for staged installs) work as usual. `--version` prints each
-program's version (0.4.6), and `man plmc`, `man sim6809` and `man srec2flex`
-give a summary of each program's options.
+`DESTDIR` (for staged installs) work as usual. `plmc --version` prints its
+version (0.5.0), and `man plmc` gives a summary of its options.
 
 <!-- installed-paths
 The runtime and hooks files are installed in `@RUNTIME@`, and the commands
@@ -42,16 +43,17 @@ place of `-I runtime -I runtime/sim`.
 release tag `v$(VERSION)` (the same files as the GitHub release archive the
 spec's `Source0` names; HEAD while the version isn't tagged yet, and never
 uncommitted changes), running the test suites
-that need only lwasm, python3 and groff; `make rpm` first removes the RPMs of earlier builds; `make srpm` makes just the source
+that need only lwasm, sim6809, python3 and groff (so the sim6809 RPM must be
+installed, or given to `mock` with `--addrepo`); `make rpm` first removes the RPMs of earlier builds; `make srpm` makes just the source
 RPM (for `mock`). The RPM build applies a patch, made by
 `tools/rpmdocs.py`, that changes the documentation's runtime paths to the
 installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:
 
 ```
-sudo dnf install build/rpm/RPMS/x86_64/plm09-0.4.6-*.x86_64.rpm
+sudo dnf install build/rpm/RPMS/x86_64/plm09-0.5.0-*.x86_64.rpm
 ```
 
-It installs the programs in `/usr/bin`, the man pages, and the runtime in
+It installs plmc in `/usr/bin`, its man page, and the runtime in
 `/usr/share/plm09/runtime`:
 
 ```
@@ -82,7 +84,7 @@ END HELLO;
 ```
 build/plmc -o hello.asm hello.plm
 lwasm -9 -f srec -I runtime -I runtime/sim -o hello.s19 hello.asm
-build/sim6809 hello.s19
+sim6809 hello.s19
 ```
 
 `make run F=hello.plm` does all three steps. `contrib/` has two example programs and a Makefile that builds and runs them with an installed plm09 (the RPM's `/usr/share/plm09`): `make -C contrib`, or `make -C contrib TARGET=os9`. The RPM installs them in `/usr/share/doc/plm09/contrib`; copy that directory somewhere writable to build them.
@@ -282,7 +284,7 @@ plmc --obj -o util.asm util.plm
 lwasm -9 -f obj -I runtime -I runtime/sim -o main.o main.asm
 lwasm -9 -f obj -o util.o util.asm
 lwlink -f srec -s runtime/plm09.link -o demo.s19 main.o util.o
-build/sim6809 demo.s19                          # prints 21
+sim6809 demo.s19                                # prints 21
 ```
 
 `runtime/plm09.link` loads the program at `$0100` and starts it at
@@ -328,7 +330,7 @@ lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
 
 * **Running it:** copy `sum` to `CMDS` on an OS-9 disk (with toolshed:
   `os9 copy sum disk.dsk,CMDS/sum` and `os9 attr -e -pe disk.dsk,CMDS/sum`)
-  and run it from the shell. `build/sim6809 --os9 sum` runs it without OS-9.
+  and run it from the shell. `sim6809 --os9 sum` runs it without OS-9.
 * **What `--os9` produces:**
   * The module is position-independent (`LBSR`/`LBRA` instead of
     `JSR`/`JMP`) and reentrant.
@@ -344,13 +346,13 @@ lwasm -9 -f os9 -I runtime -I runtime/os9 -o sum sum.asm
 ```
 build/plmc -o sum.asm sum.plm
 lwasm -9 -f srec -I runtime -I runtime/flex -o sum.s19 sum.asm
-build/srec2flex sum.s19 SUM.CMD
+srec2flex sum.s19 SUM.CMD
 ```
 
-* **Running it:** copy `SUM.CMD` to a FLEX disk and type `SUM`. `build/sim6809 --flex SUM.CMD` runs it in the simulator, which emulates FLEX's DOS entry points.
+* **Running it:** copy `SUM.CMD` to a FLEX disk and type `SUM`. `sim6809 --flex SUM.CMD` runs it in the simulator, which emulates FLEX's DOS entry points.
 * **Any FLEX 9 system:** the hooks only use FLEX's jump table at `$CD00` (PUTCHR, PCRLF, GETCHR, OUTDEC, WARMS). The program returns to FLEX when it ends.
 * **Machine-dependent values:** the stack top (`RT_STACKTOP`, default `$C700`, the top of FLEX's utility command area) and the clock for `TIME` (`RT_CYCLES100`, 1 MHz) can be set with lwasm's `-D`.
-* **`srec2flex`** converts lwasm's S-records to a FLEX binary (`.CMD`), using the S9 entry address as the transfer address.
+* **`srec2flex`** (from sim6809) converts lwasm's S-records to a FLEX binary (`.CMD`), using the S9 entry address as the transfer address.
 * **Tested on real FLEX:** the `dragonflex` suite runs the test programs on Compusense FLEX for the Dragon 64 under XRoar (`$FLEX_DISK`, default `~/coco/flex/FLEX_1.3.2.VDK`).
 
 ## Simon6809
@@ -408,27 +410,10 @@ lwasm -9 -f srec -I runtime -I runtime/searle6809 -o sum.s19 sum.asm
 
 ## sim6809
 
-```
-build/sim6809 [-t] [-n N] [--io BASE] [--entry ADDR] [--zero] prog.s19
-build/sim6809 --os9 [--load ADDR] [--data ADDR] [--param STR] module
-build/sim6809 --flex [--param STR] PROG.CMD
-```
-
-| Option | Meaning |
-|---|---|
-| `-t` | trace each instruction to stderr |
-| `-n N` | stop after N instructions (default 100M) |
-| `--io BASE` | move the I/O block from `$FF00` |
-| `--entry ADDR` | start address, if the file has no S9 record |
-| `--zero` | clear memory instead of filling it with `$A5` |
-| `--swi` | execute `SWI`, `SWI2` and `SWI3` through their vectors instead of stopping |
-| `--acia ADDR` | an MC6850 ACIA at `ADDR`/`ADDR+1` on stdin/stdout (reads 0 at end of input) |
-| `--ft245 ADDR` | an FT245RL USB FIFO at `ADDR` on stdin/stdout, asserting FIRQ while input waits |
-| `--stop-at-end` | with `--acia`: waiting for input after its end ends the run (status 0) |
-| `--reset` | start at the reset vector (`$FFFE`), for ROM images |
-| `--rom ADDR` | `ADDR`-`$FFFF` is ROM: writes are ignored |
-
-S-records and Intel HEX files (as many ROMs come) are both loaded.
+[sim6809](https://github.com/retrotinker/sim6809) runs the programs built
+with `runtime/sim`, and has OS-9 and FLEX modes and board devices for the
+other targets' tests; see its manual for the options. A PL/M program can
+also reach its I/O block directly, as `DECLARE IO(16) BYTE AT (0FF00H);`.
 
 **I/O block**
 
@@ -456,8 +441,8 @@ It implements the full MC6809 instruction set, IRQ/FIRQ/NMI (level-triggered IRQ
 
 | Suite | What it checks |
 |---|---|
-| `sim` | 6809 self-tests written in assembly with hand-checked expected values; the runtime routines; and every opcode in every addressing mode against lwasm's listing |
-| `man` | the man pages format without groff warnings and name every `--help` option |
+| `rt` | the runtime's multiply/divide routines and the sim hooks, called from assembly with hand-checked expected values |
+| `man` | the plmc man page formats without groff warnings and names every `--help` option |
 | `lex`, `parse` | `--tokens` and `--ast` output against golden files |
 | `err` | each program must fail to compile with the expected message |
 | `run` | compile, assemble, run, and compare output and exit status |

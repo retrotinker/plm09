@@ -1,4 +1,4 @@
-VERSION := 0.4.6
+VERSION := 0.5.0
 
 # CFLAGS and LDFLAGS may be replaced (rpmbuild sets its own); the language
 # and warning flags are always used, and WERROR= turns off -Werror
@@ -9,59 +9,52 @@ ALL_CFLAGS = -std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS) -DPLM09_VERS
 BUILD   := build
 
 PLMC_SRCS := $(wildcard src/*.c)
-SIM_SRCS  := $(wildcard sim/*.c)
 PLMC_OBJS := $(PLMC_SRCS:src/%.c=$(BUILD)/src/%.o)
-SIM_OBJS  := $(SIM_SRCS:sim/%.c=$(BUILD)/sim/%.o)
 
 PLMC := $(BUILD)/plmc
-SIM  := $(BUILD)/sim6809
-S2F  := $(BUILD)/srec2flex
+
+# the tests run programs in sim6809 and convert FLEX programs with
+# srec2flex, both from the sim6809 project (https://github.com/retrotinker/sim6809)
+SIM6809   ?= sim6809
+SREC2FLEX ?= srec2flex
+export SIM6809 SREC2FLEX
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man
 DATADIR ?= $(PREFIX)/share
 RUNTIME_DIRS := $(sort $(dir $(wildcard runtime/*/plm_hooks.asm)))
-MANPAGES := docs/man/plmc.1 docs/man/sim6809.1 docs/man/srec2flex.1
+MANPAGES := docs/man/plmc.1
 
 N ?= 200
 OS9N ?= 25
 FLEXN ?= 25
 
-.PHONY: all install rpm srpm docs test man-test sim-test lex-test parse-test err-test run-test obj-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
+.PHONY: all install rpm srpm docs test man-test rt-test lex-test parse-test err-test run-test obj-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test run clean
 
-all: $(PLMC) $(SIM) $(S2F)
+all: $(PLMC)
 
 $(PLMC): $(PLMC_OBJS)
 	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o $@ $^
 
-$(SIM): $(SIM_OBJS)
-	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o $@ $^
-
-$(S2F): tools/srec2flex.c | $(BUILD)/src
-	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o $@ $<
-
 $(BUILD)/src/%.o: src/%.c | $(BUILD)/src
 	$(CC) $(ALL_CFLAGS) -MMD -MP -c -o $@ $<
 
-$(BUILD)/sim/%.o: sim/%.c | $(BUILD)/sim
-	$(CC) $(ALL_CFLAGS) -MMD -MP -c -o $@ $<
-
-$(BUILD)/src $(BUILD)/sim:
+$(BUILD)/src:
 	mkdir -p $@
 
--include $(PLMC_OBJS:.o=.d) $(SIM_OBJS:.o=.d)
+-include $(PLMC_OBJS:.o=.d)
 
-# the programs that print VERSION (--version) are rebuilt when it changes
-$(BUILD)/src/main.o $(BUILD)/sim/main.o $(S2F): Makefile
+# plmc prints VERSION (--version), so it is rebuilt when it changes
+$(BUILD)/src/main.o: Makefile
 
-# install plmc, sim6809 and srec2flex in BINDIR (default $(PREFIX)/bin, PREFIX
-# default /usr/local), their man pages in MANDIR/man1 (default
+# install plmc in BINDIR (default $(PREFIX)/bin, PREFIX default
+# /usr/local), its man page in MANDIR/man1 (default
 # $(PREFIX)/share/man) and the runtime in DATADIR/plm09/runtime (default
 # $(PREFIX)/share); DESTDIR prefixes them all for staged installs
 install: all
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR)/man1
-	install -m 755 $(PLMC) $(SIM) $(S2F) $(DESTDIR)$(BINDIR)
+	install -m 755 $(PLMC) $(DESTDIR)$(BINDIR)
 	install -m 644 $(MANPAGES) $(DESTDIR)$(MANDIR)/man1
 	install -d $(DESTDIR)$(DATADIR)/plm09/runtime
 	install -m 644 runtime/*.asm runtime/*.link $(DESTDIR)$(DATADIR)/plm09/runtime
@@ -85,7 +78,7 @@ $(TARBALL): .FORCE
 # the patch plm09.spec applies: the documentation's runtime paths changed to
 # the directory the spec installs it in (make install DATADIR=%{_datadir})
 RPM_DATADIR := $(shell rpm --eval '%{_datadir}' 2>/dev/null)
-RPMDOCS := README.md docs/plmc.md docs/sim6809.md docs/man/plmc.1 docs/man/srec2flex.1
+RPMDOCS := README.md docs/plmc.md docs/man/plmc.1
 DOCPATCH := $(RPMTOP)/SOURCES/plm09-$(VERSION)-datadir.patch
 
 $(DOCPATCH): $(TARBALL)
@@ -105,9 +98,9 @@ srpm: $(TARBALL) $(DOCPATCH)
 
 .FORCE:
 
-test: sim-test man-test lex-test parse-test err-test run-test obj-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
+test: rt-test man-test lex-test parse-test err-test run-test obj-test coco-test xroar-test os9-test nitros9-test flex-test dragonflex-test simon6809-test kswichit-test searle6809-test fuzz-test
 
-sim-test man-test lex-test parse-test err-test run-test obj-test coco-test xroar-test: all
+rt-test man-test lex-test parse-test err-test run-test obj-test coco-test xroar-test: all
 	tests/run_tests.sh $(@:-test=)
 
 fuzz-test: all
@@ -134,7 +127,7 @@ run: all
 
 # PDF manuals.  docs/tex supplies a stand-in for footnotehyper.sty, which
 # pandoc's LaTeX template needs but this TeX installation lacks.
-DOCS := docs/sim6809.pdf docs/plmc.pdf
+DOCS := docs/plmc.pdf
 
 docs: $(DOCS)
 

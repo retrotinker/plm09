@@ -25,7 +25,7 @@ include path. Eight hooks files come with plmc:
 
 | Hooks | Target |
 |---|---|
-| `runtime/sim/` | `sim6809`, the headless simulator used by the test suite |
+| `runtime/sim/` | [sim6809](https://github.com/retrotinker/sim6809), the headless simulator used by the test suite |
 | `runtime/coco/` | the Tandy Color Computer 1, 2 and 3 under Color BASIC |
 | `runtime/os9/` | OS-9 and NitrOS-9 (Level 1 and 2), for modules built with `--os9` |
 | `runtime/flex/` | the FLEX 9 disk operating system, for `.CMD` commands made by `srec2flex` |
@@ -62,15 +62,21 @@ include path. Eight hooks files come with plmc:
 `plmc` is plain C11. From the top of the plm09 tree:
 
 ```
-make            # builds build/plmc, build/sim6809 and build/srec2flex
+make            # builds build/plmc
 make test       # runs every test suite
-make install    # copies plmc, sim6809 and srec2flex to BINDIR
+make install    # copies plmc to BINDIR
 ```
+
+The tests, and the examples in this manual, run programs in `sim6809` and
+make FLEX commands with `srec2flex`. Both come from the separate
+[sim6809](https://github.com/retrotinker/sim6809) project (they were part
+of plm09 until version 0.5.0); `make test` finds them on PATH, or takes
+`SIM6809=` and `SREC2FLEX=`.
 
 `BINDIR` defaults to `$(PREFIX)/bin`, and `PREFIX` to `/usr/local`; for
 example `make install BINDIR=~/bin`. `DESTDIR` is put in front for staged
-installs. The man pages `plmc(1)`, `sim6809(1)` and `srec2flex(1)` (from
-`docs/man/`) go to `MANDIR/man1`, `MANDIR` defaulting to
+installs. The man page `plmc(1)` (from
+`docs/man/`) goes to `MANDIR/man1`, `MANDIR` defaulting to
 `$(PREFIX)/share/man`, so `man plmc` summarizes the options.
 
 <!-- installed-paths
@@ -110,7 +116,7 @@ Compile it, assemble it, and run it in the simulator:
 ```
 $ build/plmc -o sum.asm sum.plm
 $ lwasm -9 -f srec -I runtime -I runtime/sim -o sum.s19 sum.asm
-$ build/sim6809 sum.s19
+$ sim6809 sum.s19
 55
 ```
 
@@ -1694,11 +1700,11 @@ Color BASIC 1.1.
 ```
 build/plmc -o hello.asm hello.plm
 lwasm -9 -f srec -I runtime -I runtime/flex -o hello.s19 hello.asm
-build/srec2flex hello.s19 HELLO.CMD
+srec2flex hello.s19 HELLO.CMD
 ```
 
 Copy `HELLO.CMD` to a FLEX disk and type `HELLO` at the `+++` prompt.
-`build/sim6809 --flex HELLO.CMD` runs it in the simulator instead.
+`sim6809 --flex HELLO.CMD` runs it in the simulator instead.
 
 * **Any FLEX 9 system:** the hooks use only the DOS entry points of FLEX's
   jump table at `$CD00`, which are the same on every 6809 FLEX (SWTPC,
@@ -1715,7 +1721,7 @@ Copy `HELLO.CMD` to a FLEX disk and type `HELLO` at the `+++` prompt.
 
   `RT_CYCLES100` and `RT_STACKTOP` depend on the machine; give
   yours to lwasm with `-D`, for example `-DRT_CYCLES100=200` for 2 MHz.
-* **`srec2flex`** turns lwasm's S-records into a FLEX binary file: `$02`
+* **`srec2flex`** (from sim6809) turns lwasm's S-records into a FLEX binary file: `$02`
   records (address, count, up to 252 bytes) for the loaded bytes, and a
   `$16` transfer address record from the S9 entry address, which makes it
   a command. lwasm has no FLEX output format of its own.
@@ -2185,7 +2191,7 @@ group of instructions.
 | `dragonflex` | the `run` programs (except those needing compiler options or input) as commands on real FLEX: Compusense FLEX for the Dragon 64, booted under XRoar, with each program's printer output compared. Uses `$FLEX_DISK`; skipped if it or XRoar is missing. See [FLEX] |
 | `flex` | every `run` program (except those needing compiler options) plus 25 fuzz programs as FLEX commands (`srec2flex`), run by `sim6809 --flex`, which emulates the FLEX DOS entry points and protects FLEX's memory |
 | `nitros9` | the `run` programs as modules on a NitrOS-9 Level 2 disk, booted on an emulated CoCo 3 under XRoar, with each program's output compared. Uses `$NITROS9_DISK` (a bootable NitrOS-9 Level 2 disk image) and `$COCO3_ROM`; skipped if they, XRoar or toolshed are missing |
-| `sim` | the simulator itself (see the sim6809 manual) |
+| `rt` | the runtime's 16-bit multiply and divide on edge cases, and crt0 with the sim hooks called through the EXTERNAL ABI, from assembly with hand-checked results |
 
 # Source code
 

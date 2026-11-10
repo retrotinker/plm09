@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# plm09 test runner.
-#   run_tests.sh sim|lex|parse|err|run|coco|xroar   run one suite
+# plm09 test runner.  Programs run in sim6809 and FLEX programs are made
+# by srec2flex, from the sim6809 project: $SIM6809 and $SREC2FLEX, default
+# from PATH.
+#   run_tests.sh rt|man|lex|parse|err|run|coco|xroar   run one suite
 #   run_tests.sh os9 [N]                   run tests + N fuzz seeds as OS-9 modules
 #   run_tests.sh flex [N]                  run tests + N fuzz seeds as FLEX commands
 #   run_tests.sh dragonflex                run tests on real FLEX (Dragon 64, XRoar)
@@ -12,7 +14,8 @@ set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BUILD=$ROOT/build
 PLMC=$BUILD/plmc
-SIM=$BUILD/sim6809
+SIM=$(command -v "${SIM6809:-sim6809}") || { echo "${SIM6809:-sim6809} not found (https://github.com/retrotinker/sim6809)" >&2; exit 2; }
+S2F=$(command -v "${SREC2FLEX:-srec2flex}") || { echo "${SREC2FLEX:-srec2flex} not found (https://github.com/retrotinker/sim6809)" >&2; exit 2; }
 OUT=$BUILD/tests
 LWASM=(lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/sim")
 
@@ -38,66 +41,20 @@ check_diff() {
     return 1
 }
 
-# (address, bytes) of each instruction from LEN_BEGIN up to LEN_END, from an
-# lwasm listing ($1 = listing) or a sim6809 -t trace ($1 = trace)
-len_pairs() {
-    awk -v b="$2" -v e="$3" '$1 ~ /^[0-9A-F][0-9A-F][0-9A-F][0-9A-F]$/ &&
-        $2 ~ /^[0-9A-F]+$/ && $1 >= b && $1 < e { print $1, $2 }' "$1"
-}
-
-# sim test: assemble, run, compare stdout+rc with .out.  Optional first-line
-# "; SIMARGS: ..." passes extra simulator options.  os9_*.asm files are OS-9
-# modules: assembled with -f os9 and run with --os9.  Files whose listing has
-# LEN_BEGIN/LEN_END also get the trace-vs-listing instruction length check.
-sim_one() {    # $1 = asm, $2 = expected .out
-    local name s19 lst args b e
-    name=sim/$(basename "$1" .asm)
-    s19=$OUT/$(basename "$1" .asm).s19
-    lst=${s19%.s19}.lst
-    args=$(sed -n '1s/^; SIMARGS: *//p' "$1")
-    case $(basename "$1") in
-    os9_*)      # OS-9 module tests: assembled with -f os9, run with --os9
-        if ! lwasm -9 -f os9 --list="$lst" -o "$s19" "$1" 2>"$s19.err"; then
-            bad "$name" "lwasm failed"; cat "$s19.err"; return
-        fi
-        args="--os9 $args" ;;
-    flex_*)     # FLEX tests: S-records converted to a .CMD file, run with --flex
-        if ! assemble "$1" "$s19" || ! "$BUILD/srec2flex" "$s19" "${s19%.s19}.cmd" 2>>"$s19.err"; then
-            bad "$name" "lwasm or srec2flex failed"; cat "$s19.err"; return
-        fi
-        s19=${s19%.s19}.cmd
-        args="--flex $args" ;;
-    *)
-        if ! assemble "$1" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; return; fi ;;
-    esac
-    b=$(awk '/LEN_BEGIN/ { print $1; exit }' "$lst")
-    e=$(awk '/LEN_END/ { print $1; exit }' "$lst")
-    [ -n "$b" ] && args="$args -t"
-    # shellcheck disable=SC2086
-    "$SIM" $args "$s19" </dev/null >"$s19.stdout" 2>"$s19.stderr"
-    echo "rc=$?" >>"$s19.stdout"
-    check_diff "$name" "$s19.stdout" "$2" || return
-    if [ -n "$b" ]; then
-        len_pairs "$lst" "$b" "$e" >"$s19.want"
-        len_pairs "$s19.stderr" "$b" "$e" >"$s19.got"
-        if [ ! -s "$s19.want" ]; then bad "$name" "no instructions in listing range"; return; fi
-        check_diff "$name (lengths)" "$s19.got" "$s19.want" || return
-        echo "  $name: $(wc -l <"$s19.want") instructions match the lwasm listing"
-    fi
-    ok
-}
-
-suite_sim() {
-    local f
-    for f in "$ROOT"/sim/tests/*.asm; do
+# runtime test: tests/rt/X.asm (crt0, plm_rt.asm and the sim hooks used
+# directly) assembled with the runtime include path, run, and its stdout
+# plus "rc=N" compared with X.out
+suite_rt() {
+    local f name s19
+    for f in "$ROOT"/tests/rt/*.asm; do
         [ -e "$f" ] || continue
-        sim_one "$f" "${f%.asm}.out"
+        name=rt/$(basename "$f" .asm)
+        s19=$OUT/rt-$(basename "$f" .asm).s19
+        if ! assemble "$f" "$s19"; then bad "$name" "lwasm failed"; cat "$s19.err"; continue; fi
+        "$SIM" "$s19" </dev/null >"$s19.stdout" 2>"$s19.stderr"
+        echo "rc=$?" >>"$s19.stdout"
+        check_diff "$name" "$s19.stdout" "${f%.asm}.out" && ok
     done
-    if python3 "$ROOT/sim/tests/gen_len_ops.py" >"$OUT/len_ops.asm"; then
-        sim_one "$OUT/len_ops.asm" "$ROOT/sim/tests/len_ops.out"
-    else
-        bad sim/len_ops "generator failed"
-    fi
 }
 
 suite_golden() {    # $1 = dir, $2 = plmc flag, $3 = expected extension
@@ -412,7 +369,7 @@ suite_os9() {
 # must mention every option its program's --help lists.
 suite_man() {
     local p o warn missing
-    for p in plmc sim6809 srec2flex; do
+    for p in plmc; do
         if [ ! -e "$ROOT/docs/man/$p.1" ]; then bad "man/$p" "no docs/man/$p.1"; continue; fi
         warn=$(groff -man -ww -z "$ROOT/docs/man/$p.1" 2>&1)
         [ -n "$warn" ] && { bad "man/$p" "groff warnings"; echo "$warn"; continue; }
@@ -438,7 +395,7 @@ flex_build() {     # $1 = source, $2 = base path; command in $2.cmd
     "$PLMC" -o "$2.asm" "$1" 2>"$2.plmc.err" || { cat "$2.plmc.err"; return 1; }
     lwasm -9 -f srec -I "$ROOT/runtime" -I "$ROOT/runtime/flex" \
         --list="$2.lst" -o "$2.s19" "$2.asm" 2>"$2.err" || { cat "$2.err"; return 1; }
-    "$BUILD/srec2flex" "$2.s19" "$2.cmd" 2>>"$2.err" || { cat "$2.err"; return 1; }
+    "$S2F" "$2.s19" "$2.cmd" 2>>"$2.err" || { cat "$2.err"; return 1; }
 }
 
 flex_run() {    # $1 = name, $2 = command, $3 = input, $4 = expected
@@ -667,7 +624,7 @@ suite_dragonflex() {
     fi
     for prog in done mark; do
         if ! lwasm -9 -f srec -o "$OUT/dragonflex-$prog.s19" "$ROOT/tests/flex/$prog.asm" 2>"$OUT/dragonflex-$prog.err" ||
-           ! "$BUILD/srec2flex" "$OUT/dragonflex-$prog.s19" "$OUT/dragonflex-$prog.cmd" ||
+           ! "$S2F" "$OUT/dragonflex-$prog.s19" "$OUT/dragonflex-$prog.cmd" ||
            ! "${fd[@]}" put "$OUT/dragonflex-$prog.cmd" "${prog^^}.CMD"; then
             bad dragonflex "cannot build tests/flex/$prog.asm"; return
         fi
@@ -807,7 +764,7 @@ suite_fuzz() {
 }
 
 case ${1:-} in
-    sim)   suite_sim ;;
+    rt)    suite_rt ;;
     lex)   suite_golden lex --tokens tok ;;
     parse) suite_golden parse --ast ast ;;
     err)   suite_err ;;
@@ -828,7 +785,7 @@ case ${1:-} in
         act=$OUT/one.stdout
         build_and_run "$2" "$act" /dev/stdin || exit 1
         cat "$act"; exit 0 ;;
-    *) echo "usage: $0 sim|lex|parse|err|run|coco|xroar|os9 [N]|nitros9|fuzz [N]|one FILE" >&2; exit 2 ;;
+    *) echo "usage: $0 rt|man|lex|parse|err|run|coco|xroar|os9 [N]|nitros9|fuzz [N]|one FILE" >&2; exit 2 ;;
 esac
 
 if [ $((pass + fail)) -eq 0 ] && [ "$1" != fuzz ]; then

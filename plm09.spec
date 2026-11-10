@@ -1,7 +1,7 @@
 Name:           plm09
-Version:        0.4.6
+Version:        0.5.0
 Release:        1%{?dist}
-Summary:        PL/M-80 compiler for the 6809, with a 6809 simulator
+Summary:        PL/M-80 compiler for the Motorola 6809
 
 License:        MIT
 URL:            https://github.com/retrotinker/plm09
@@ -38,10 +38,14 @@ BuildRequires:  texlive-xcolor
 BuildRequires:  texlive-xurl
 # for %%check
 BuildRequires:  lwtools
+BuildRequires:  sim6809
 BuildRequires:  python3
 BuildRequires:  groff-base
 # plmc's output is assembled with lwasm
 Requires:       lwtools
+# runs programs built with the runtime/sim hooks, and makes FLEX commands
+# (srec2flex); both were part of this package before 0.5.0
+Recommends:     sim6809
 
 %description
 plm09 is a compiler for PL/M-80, plmc, that emits Motorola 6809 assembly
@@ -49,9 +53,8 @@ language for lwasm, together with the startup code, runtime routines and
 hooks for several targets (the sim6809 simulator, the Tandy Color Computer,
 OS-9 and NitrOS-9, FLEX 9 and small 6809 boards).
 
-It also includes sim6809, a headless MC6809 simulator with OS-9 and FLEX
-environments and serial devices, and srec2flex, which converts S-records
-to FLEX binary (.CMD) files.
+The sim6809 simulator and srec2flex, formerly part of plm09, are now the
+separate sim6809 package.
 
 %prep
 %autosetup -p1
@@ -69,20 +72,21 @@ make -B docs
 
 %check
 # the suites that need nothing beyond lwasm, python3 and groff
-make WERROR= sim-test man-test lex-test parse-test err-test run-test obj-test fuzz-test
+make WERROR= rt-test man-test lex-test parse-test err-test run-test obj-test fuzz-test
 
 %files
 %license LICENSE
-%doc README.md docs/plmc.pdf docs/sim6809.pdf contrib
+%doc README.md docs/plmc.pdf contrib
 %{_bindir}/plmc
-%{_bindir}/sim6809
-%{_bindir}/srec2flex
 %{_mandir}/man1/plmc.1*
-%{_mandir}/man1/sim6809.1*
-%{_mandir}/man1/srec2flex.1*
 %{_datadir}/%{name}/
 
 %changelog
+* Tue Nov 10 2026 John W. Linville <linville@tuxdriver.com> - 0.5.0-1
+- sim6809 and srec2flex moved to their own project and package, sim6809
+  (https://github.com/retrotinker/sim6809); %%check uses it
+- The runtime tests are the rt suite (tests/rt)
+
 * Mon Nov 09 2026 John W. Linville <linville@tuxdriver.com> - 0.4.6-1
 - sim6809 --flex: the File Management System on host files
 

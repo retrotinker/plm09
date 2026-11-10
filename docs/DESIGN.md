@@ -3,7 +3,7 @@
 This is the design document as built. It started as the approved project
 plan; sections now describe what was implemented, and
 [Milestones](#milestones) records where the implementation differs from
-the plan. The user manuals are `plmc.md` and `sim6809.md` (PDFs alongside).
+the plan. The user manual is `plmc.md` (PDF alongside); the simulator's is in the sim6809 project.
 
 ## Context
 `plmc` is a Linux compiler, written in C11, for a "tiny core" subset of PL/M-80. It produces 6809 assembly that lwasm (lwtools 4.24) accepts. Everything machine-specific lives in a hooks file chosen through lwasm's include path. Hooks are provided for the simulator, the Tandy Color Computer under Color BASIC, OS-9/NitrOS-9, FLEX 9, and an MC6850 ACIA board (template). With `--os9` the compiler emits position-independent, reentrant OS-9 program modules.
@@ -39,9 +39,8 @@ runtime/  plm_crt0.asm  plm_crt0_os9.asm  plm_rt.asm (RT_MUL16, RT_DIV16)
           sim/ coco/ os9/ flex/ example/  plm_hooks.asm   (chosen with -I)
           plm09.link (lwlink script for --obj programs: code at $0100, data, bss; entry RT_START)
           coco/plm09.link (the same for the CoCo: code at $0E00, Disk BASIC's graphics pages)
-sim/      cpu6809.[ch] (also the --acia, --ft245 and --swi devices) disasm.c srec.[ch] os9.[ch] flex.[ch] main.c
-          tests/*.asm + *.out, harness.inc (check macros), gen_len_ops.py (length test)
 tests/    run_tests.sh
+          rt/*.asm+.out, rt/harness.inc (the runtime called from assembly, with check macros)
           lex/*.plm+.tok  parse/*.plm+.ast  err/*.plm+.err
           run/*.plm+.out[+.rc][+.in]
           obj/NAME/main.plm + other modules + main.out[+.rc][+.in] (--obj programs)
@@ -50,23 +49,22 @@ tests/    run_tests.sh
           nitros9/done.asm (completion signal for the nitros9 suite)
           gen/exprgen.c (random expressions + C reference evaluator)
 tools/    coco_screen.py (decodes the CoCo text screen from an XRoar snapshot)
-          srec2flex.c (S-records to a FLEX .CMD file; built as build/srec2flex)
           rpmdocs.py (the RPM's documentation patch: runtime paths to the installed ones)
 contrib/  Makefile hello.plm sum.plm (example programs built with an installed plm09: TARGET=sim or os9; %doc in the RPM)
           obj/ main.plm util.plm Makefile (two modules as object files, linked with lwlink)
-docs/     DESIGN.md  plmc.md/.pdf  sim6809.md/.pdf  tex/footnotehyper.sty
-          man/plmc.1  man/sim6809.1  man/srec2flex.1 (man pages)
+docs/     DESIGN.md  plmc.md/.pdf  tex/footnotehyper.sty
+          man/plmc.1 (man page)
 ```
 
 **Makefile targets**
 
 | Target | Effect |
 |---|---|
-| `all` | builds `build/plmc`, `build/sim6809` and `build/srec2flex` with `-std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS)` and `$(LDFLAGS)`; `CFLAGS` (default `-O2 -g`) and `LDFLAGS` can be replaced, as rpmbuild does, and `WERROR` (default `-Werror`) is emptied by the spec; `VERSION` (0.4.6) becomes `PLM09_VERSION`, printed by `--version` |
-| `install` | copies `plmc`, `sim6809` and `srec2flex` to `$(DESTDIR)$(BINDIR)` and their man pages to `$(DESTDIR)$(MANDIR)/man1`, and `runtime/` to `$(DESTDIR)$(DATADIR)/plm09/runtime`; `BINDIR` defaults to `$(PREFIX)/bin`, `MANDIR` to `$(PREFIX)/share/man`, `DATADIR` to `$(PREFIX)/share`, `PREFIX` to `/usr/local` |
-| `rpm`, `srpm` | `git archive` of the tag `v$(VERSION)` (HEAD if there is none yet; the same files as GitHub's release archive, the spec's `Source0`) to `build/rpm/SOURCES/plm09-$(VERSION).tar.gz`, and `plm09-$(VERSION)-datadir.patch` (a copy of the tarball's README, plmc.md, sim6809.md, plmc.1 and srec2flex.1 converted by `tools/rpmdocs.py $(rpm --eval %{_datadir})`, diffed against the original), then (for `rpm`, after removing earlier builds' `RPMS` and `SRPMS`) `rpmbuild -ba`/`-bs plm09.spec` with `_topdir` `build/rpm`; the spec applies the patch, checks it names `%{_datadir}/plm09/runtime`, rebuilds the PDFs (`make -B docs`, hence its pandoc and TeX BuildRequires), and `%check` runs sim, man, lex, parse, err, run and fuzz |
-| `test` | runs the suites sim, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
-| `sim-test`, `man-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
+| `all` | builds `build/plmc` with `-std=c11 -Wall -Wextra $(WERROR) $(CPPFLAGS) $(CFLAGS)` and `$(LDFLAGS)`; `CFLAGS` (default `-O2 -g`) and `LDFLAGS` can be replaced, as rpmbuild does, and `WERROR` (default `-Werror`) is emptied by the spec; `VERSION` (0.5.0) becomes `PLM09_VERSION`, printed by `--version` |
+| `install` | copies `plmc` to `$(DESTDIR)$(BINDIR)` and its man page to `$(DESTDIR)$(MANDIR)/man1`, and `runtime/` to `$(DESTDIR)$(DATADIR)/plm09/runtime`; `BINDIR` defaults to `$(PREFIX)/bin`, `MANDIR` to `$(PREFIX)/share/man`, `DATADIR` to `$(PREFIX)/share`, `PREFIX` to `/usr/local` |
+| `rpm`, `srpm` | `git archive` of the tag `v$(VERSION)` (HEAD if there is none yet; the same files as GitHub's release archive, the spec's `Source0`) to `build/rpm/SOURCES/plm09-$(VERSION).tar.gz`, and `plm09-$(VERSION)-datadir.patch` (a copy of the tarball's README, plmc.md and plmc.1 converted by `tools/rpmdocs.py $(rpm --eval %{_datadir})`, diffed against the original), then (for `rpm`, after removing earlier builds' `RPMS` and `SRPMS`) `rpmbuild -ba`/`-bs plm09.spec` with `_topdir` `build/rpm`; the spec applies the patch, checks it names `%{_datadir}/plm09/runtime`, rebuilds the PDFs (`make -B docs`, hence its pandoc and TeX BuildRequires), and `%check` runs rt, man, lex, parse, err, run, obj and fuzz (with sim6809 from its BuildRequires) |
+| `test` | runs the suites rt, man, lex, parse, err, run, coco, xroar, os9, nitros9, flex, dragonflex, simon6809, kswichit, searle6809, fuzz |
+| `rt-test`, `man-test`, `lex-test`, `parse-test`, `err-test`, `run-test`, `coco-test`, `xroar-test`, `nitros9-test` | one suite each |
 | `os9-test OS9N=25` | the os9 suite, with OS9N fuzz seeds |
 | `flex-test FLEXN=25` | the flex suite, with FLEXN fuzz seeds |
 | `fuzz-test N=200` | the fuzz suite, with N seeds |
@@ -434,47 +432,14 @@ All five provide `PUTCH`, `PUTDEC`, `GETCH` and `EXIT`.
   - exit and HALT spin forever
   - tests only check that it assembles
 
-## Simulator (sim/)
-**CPU**
-- The full documented MC6809 instruction set and all addressing modes. No cycle accuracy.
-- Interrupts: IRQ and FIRQ lines (level-triggered) and NMI (edge), asserted and released through MMIO, plus an instruction-count timer. `cpu_interrupt()` is called before each step; it stacks and vectors as the MC6809 does. CWAI and SYNC wait for an interrupt (the wait counts against `-n`).
-- Reset state: all registers 0, including S, and CC=$50.
-- Memory starts filled with $A5 (`--zero` for 0), so tests catch use of uninitialized variables.
-- Where the datasheet leaves results undefined (H after subtract, V after DAA/SEX, mixed-size TFR/EXG), the choices are documented in `sim6809.md`.
-- Undocumented opcodes, reserved indexed postbytes, and SWI/SWI2/SWI3 stop the simulator with a register dump and exit status 125.
-- The instruction limit (`-n`, default 100,000,000) stops it with exit status 124.
-- Usage and load errors give exit status 2.
-- `-t` prints a trace with disassembly to stderr.
-- `--io BASE` moves the MMIO block, and `--entry ADDR` overrides the S9 entry address.
-- S-records: S1/S9 are loaded, S0/S5 ignored, checksums verified. If several S9 records are present, the last one wins, which lets two files be combined.
-- Loading: S-records and Intel HEX (`:` lines, types 00/01) in the same file; `--reset` starts at [$FFFE]; `--rom ADDR` makes [ADDR, $10000) ignore writes (`Cpu.rom` with the `ro_lo`/`ro_hi` range; the I/O block still works), as real ROM does — Grant's BASIC sizes RAM by writing to it.
-- Board devices: `--swi` executes SWI/SWI2/SWI3 through their vectors; `--acia ADDR` is an MC6850 (TDRE always; RDRF only after 32 status reads since the last data access — monitors like ASSIST09 poll for a key between output characters and would swallow input given earlier; data from stdin, 0 at its end, or with `--stop-at-end` a status poll after the end stops the run); `--ft245 ADDR` is an FT245RL whose data-available line drives FIRQ (`cpu_interrupt()` peeks stdin), and waiting in SYNC/CWAI after the end of stdin ends the run with status 0.
-- `--flex` loads a FLEX binary and emulates the DOS entry points through `Cpu.pc_hook` (`flex_call()`, called before each instruction): the terminal routines, OUTDEC/OUTHEX/OUTADR, CLASS, ADDBX, and WARMS, which stops with B as the exit status; and the File Management System's open, close, read and write a byte (with text files' space compression), rewind, delete and rename on host files, which hold FLEX's sectors' data bytes (`fms()`), so that a C library's files can run. Writes to $C700–$DFFF (`Cpu.ro_lo`/`ro_hi`) and code run there other than at an entry point stop the program.
-
-**MMIO** (base $FF00, configurable)
-| Address | Access | Meaning |
-|---|---|---|
-| +0 | write | put a character |
-| +1 | read | get a character (0 at end of input) |
-| +2 | write | exit with that status |
-| +4/+5 | write | print the 16-bit value in decimal; `STD $FF04` is enough |
-| +6 | write / read | assert interrupt lines (1 IRQ, 2 FIRQ, 4 NMI) / the asserted lines |
-| +7 | write | release lines |
-| +8/+9 | write | timer period in instructions, started by the write to +9 (0 stops it) |
-| +10 | write | the lines the timer asserts (default IRQ) |
-
-Instruction fetches bypass MMIO; all other accesses go through it.
-
-**Checking the simulator itself**
-1. Self-checking assembly tests for flags, branches, indexed modes, PSH/PUL, TFR/EXG, RTI, DAA, MUL and interrupts (IRQ/FIRQ/NMI, timer, CWAI, SYNC). They use `sim/tests/harness.inc`, with expected values worked out by hand from the datasheet at the edge cases.
-2. An instruction-length check. `gen_len_ops.py` generates every opcode in every addressing mode as straight-line code (about 11,000 instructions). The traced (address, bytes) pairs must match the lwasm listing (`--list=`).
-3. Mutation checks during development. Injected bugs, such as wrong flags or a mis-decoded offset, were confirmed to fail the tests.
+## Simulator
+The programs run in sim6809, and FLEX commands are made by srec2flex. Both were in `sim/` and `tools/` here until 0.5.0; since then they are the separate project https://github.com/retrotinker/sim6809 (moved with their history, manual, man pages and self-tests). The Makefile exports `SIM6809` and `SREC2FLEX` (default: from PATH) to `tests/run_tests.sh`, which stops with status 2 if either is missing. plm09 relies on its MMIO block at $FF00 (the `runtime/sim` hooks and the `rt` tests), the exit statuses (124 instruction limit, 125 illegal opcode), `--os9`, `--flex` and the board devices (`--acia`, `--ft245`, `--swi`, `--rom`, `--reset`, `--stop-at-end`, Intel HEX).
 
 ## Test suites
 | Suite | Contents |
 |---|---|
-| sim | the checks above, plus the runtime routines (`rt_muldiv`, `rt_hooks`) |
-| man | each `docs/man/*.1` formats without warnings (`groff -man -ww -z`) and names every option its program's `--help` lists |
+| rt | the runtime from assembly with `tests/rt/harness.inc`: `muldiv` (RT_MUL16/RT_DIV16 edge cases, Y and U preserved) and `hooks` (crt0 and the sim hooks through the EXTERNAL ABI) |
+| man | `docs/man/plmc.1` formats without warnings (`groff -man -ww -z`) and names every option its program's `--help` lists |
 | lex, parse | `--tokens` / `--ast` golden files |
 | err | programs that must fail; the `.err` file holds the expected message, with position |
 | obj | programs of several modules: each compiled with `--obj` and assembled with `lwasm -f obj`, linked with `lwlink -f srec -s runtime/plm09.link`, run in sim6809 |
@@ -519,7 +484,7 @@ How the dragonflex suite works (each point was found the hard way):
 | # | Milestone | Verification | Status |
 |---|---|---|---|
 | M0 | Repo, Makefile, stub binaries | `make` builds cleanly under `-Werror` | done |
-| M1 | Simulator, srec loader, MMIO, trace | `make sim-test` passes, including the listing-length check | done |
+| M1 | Simulator, srec loader, MMIO, trace | `make sim-test` passes, including the listing-length check | done; moved to the sim6809 project in 0.5.0 |
 | M2 | Runtime: crt0, sim hooks (PUTCH, PUTDEC, GETCH, EXIT, HALT), MUL16, DIV16 | Assembly harness over edge-case value tables | done |
 | M3 | Lexer, `--tokens` | lex goldens and error tests | done |
 | M4 | Parser, `--ast` | Goldens for precedence, dangling ELSE, multi-assign, nested procedures | done |
@@ -582,7 +547,6 @@ How the dragonflex suite works (each point was found the hard way):
 ## Documentation rule
 Every changed or added feature updates the matching files in `docs/`, in the same commit:
 - `plmc.md` for the compiler, language, hooks or code generation
-- `sim6809.md` for the simulator
 - this file for architecture, layout, test suites or milestones
 - `README.md` when anything users see changes
 - `man/*.1` when a program's options change
