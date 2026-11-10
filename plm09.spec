@@ -1,5 +1,5 @@
 Name:           plm09
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        PL/M-80 compiler for the Motorola 6809
 
@@ -82,6 +82,10 @@ make WERROR= rt-test man-test lex-test parse-test err-test run-test obj-test fuz
 %{_datadir}/%{name}/
 
 %changelog
+* Tue Nov 10 2026 John W. Linville <linville@tuxdriver.com> - 0.5.1-1
+- %%check also checks TIME's delay, with sim6809 1.1.0's cycle counter
+- BuildRequires sim6809 >= 1.1.0
+
 * Tue Nov 10 2026 John W. Linville <linville@tuxdriver.com> - 0.5.0-1
 - sim6809 and srec2flex moved to their own project and package, sim6809
   (https://github.com/retrotinker/sim6809); %%check uses it

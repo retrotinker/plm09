@@ -26,7 +26,7 @@ make install    # copy plmc to BINDIR (default /usr/local/bin), its man page
 `make install BINDIR=~/bin` installs elsewhere; `PREFIX` (BINDIR is
 `$(PREFIX)/bin`, MANDIR `$(PREFIX)/share/man`, DATADIR `$(PREFIX)/share`) and
 `DESTDIR` (for staged installs) work as usual. `plmc --version` prints its
-version (0.5.0), and `man plmc` gives a summary of its options.
+version (0.5.1), and `man plmc` gives a summary of its options.
 
 <!-- installed-paths
 The runtime and hooks files are installed in `@RUNTIME@`, and the commands
@@ -50,7 +50,7 @@ RPM (for `mock`). The RPM build applies a patch, made by
 installed directory, `%{_datadir}/plm09/runtime`, and rebuilds the PDFs. Then:
 
 ```
-sudo dnf install build/rpm/RPMS/x86_64/plm09-0.5.0-*.x86_64.rpm
+sudo dnf install build/rpm/RPMS/x86_64/plm09-0.5.1-*.x86_64.rpm
 ```
 
 It installs plmc in `/usr/bin`, its man page, and the runtime in
