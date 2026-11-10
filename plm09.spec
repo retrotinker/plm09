@@ -38,7 +38,7 @@ BuildRequires:  texlive-xcolor
 BuildRequires:  texlive-xurl
 # for %%check
 BuildRequires:  lwtools
-BuildRequires:  sim6809
+BuildRequires:  sim6809 >= 1.1.0
 BuildRequires:  python3
 BuildRequires:  groff-base
 # plmc's output is assembled with lwasm

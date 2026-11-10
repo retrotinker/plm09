@@ -7,7 +7,7 @@
 ; register except S.
 SIM_IO	EQU	$FF00
 RT_STACKTOP	EQU	$FF00		; stack grows down from $FEFF
-RT_CYCLES100	EQU	100		; TIME: the simulator has no timing; as for 1 MHz
+RT_CYCLES100	EQU	100		; TIME: 1 MHz, as sim6809 counts cycles
 
 ; end of program; B = exit status
 PLM_EXIT	STB	SIM_IO+2

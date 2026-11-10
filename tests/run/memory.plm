@@ -73,7 +73,7 @@ CALL PUTDEC(Q);                                 /* 12 */
 Q = DEPTH;
 CALL PUTDEC(Q);                                 /* 2 */
 
-/* TIME: a delay (instant in the simulator, which has no timing) */
+/* TIME: a delay (its length is checked by the time test) */
 DO I = 1 TO 3;
     CALL TIME(250);
 END;

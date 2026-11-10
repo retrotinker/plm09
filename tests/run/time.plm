@@ -1,0 +1,44 @@
+/* PLMCARGS: --org 0100H */
+/* TIME (PL/M-80 manual 11.2) timed by sim6809's cycle counter (I/O $FF0C
+   to $FF0F; reading $FF0C latches all four bytes).  The sim hooks give
+   RT_CYCLES100 = 100, a 1 MHz CPU, so TIME(n) should take n * 100 cycles.
+   WAIT times CALL TIME(n) with the calls and counter reads around it;
+   less WAIT(0), that leaves RT_TIME's loop, n * 104 cycles (8 * 12 + 8
+   per unit, the nearest it gets), which must be no less than n * 100 and
+   at most 5% more.  A wait out of range prints its cycles.  (The PLMCARGS
+   line keeps this test to the run suite: elsewhere $FF0C isn't sim6809's
+   I/O block.) */
+TIMING: DO;
+PUTDEC: PROCEDURE (N) EXTERNAL; DECLARE N ADDRESS; END PUTDEC;
+DECLARE CYC (4) BYTE AT (0FF0CH);
+DECLARE (BASE, T) ADDRESS;
+
+/* the low 16 bits of the cycle count */
+NOW: PROCEDURE ADDRESS;
+    DECLARE LATCH BYTE;
+    LATCH = CYC(0);
+    RETURN SHL(DOUBLE(CYC(2)), 8) OR CYC(3);
+END NOW;
+
+/* the cycles CALL TIME(N) takes, with the calls and counter reads */
+WAIT: PROCEDURE (N) ADDRESS;
+    DECLARE N BYTE, T0 ADDRESS;
+    T0 = NOW;
+    CALL TIME(N);
+    RETURN NOW - T0;
+END WAIT;
+
+CHECK: PROCEDURE (N);
+    DECLARE N BYTE;
+    CALL PUTDEC(N);
+    T = WAIT(N) - BASE;
+    IF T < N * 100 OR T > N * 105 THEN CALL PUTDEC(T);
+END CHECK;
+
+BASE = WAIT(0);                     /* TIME(0) returns at once */
+IF BASE >= 100 THEN CALL PUTDEC(BASE);
+CALL CHECK(1);                      /* 1 */
+CALL CHECK(10);                     /* 10 */
+CALL CHECK(100);                    /* 100 */
+CALL CHECK(250);                    /* 250 */
+END TIMING;

@@ -530,7 +530,7 @@ How the dragonflex suite works (each point was found the hard way):
 - INPUT and OUTPUT removed in 0.2.0: the 6809 has no I/O ports, so the 8080 port I/O was dropped (with `RT_PORTS` in the hooks) in favour of BYTE variables AT device addresses; the run tests `atio` and `ioname` and the error tests `input_unsupported`/`output_unsupported` replace `ports` and the port-number checks
 
 ## Known gaps
-- **Language:** PUBLIC (other than on labels), `:=`, are not supported. TIME's timing is only checked on an emulated CoCo; sim6809 has no cycle counts. Arrays are one-dimensional and can't be parameters.
+- **Language:** PUBLIC (other than on labels), `:=`, are not supported. TIME's timing is checked in sim6809 by the run test `time` (its cycle counter, from sim6809 1.1.0) and on an emulated CoCo by the xroar test `time`. Arrays are one-dimensional and can't be parameters.
 - **Code size:** statement control flow always uses long branches.
 - **CoCo testing:** the CoCo hooks are tested only on an emulated CoCo 2 with Disk Extended BASIC 1.1, not on a CoCo 3, other ROM versions or real hardware. `CLS` relies on the fixed ROM address $A928.
 - **FLEX:** real FLEX is only Compusense FLEX for the Dragon 64 (emulated); the FMS path of GETCH (input from a file) was checked by hand with an XRoar trace, not by the suite.
